@@ -1,0 +1,27 @@
+# Backend
+backend/.venv/
+backend/data/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/.pytest_cache/
+backend/.env
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Repository foundation safety
+.claude_scratch/
+_backups/
+.env
+.env.*
+!.env.example
+backend/.env.*
+!backend/.env.example
+frontend/.env.*
+!frontend/.env.example
