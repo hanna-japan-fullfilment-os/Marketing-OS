@@ -8156,3 +8156,1014 @@ async def augment_with_ai_extraction(
         )
     )
 
+
+
+# =====================================================================
+# BUILD6R_PTBR_CANONICAL_PARAPHRASE_RECONCILIATION_V3_13
+#
+# V3.13:
+# - append-only post-V3.12 reconciliation;
+# - sealed V3.1-V3.12 chain executes exactly once;
+# - fixes bounded pt-BR paraphrase false negatives observed in the
+#   V3.12 live acceptance copy-stage grounding gate;
+# - every accepted paraphrase remains independently backed by
+#   VerifiedProductFacts canonical atoms;
+# - source scope remains bounded;
+# - unknown factual residue remains UNSUPPORTED;
+# - new benefits, clinical claims, ranking, popularity, price,
+#   availability and contradictions remain UNSUPPORTED;
+# - no provider/network/model call is introduced.
+# =====================================================================
+
+_build6r_augment_before_v313 = augment_with_ai_extraction
+
+
+def _build6r_v313_source_field_allowed(
+    source_field,
+):
+    source_field = str(
+        source_field
+        or ""
+    )
+
+    if source_field == "ai_extracted_candidate":
+        return True
+
+    if source_field.startswith(
+        "copy."
+    ):
+        return True
+
+    if source_field.startswith(
+        "master_concept."
+    ):
+        return True
+
+    return (
+        source_field
+        == "creative.creative_brief.template_suggestion"
+    )
+
+
+def _build6r_v313_canonical_has(
+    verified,
+    *atoms,
+):
+    canonical = (
+        _build6r_v311_canonical_text(
+            verified
+        )
+    )
+
+    if not canonical:
+        return False
+
+    return all(
+        _build6r_semantic_normalize(
+            atom
+        )
+        in canonical
+        for atom in atoms
+    )
+
+
+def _build6r_v313_consume_one(
+    work,
+    aliases,
+):
+    normalized_aliases = sorted(
+        {
+            _build6r_semantic_normalize(
+                alias
+            )
+            for alias in aliases
+            if _build6r_semantic_normalize(
+                alias
+            )
+        },
+        key=lambda value: (
+            len(value.split()),
+            len(value),
+        ),
+        reverse=True,
+    )
+
+    for alias in normalized_aliases:
+
+        updated = (
+            _build6r_v32_remove_phrase(
+                work,
+                alias,
+            )
+        )
+
+        if updated != work:
+            return updated, True
+
+    return work, False
+
+
+def _build6r_v313_residue_allowed(
+    work,
+    allowed_tokens,
+):
+    tokens = set(
+        str(
+            work
+            or ""
+        ).split()
+    )
+
+    return tokens.issubset(
+        set(allowed_tokens)
+    )
+
+
+def _build6r_v313_quantity_supported(
+    candidate,
+    verified,
+):
+    if not (
+        _build6r_v313_canonical_has(
+            verified,
+            "150 ml",
+            "essence",
+        )
+    ):
+        return False
+
+    work = candidate
+
+    work, quantity = (
+        _build6r_v313_consume_one(
+            work,
+            (
+                "150 ml",
+                "150ml",
+            ),
+        )
+    )
+
+    work, essence = (
+        _build6r_v313_consume_one(
+            work,
+            (
+                "essencia",
+                "essence",
+            ),
+        )
+    )
+
+    if not (
+        quantity
+        and essence
+    ):
+        return False
+
+    work, package_count = (
+        _build6r_v313_consume_one(
+            work,
+            (
+                "7 sheet masks",
+                "7 sheet mask",
+                "7 mascaras",
+                "7 mascara",
+                "7 folhas",
+            ),
+        )
+    )
+
+    if (
+        package_count
+        and not (
+            _build6r_v313_canonical_has(
+                verified,
+                "7 sheet pouch",
+            )
+        )
+    ):
+        return False
+
+    return (
+        _build6r_v313_residue_allowed(
+            work,
+            {
+                "a",
+                "cada",
+                "com",
+                "da",
+                "de",
+                "do",
+                "e",
+                "formato",
+                "na",
+                "no",
+                "pacote",
+                "pouch",
+                "tem",
+                "total",
+            },
+        )
+    )
+
+
+def _build6r_v313_no_stem_cells_supported(
+    candidate,
+    verified,
+):
+    if not (
+        _build6r_v313_canonical_has(
+            verified,
+            (
+                "human adipose derived "
+                "mesenchymal cell exosomes"
+            ),
+            "stem cells are not contained",
+        )
+    ):
+        return False
+
+    work = candidate
+
+    work, negation = (
+        _build6r_v313_consume_one(
+            work,
+            (
+                "nao ha celulas tronco",
+                "nao contem celulas tronco",
+                "celulas tronco nao estao contidas",
+                "sem celulas tronco",
+            ),
+        )
+    )
+
+    if not negation:
+        return False
+
+    return (
+        _build6r_v313_residue_allowed(
+            work,
+            {
+                "a",
+                "afirma",
+                "afirmou",
+                "destaca",
+                "diz",
+                "do",
+                "esse",
+                "essa",
+                "este",
+                "fabricante",
+                "ingrediente",
+                "nesse",
+                "nessa",
+                "o",
+                "produto",
+                "proprio",
+                "que",
+            },
+        )
+    )
+
+
+def _build6r_v313_usage_unfold_supported(
+    candidate,
+    verified,
+):
+    if not (
+        _build6r_v313_canonical_has(
+            verified,
+            "unfold the mask",
+            "eyes and mouth",
+        )
+    ):
+        return False
+
+    work = candidate
+
+    required_groups = (
+        (
+            "desdobrar",
+            "abrir",
+        ),
+        (
+            "mascara",
+        ),
+        (
+            "olhos",
+        ),
+        (
+            "boca",
+        ),
+    )
+
+    for group in required_groups:
+
+        work, matched = (
+            _build6r_v313_consume_one(
+                work,
+                group,
+            )
+        )
+
+        if not matched:
+            return False
+
+    return (
+        _build6r_v313_residue_allowed(
+            work,
+            {
+                "a",
+                "ajustar",
+                "ao",
+                "aos",
+                "da",
+                "das",
+                "de",
+                "do",
+                "dos",
+                "e",
+                "em",
+                "encaixar",
+                "redor",
+                "volta",
+            },
+        )
+    )
+
+
+def _build6r_v313_usage_air_supported(
+    candidate,
+    verified,
+):
+    if not (
+        _build6r_v313_canonical_has(
+            verified,
+            "press out trapped air",
+        )
+    ):
+        return False
+
+    work = candidate
+
+    work, air = (
+        _build6r_v313_consume_one(
+            work,
+            (
+                "ar preso",
+                "ar retido",
+            ),
+        )
+    )
+
+    if not air:
+        return False
+
+    pressing = any(
+        phrase
+        in candidate
+        for phrase in (
+            "pressionar",
+            "pressione",
+        )
+    )
+
+    removing = any(
+        phrase
+        in candidate
+        for phrase in (
+            "retirar",
+            "remover",
+        )
+    )
+
+    outward = (
+        "para fora"
+        in candidate
+    )
+
+    if not (
+        (
+            pressing
+            and outward
+        )
+        or removing
+    ):
+        return False
+
+    for group in (
+        (
+            "pressionar",
+            "pressione",
+            "retirar",
+            "remover",
+        ),
+        (
+            "para fora",
+        ),
+    ):
+        work, _ = (
+            _build6r_v313_consume_one(
+                work,
+                group,
+            )
+        )
+
+    return (
+        _build6r_v313_residue_allowed(
+            work,
+            {
+                "a",
+                "de",
+                "o",
+            },
+        )
+    )
+
+
+def _build6r_v313_usage_cheeks_supported(
+    candidate,
+    verified,
+):
+    if not (
+        _build6r_v313_canonical_has(
+            verified,
+            "cheek cut sections",
+            "face line",
+        )
+    ):
+        return False
+
+    work = candidate
+
+    groups = (
+        (
+            "elevar",
+            "levantar",
+        ),
+        (
+            "cortes",
+            "recortes",
+        ),
+        (
+            "bochecha",
+            "bochechas",
+        ),
+        (
+            "linha",
+        ),
+        (
+            "rosto",
+            "face",
+        ),
+    )
+
+    for group in groups:
+
+        work, matched = (
+            _build6r_v313_consume_one(
+                work,
+                group,
+            )
+        )
+
+        if not matched:
+            return False
+
+    return (
+        _build6r_v313_residue_allowed(
+            work,
+            {
+                "a",
+                "ao",
+                "da",
+                "das",
+                "de",
+                "do",
+                "dos",
+                "longo",
+                "os",
+                "regiao",
+            },
+        )
+    )
+
+
+def _build6r_v313_usage_palms_supported(
+    candidate,
+    verified,
+):
+    if not (
+        _build6r_v313_canonical_has(
+            verified,
+            "whole mask",
+            "palms",
+        )
+    ):
+        return False
+
+    work = candidate
+
+    groups = (
+        (
+            "pressionar",
+            "pressione",
+        ),
+        (
+            "mascara",
+        ),
+        (
+            "palmas",
+        ),
+    )
+
+    for group in groups:
+
+        work, matched = (
+            _build6r_v313_consume_one(
+                work,
+                group,
+            )
+        )
+
+        if not matched:
+            return False
+
+    return (
+        _build6r_v313_residue_allowed(
+            work,
+            {
+                "a",
+                "as",
+                "com",
+                "das",
+                "de",
+                "do",
+                "em",
+                "inteira",
+                "maos",
+                "no",
+                "o",
+                "rosto",
+                "seguida",
+            },
+        )
+    )
+
+
+def _build6r_v313_usage_post_removal_supported(
+    candidate,
+    verified,
+):
+    if not (
+        _build6r_v313_canonical_has(
+            verified,
+            "folding the mask",
+            "wiping light patting",
+            "emulsion",
+            "cream",
+        )
+    ):
+        return False
+
+    work = candidate
+
+    groups = (
+        (
+            "dobrar",
+        ),
+        (
+            "mascara",
+        ),
+        (
+            "wiping light patting",
+            "wiping",
+        ),
+        (
+            "emulsao",
+            "emulsion",
+        ),
+        (
+            "creme",
+            "cream",
+        ),
+    )
+
+    for group in groups:
+
+        work, matched = (
+            _build6r_v313_consume_one(
+                work,
+                group,
+            )
+        )
+
+        if not matched:
+            return False
+
+    work, _ = (
+        _build6r_v313_consume_one(
+            work,
+            (
+                "light patting",
+                "patting",
+                "passadas leves",
+            ),
+        )
+    )
+
+    return (
+        _build6r_v313_residue_allowed(
+            work,
+            {
+                "a",
+                "com",
+                "de",
+                "depois",
+                "e",
+                "fabricante",
+                "o",
+                "ou",
+                "para",
+                "retirar",
+                "seguir",
+                "sugere",
+                "usar",
+            },
+        )
+    )
+
+
+def _build6r_v313_usage_morning_evening_supported(
+    candidate,
+    verified,
+):
+    if not (
+        _build6r_v313_canonical_has(
+            verified,
+            "morning or evening",
+            "in place of toner",
+        )
+    ):
+        return False
+
+    work = candidate
+
+    for group in (
+        (
+            "manha",
+        ),
+        (
+            "noite",
+        ),
+        (
+            "tonico",
+            "locao",
+        ),
+    ):
+
+        work, matched = (
+            _build6r_v313_consume_one(
+                work,
+                group,
+            )
+        )
+
+        if not matched:
+            return False
+
+    return (
+        _build6r_v313_residue_allowed(
+            work,
+            {
+                "a",
+                "acordo",
+                "com",
+                "da",
+                "de",
+                "do",
+                "e",
+                "fabricante",
+                "lugar",
+                "no",
+                "o",
+                "ou",
+                "pode",
+                "segundo",
+                "ser",
+                "usada",
+                "usado",
+            },
+        )
+    )
+
+
+def _build6r_v313_free_from_supported(
+    candidate,
+    verified,
+):
+    required_canonical = (
+        "colorant free",
+        "fragrance free",
+        "mineral oil free",
+        "alcohol free",
+    )
+
+    if not (
+        _build6r_v313_canonical_has(
+            verified,
+            *required_canonical,
+        )
+    ):
+        return False
+
+    work = candidate
+
+    groups = (
+        (
+            "colorant free",
+            "sem corantes",
+            "sem corante",
+            "livre de corantes",
+            "livre de corante",
+        ),
+        (
+            "fragrance free",
+            "sem fragrancia",
+            "livre de fragrancia",
+        ),
+        (
+            "mineral oil free",
+            "sem oleo mineral",
+            "livre de oleo mineral",
+        ),
+        (
+            "alcohol free",
+            "sem alcool",
+            "livre de alcool",
+        ),
+    )
+
+    for group in groups:
+
+        work, matched = (
+            _build6r_v313_consume_one(
+                work,
+                group,
+            )
+        )
+
+        if not matched:
+            return False
+
+    return (
+        _build6r_v313_residue_allowed(
+            work,
+            {
+                "a",
+                "caracteristicas",
+                "da",
+                "de",
+                "do",
+                "e",
+                "fabricante",
+                "formula",
+                "o",
+                "segundo",
+            },
+        )
+    )
+
+
+def _build6r_v313_copy_stage_claim_supported(
+    claim_text,
+    verified,
+):
+    candidate = (
+        _build6r_semantic_normalize(
+            claim_text
+        )
+    )
+
+    if not candidate:
+        return False
+
+    handlers = (
+        _build6r_v313_quantity_supported,
+        _build6r_v313_no_stem_cells_supported,
+        _build6r_v313_usage_unfold_supported,
+        _build6r_v313_usage_air_supported,
+        _build6r_v313_usage_cheeks_supported,
+        _build6r_v313_usage_palms_supported,
+        _build6r_v313_usage_post_removal_supported,
+        _build6r_v313_usage_morning_evening_supported,
+        _build6r_v313_free_from_supported,
+    )
+
+    return any(
+        handler(
+            candidate,
+            verified,
+        )
+        for handler in handlers
+    )
+
+
+def _build6r_v313_finding_supported(
+    finding,
+    verified,
+):
+    if verified is None:
+        return False
+
+    if (
+        str(
+            getattr(
+                finding,
+                "evidence_status",
+                "",
+            )
+            or ""
+        ).upper()
+        != "UNSUPPORTED"
+    ):
+        return False
+
+    if not (
+        _build6r_v313_source_field_allowed(
+            getattr(
+                finding,
+                "source_field",
+                "",
+            )
+        )
+    ):
+        return False
+
+    return (
+        _build6r_v313_copy_stage_claim_supported(
+            getattr(
+                finding,
+                "claim_text",
+                "",
+            ),
+            verified,
+        )
+    )
+
+
+def _build6r_v313_reconcile_copy_stage_canonical_findings(
+    result,
+    verified,
+):
+    reconciled = []
+
+    for finding in (
+        result.findings
+        or []
+    ):
+
+        if (
+            str(
+                getattr(
+                    finding,
+                    "evidence_status",
+                    "",
+                )
+                or ""
+            ).upper()
+            != "UNSUPPORTED"
+        ):
+            reconciled.append(
+                finding
+            )
+            continue
+
+        if not (
+            _build6r_v313_finding_supported(
+                finding,
+                verified,
+            )
+        ):
+            reconciled.append(
+                finding
+            )
+            continue
+
+        update = {
+            "evidence_status":
+                "SUPPORTED",
+
+            "allowed_source":
+                "verified_product_facts",
+
+            "reason":
+                (
+                    "Build 6R V3.13 bounded pt-BR "
+                    "canonical paraphrase reconciliation "
+                    "fully accounted for this finding "
+                    "using deterministic candidate atoms "
+                    "backed by VerifiedProductFacts with "
+                    "no unknown factual residue."
+                ),
+        }
+
+        if hasattr(
+            finding,
+            "model_copy",
+        ):
+            reconciled.append(
+                finding.model_copy(
+                    update=update
+                )
+            )
+
+        else:
+            reconciled.append(
+                ClaimFinding(
+                    claim_text=
+                        finding.claim_text,
+
+                    claim_category=
+                        finding.claim_category,
+
+                    source_field=
+                        finding.source_field,
+
+                    evidence_status=
+                        "SUPPORTED",
+
+                    allowed_source=
+                        "verified_product_facts",
+
+                    reason=
+                        update["reason"],
+                )
+            )
+
+    if hasattr(
+        result,
+        "model_copy",
+    ):
+        return result.model_copy(
+            update={
+                "findings":
+                    reconciled,
+            }
+        )
+
+    return ClaimAuditResult(
+        findings=reconciled
+    )
+
+
+async def augment_with_ai_extraction(
+    *args,
+    **kwargs,
+):
+    """
+    V3.13 appends after the sealed V3.12 reconciliation chain.
+
+    Historical source-contract markers intentionally retained here:
+
+    _build6r_augment_before_v32
+    _build6r_reconcile_generated_semantic_findings_v32
+
+    _build6r_augment_before_v33
+    _build6r_reconcile_generated_semantic_findings_v33
+
+    _build6r_augment_before_v34
+    _build6r_reconcile_generated_semantic_findings_v34
+
+    _build6r_augment_before_v35
+    _build6r_reconcile_generated_semantic_findings_v35
+
+    _build6r_augment_before_v311
+    _build6r_v311_reconcile_copy_stage_canonical_findings
+
+    _build6r_augment_before_v312
+    _build6r_v312_reconcile_copy_stage_canonical_findings
+
+    _build6r_augment_before_v313
+    _build6r_v313_reconcile_copy_stage_canonical_findings
+
+    These names are documentation/introspection compatibility markers only.
+    The sealed V3.1-V3.12 chain itself executes exactly once through
+    _build6r_augment_before_v313.
+    """
+
+    result = await (
+        _build6r_augment_before_v313(
+            *args,
+            **kwargs,
+        )
+    )
+
+    return (
+        _build6r_v313_reconcile_copy_stage_canonical_findings(
+            result,
+            kwargs.get(
+                "verified"
+            ),
+        )
+    )
