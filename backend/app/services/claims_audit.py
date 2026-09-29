@@ -224,8 +224,9 @@ _PHRASE_CLAIM_PATTERNS: dict[str, list[str]] = {
 # sit right before the noun so an adjective in between (e.g. "10,000
 # Brazilian customers") is a soft miss the AI-augmentation layer can still
 # recall — layer 1 stays precise rather than guessing across arbitrary gaps.
+# BUILD6R_SOCIAL_PROOF_COUNT_REGEX_BOUNDARY_V3_14 - numeric social-proof prefixes must begin with a digit.
 _SOCIAL_PROOF_COUNT_RE = re.compile(
-    r"\b[\d,.]{1,9}\+?\s*(?:k\b)?\s*(customers?|followers?|subscribers?|reviews?|clients?|members?|"
+    r"\b\d[\d,.]{0,8}\+?\s*(?:k\b)?\s*(customers?|followers?|subscribers?|reviews?|clients?|members?|"
     r"orders?|sold|units sold|people|women|men|users?)\b",
     re.IGNORECASE,
 )
