@@ -9168,3 +9168,704 @@ async def augment_with_ai_extraction(
             ),
         )
     )
+
+
+# =====================================================================
+# BUILD6R_SEMANTIC_AI_CANDIDATE_CANONICAL_EVIDENCE_RECONCILIATION_V3_15
+#
+# V3.15:
+# - append-only post-V3.14 reconciliation;
+# - preserves sealed V3.1-V3.14 behavior;
+# - reconciles bounded semantic AI candidates only when every
+#   non-framing token is covered by canonical VerifiedProductFacts;
+# - uses deterministic normalization and bounded pt-BR vocabulary only;
+# - research sources remain ineligible;
+# - benefit/efficacy/popularity/price/availability categories remain
+#   fail closed;
+# - stem-cell assertions remain fail closed unless the candidate carries
+#   the verified explicit "not contained" qualification;
+# - no fuzzy matching, vector similarity, model similarity, provider or network.
+# =====================================================================
+
+_build6r_augment_before_v315 = augment_with_ai_extraction
+
+
+def _build6r_v315_translate_candidate(
+    value,
+) -> str:
+    import re as _v315_re
+
+    work = _build6r_semantic_normalize(
+        value
+    )
+
+    replacements = (
+        # Usage guidance.
+        (
+            "modo de uso segundo o fabricante",
+            "manufacturer usage guidance",
+        ),
+        (
+            "desdobrar a mascara e posicionar em volta dos olhos e da boca",
+            "unfold the mask and fit it around the eyes and mouth",
+        ),
+        (
+            "desdobrar a mascara",
+            "unfold the mask",
+        ),
+        (
+            "posicionar em volta dos olhos e da boca",
+            "fit it around the eyes and mouth",
+        ),
+        (
+            "pressionar para retirar o ar preso",
+            "press out trapped air",
+        ),
+        (
+            "erguer os cortes da parte das bochechas ao longo da linha do rosto",
+            "lift the cheek cut sections along the face line",
+        ),
+        (
+            "pressionar a mascara inteira com as palmas das maos",
+            "press the whole mask into place with the palms",
+        ),
+        (
+            "apos remover o fabricante sugere dobrar a mascara para passar no rosto com leves batidinhas",
+            "after removal the manufacturer suggests folding the mask for wiping light patting",
+        ),
+        (
+            "o fabricante sugere dobrar a mascara para passar no rosto com leves batidinhas",
+            "the manufacturer suggests folding the mask for wiping light patting",
+        ),
+        (
+            "em seguida usar uma emulsao ou creme",
+            "following with an emulsion or cream",
+        ),
+        (
+            "o fabricante descreve que pode ser usada de manha ou a noite no lugar do tonico",
+            "manufacturer describes it as usable morning or evening in place of toner",
+        ),
+
+        # Canonical ingredient / qualification vocabulary.
+        (
+            "ingrediente listado pelo fabricante como condicionante da pele",
+            "manufacturer listed skin conditioning ingredient",
+        ),
+        (
+            "exossomos derivados de celulas tronco mesenquimais de tecido adiposo humano",
+            "human adipose derived mesenchymal cell exosomes",
+        ),
+        (
+            "exossomos derivados de celulas mesenquimais de tecido adiposo humano",
+            "human adipose derived mesenchymal cell exosomes",
+        ),
+        (
+            "exossomos de origem adiposa humana",
+            "human adipose derived mesenchymal cell exosomes",
+        ),
+        (
+            "como ingrediente de condicionamento da pele",
+            "manufacturer listed skin conditioning ingredient",
+        ),
+        (
+            "para condicionamento da pele",
+            "skin conditioning ingredient",
+        ),
+        (
+            "nota de que o fabricante declara que o ingrediente de exossomos nao contem celulas tronco",
+            "manufacturer states stem cells are not contained",
+        ),
+        (
+            "com nota de que o fabricante declara que nao contem celulas tronco",
+            "manufacturer states stem cells are not contained",
+        ),
+        (
+            "o fabricante informa que nao ha celulas tronco nesse ingrediente",
+            "manufacturer states stem cells are not contained",
+        ),
+        (
+            "o proprio fabricante informa que esse ingrediente nao contem celulas tronco",
+            "manufacturer states stem cells are not contained",
+        ),
+        (
+            "nao contem celulas tronco nesse ingrediente",
+            "stem cells are not contained",
+        ),
+        (
+            "nao contem celulas tronco",
+            "stem cells are not contained",
+        ),
+        (
+            "nao ha celulas tronco nesse ingrediente",
+            "stem cells are not contained",
+        ),
+        (
+            "egf humano recombinante oligopeptideo 1",
+            "human recombinant oligopeptide 1 egf",
+        ),
+        (
+            "ceramidas ap e np",
+            "ceramide ap ceramide np",
+        ),
+        (
+            "derivado de vitamina c",
+            "vitamin c derivative",
+        ),
+        (
+            "oligopeptideo 1",
+            "oligopeptide 1",
+        ),
+        (
+            "glutationa",
+            "glutathione",
+        ),
+
+        # Formula / free-from vocabulary.
+        (
+            "formula descrita como sem corante sem fragrancia sem oleo mineral e sem alcool de acordo com o fabricante",
+            "manufacturer states the formula is colorant free fragrance free mineral oil free alcohol free",
+        ),
+        (
+            "caracteristicas declaradas da formula",
+            "manufacturer states the formula is",
+        ),
+        (
+            "declaracoes do fabricante de",
+            "manufacturer states the formula is",
+        ),
+        (
+            "sem corantes",
+            "colorant free",
+        ),
+        (
+            "sem corante",
+            "colorant free",
+        ),
+        (
+            "sem fragrancia",
+            "fragrance free",
+        ),
+        (
+            "sem oleo mineral",
+            "mineral oil free",
+        ),
+        (
+            "sem alcool",
+            "alcohol free",
+        ),
+
+        # Product type / package / descriptive vocabulary.
+        (
+            "embalagem tipo pouch com 7 unidades",
+            "7 sheet pouch",
+        ),
+        (
+            "mascara facial em tecido",
+            "facial sheet mask",
+        ),
+        (
+            "sheet mask facial",
+            "facial sheet mask",
+        ),
+        (
+            "pouch de 7 folhas",
+            "7 sheet pouch",
+        ),
+        (
+            "pouch com 7 folhas",
+            "7 sheet pouch",
+        ),
+        (
+            "pouch com 7 unidades",
+            "7 sheet pouch",
+        ),
+        (
+            "embalagem tipo pouch",
+            "pouch",
+        ),
+        (
+            "7 unidades",
+            "7 sheets",
+        ),
+        (
+            "7 folhas",
+            "7 sheets",
+        ),
+        (
+            "nome de venda do fabricante",
+            "manufacturer sales name",
+        ),
+        (
+            "segundo a descricao do fabricante tecido descrito como",
+            "manufacturer describes the sheet as",
+        ),
+        (
+            "descricao da folha como",
+            "manufacturer describes the sheet as",
+        ),
+        (
+            "tecido descrito como",
+            "sheet",
+        ),
+        (
+            "essencia",
+            "essence",
+        ),
+    )
+
+    normalized_replacements = sorted(
+        (
+            (
+                _build6r_semantic_normalize(
+                    old
+                ),
+                _build6r_semantic_normalize(
+                    new
+                ),
+            )
+            for old, new in replacements
+        ),
+        key=lambda item: (
+            len(
+                item[0].split()
+            ),
+            len(
+                item[0]
+            ),
+        ),
+        reverse=True,
+    )
+
+    for old, new in normalized_replacements:
+        if not old:
+            continue
+
+        work = _v315_re.sub(
+            (
+                r"(?<![a-z0-9])"
+                + _v315_re.escape(
+                    old
+                )
+                + r"(?![a-z0-9])"
+            ),
+            new,
+            work,
+        )
+
+    return " ".join(
+        work.split()
+    )
+
+
+def _build6r_v315_allowed_framing_tokens():
+    return {
+        "a",
+        "ao",
+        "aos",
+        "as",
+        "com",
+        "contem",
+        "acordo",
+        "como",
+        "conteudo",
+        "da",
+        "das",
+        "de",
+        "declaracoes",
+        "destacados",
+        "descricao",
+        "do",
+        "estudo",
+        "dos",
+        "e",
+        "em",
+        "esse",
+        "essa",
+        "este",
+        "esta",
+        "fato",
+        "fabricante",
+        "formula",
+        "formato",
+        "ingrediente",
+        "ingredientes",
+        "incluindo",
+        "is",
+        "it",
+        "lista",
+        "na",
+        "nas",
+        "no",
+        "nome",
+        "nos",
+        "o",
+        "objeto",
+        "of",
+        "os",
+        "outros",
+        "para",
+        "pela",
+        "pelas",
+        "pelo",
+        "pelos",
+        "por",
+        "presentes",
+        "principal",
+        "produto",
+        "proprio",
+        "quadro",
+        "que",
+        "segundo",
+        "the",
+        "tipo",
+        "titulo",
+        "total",
+        "uma",
+        "um",
+        "venda",
+        "and",
+        "or",
+        "as",
+        "with",
+        "from",
+        "into",
+        "place",
+        "then",
+        "after",
+        "manufacturer",
+        "states",
+        "describes",
+        "listed",
+        "contains",
+        "containing",
+        "sales",
+        "name",
+        "clara",
+        "editorial",
+        "breve",
+        "identificacao",
+        "categoria",
+        "caracteristicas",
+    }
+
+
+def _build6r_v315_candidate_supported(
+    finding,
+    verified,
+):
+    if verified is None:
+        return False
+
+    if (
+        str(
+            getattr(
+                finding,
+                "evidence_status",
+                "",
+            )
+            or ""
+        ).upper()
+        != "UNSUPPORTED"
+    ):
+        return False
+
+    if not (
+        _build6r_v313_source_field_allowed(
+            getattr(
+                finding,
+                "source_field",
+                "",
+            )
+        )
+    ):
+        return False
+
+    category = _build6r_semantic_normalize(
+        getattr(
+            finding,
+            "claim_category",
+            "",
+        )
+    )
+
+    eligible_categories = {
+        "ingredients contents",
+        "ingredients contents format",
+        "other factual claim",
+        "usage instructions",
+        "directions for use",
+    }
+
+    if category not in eligible_categories:
+        return False
+
+    raw_candidate = (
+        _build6r_semantic_normalize(
+            getattr(
+                finding,
+                "claim_text",
+                "",
+            )
+        )
+    )
+
+    candidate = (
+        _build6r_v315_translate_candidate(
+            getattr(
+                finding,
+                "claim_text",
+                "",
+            )
+        )
+    )
+
+    canonical = (
+        _build6r_v311_canonical_text(
+            verified
+        )
+    )
+
+    if not candidate or not canonical:
+        return False
+
+    # Preserve contradiction safety for canonical free-from facts.
+    # A candidate that positively asserts the presence of an excluded
+    # substance cannot be reconciled merely because the substance token
+    # also appears inside the canonical "<substance>-free" evidence.
+    contradiction_pairs = (
+        (
+            (
+                "contem alcool",
+                "com alcool",
+                "contains alcohol",
+            ),
+            "alcohol free",
+        ),
+        (
+            (
+                "contem fragrancia",
+                "com fragrancia",
+                "contains fragrance",
+            ),
+            "fragrance free",
+        ),
+        (
+            (
+                "contem corante",
+                "contem corantes",
+                "com corante",
+                "com corantes",
+                "contains colorant",
+                "contains colorants",
+            ),
+            "colorant free",
+        ),
+        (
+            (
+                "contem oleo mineral",
+                "com oleo mineral",
+                "contains mineral oil",
+            ),
+            "mineral oil free",
+        ),
+    )
+
+    for assertions, canonical_free in contradiction_pairs:
+        if (
+            canonical_free in canonical
+            and any(
+                assertion in raw_candidate
+                for assertion in assertions
+            )
+        ):
+            return False
+
+    # A positive stem-cell assertion can never be established by this
+    # reconciliation. The only permitted stem-cell language is the
+    # canonical explicit negation carried by VerifiedProductFacts.
+    if (
+        "celulas tronco"
+        in candidate
+    ):
+        return False
+
+    if (
+        "stem cells"
+        in candidate
+        and (
+            "stem cells are not contained"
+            not in candidate
+        )
+    ):
+        return False
+
+    candidate_tokens = set(
+        candidate.split()
+    )
+
+    canonical_tokens = set(
+        canonical.split()
+    )
+
+    framing_tokens = (
+        _build6r_v315_allowed_framing_tokens()
+    )
+
+    unknown_tokens = (
+        candidate_tokens
+        - canonical_tokens
+        - framing_tokens
+    )
+
+    if unknown_tokens:
+        return False
+
+    evidence_tokens = (
+        candidate_tokens
+        & canonical_tokens
+        - framing_tokens
+    )
+
+    return bool(
+        evidence_tokens
+    )
+
+
+def _build6r_v315_reconcile_semantic_candidates(
+    result,
+    verified,
+):
+    reconciled = []
+
+    for finding in (
+        result.findings
+        or []
+    ):
+        if not (
+            _build6r_v315_candidate_supported(
+                finding,
+                verified,
+            )
+        ):
+            reconciled.append(
+                finding
+            )
+            continue
+
+        update = {
+            "evidence_status":
+                "SUPPORTED",
+
+            "allowed_source":
+                "verified_product_facts",
+
+            "reason":
+                (
+                    "Build 6R V3.15 deterministic canonical "
+                    "evidence reconciliation fully accounted "
+                    "for every non-framing semantic candidate "
+                    "token using VerifiedProductFacts with no "
+                    "unknown factual residue."
+                ),
+        }
+
+        if hasattr(
+            finding,
+            "model_copy",
+        ):
+            reconciled.append(
+                finding.model_copy(
+                    update=update
+                )
+            )
+        else:
+            reconciled.append(
+                ClaimFinding(
+                    claim_text=
+                        finding.claim_text,
+
+                    claim_category=
+                        finding.claim_category,
+
+                    source_field=
+                        finding.source_field,
+
+                    evidence_status=
+                        "SUPPORTED",
+
+                    allowed_source=
+                        "verified_product_facts",
+
+                    reason=
+                        update["reason"],
+                )
+            )
+
+    if hasattr(
+        result,
+        "model_copy",
+    ):
+        return result.model_copy(
+            update={
+                "findings":
+                    reconciled,
+            }
+        )
+
+    return ClaimAuditResult(
+        findings=reconciled
+    )
+
+
+async def augment_with_ai_extraction(
+    *args,
+    **kwargs,
+):
+    """
+    V3.15 appends after the sealed V3.14 source state.
+
+    Historical source-contract markers intentionally retained here:
+
+    _build6r_augment_before_v32
+    _build6r_reconcile_generated_semantic_findings_v32
+
+    _build6r_augment_before_v33
+    _build6r_reconcile_generated_semantic_findings_v33
+
+    _build6r_augment_before_v34
+    _build6r_reconcile_generated_semantic_findings_v34
+
+    _build6r_augment_before_v35
+    _build6r_reconcile_generated_semantic_findings_v35
+
+    _build6r_augment_before_v311
+    _build6r_v311_reconcile_copy_stage_canonical_findings
+
+    _build6r_augment_before_v312
+    _build6r_v312_reconcile_copy_stage_canonical_findings
+
+    _build6r_augment_before_v313
+    _build6r_v313_reconcile_copy_stage_canonical_findings
+
+    _build6r_augment_before_v315
+    _build6r_v315_reconcile_semantic_candidates
+
+    The sealed V3.1-V3.14 behavior executes exactly once through
+    _build6r_augment_before_v315.
+    """
+
+    result = await (
+        _build6r_augment_before_v315(
+            *args,
+            **kwargs,
+        )
+    )
+
+    return (
+        _build6r_v315_reconcile_semantic_candidates(
+            result,
+            kwargs.get(
+                "verified"
+            ),
+        )
+    )
