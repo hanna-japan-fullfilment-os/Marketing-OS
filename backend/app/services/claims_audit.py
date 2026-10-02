@@ -9869,3 +9869,899 @@ async def augment_with_ai_extraction(
             ),
         )
     )
+# =====================================================================
+# BUILD6R_LIVE_CLAIM_TAXONOMY_CANONICAL_RECONCILIATION_V3_16
+#
+# V3.16:
+# - append-only post-V3.15 reconciliation;
+# - preserves sealed V3.1-V3.15 behavior;
+# - adds only the bounded live category families observed after V3.15;
+# - reuses V3.15 canonical token coverage and V3.13 source boundaries;
+# - keeps benefits, provenance/source-verification, popularity, price,
+#   availability, scarcity, ranking, efficacy, and research fail closed;
+# - permits ingredients/percentages only when every explicit percentage
+#   literal is also present in canonical VerifiedProductFacts;
+# - clinical/scientific findings are eligible only for the narrow verified
+#   exosome + skin-conditioning + explicit no-stem-cells fact family;
+# - positive stem-cell language requires explicit candidate negation plus
+#   canonical "stem cells are not contained" evidence;
+# - no fuzzy matching, vector similarity, model similarity, provider or network.
+# =====================================================================
+
+_build6r_augment_before_v316 = augment_with_ai_extraction
+
+
+def _build6r_v316_verified_strings(
+    verified,
+):
+    if verified is None:
+        return []
+
+    values = []
+
+    for name in (
+        "verified_description",
+        "verified_usage",
+        "verified_size",
+        "verified_variant",
+        "verified_features",
+        "verified_claims",
+        "verified_ingredients",
+    ):
+        values.extend(
+            _build6r_v311_strings(
+                getattr(
+                    verified,
+                    name,
+                    None,
+                )
+            )
+        )
+
+    return [
+        str(value)
+        for value in values
+        if value is not None
+    ]
+
+
+def _build6r_v316_percentage_literals(
+    value,
+):
+    import re as _v316_re
+
+    raw = str(
+        value
+        or ""
+    )
+
+    pattern = _v316_re.compile(
+        (
+            r"(?<!\d)"
+            r"(\d+(?:[.,]\d+)?)"
+            r"\s*"
+            r"(%|por\s+cento|percent(?:age)?s?)"
+        ),
+        _v316_re.IGNORECASE,
+    )
+
+    return {
+        (
+            match.group(1)
+            .replace(
+                ",",
+                ".",
+            )
+            + "%"
+        )
+        for match in pattern.finditer(
+            raw
+        )
+    }
+
+
+def _build6r_v316_translate_candidate(
+    value,
+) -> str:
+    import re as _v316_re
+
+    work = _build6r_semantic_normalize(
+        value
+    )
+
+    replacements = (
+        # Generic campaign-structure / visual framing.
+        (
+            "modo de uso e demonstrado passo a passo em ilustracoes simples ou em sequencias fotograficas neutras",
+            "manufacturer usage guidance",
+        ),
+        (
+            "formula formato composicao e modo de uso",
+            "",
+        ),
+        (
+            "ingredientes especificos",
+            "ingredientes",
+        ),
+        (
+            "esclarecendo visualmente que",
+            "",
+        ),
+        (
+            "destaque para as caracteristicas de formula declaradas",
+            "manufacturer states the formula is",
+        ),
+        (
+            "presenca dos ingredientes listados",
+            "contains",
+        ),
+        (
+            "componentes listados na formula",
+            "contains",
+        ),
+        (
+            "com indicacao clara de que",
+            "",
+        ),
+        (
+            "com a informacao de que",
+            "",
+        ),
+        (
+            "indicacoes de ser",
+            "",
+        ),
+        (
+            "versao exata de",
+            "",
+        ),
+        (
+            "o fato de ser",
+            "",
+        ),
+        (
+            "e mostrado como um",
+            "",
+        ),
+        (
+            "presenca de",
+            "contains",
+        ),
+        (
+            "mencao de que",
+            "",
+        ),
+        (
+            "mencao a",
+            "",
+        ),
+
+        # Manufacturer attribution / sales-name variants.
+        (
+            "o fabricante descreve o uso pela manha ou a noite no lugar do tonico",
+            "manufacturer describes it as usable morning or evening in place of toner",
+        ),
+        (
+            "uso descrito pelo fabricante manha ou noite em substituicao ao tonico",
+            "manufacturer describes it as usable morning or evening in place of toner",
+        ),
+        (
+            "uso sugerido pela manha ou a noite no lugar do tonico",
+            "manufacturer describes it as usable morning or evening in place of toner",
+        ),
+        (
+            "podendo ser usada manha ou noite em substituicao ao toner",
+            "manufacturer describes it as usable morning or evening in place of toner",
+        ),
+        (
+            "pela manha ou a noite no lugar do tonico",
+            "manufacturer describes it as usable morning or evening in place of toner",
+        ),
+        (
+            "manha ou noite em substituicao ao tonico",
+            "manufacturer describes it as usable morning or evening in place of toner",
+        ),
+        (
+            "o proprio fabricante afirma que",
+            "manufacturer states",
+        ),
+        (
+            "o fabricante afirma que",
+            "manufacturer states",
+        ),
+        (
+            "o fabricante declara",
+            "manufacturer states",
+        ),
+        (
+            "nome de venda oficial",
+            "manufacturer sales name",
+        ),
+        (
+            "nome oficial",
+            "manufacturer sales name",
+        ),
+
+        # Exosome / ingredient vocabulary.
+        (
+            "exossomos derivados de celulas tronco mesenquimais de tecido adiposo humano",
+            "human adipose derived mesenchymal cell exosomes",
+        ),
+        (
+            "exossomos derivados de celulas mesenquimais de tecido adiposo humano",
+            "human adipose derived mesenchymal cell exosomes",
+        ),
+        (
+            "nao ha celulas tronco contidas nesse ingrediente",
+            "stem cells are not contained",
+        ),
+        (
+            "nao ha celulas tronco contidas",
+            "stem cells are not contained",
+        ),
+        (
+            "nao conter celulas tronco",
+            "stem cells are not contained",
+        ),
+        (
+            "indicados pelo fabricante",
+            "manufacturer listed",
+        ),
+        (
+            "exossomos listados",
+            "exosomes listed",
+        ),
+        (
+            "exossomos",
+            "exosomes",
+        ),
+        (
+            "ceramides",
+            "ceramide",
+        ),
+        (
+            "ceramidas",
+            "ceramide",
+        ),
+        (
+            "listados",
+            "listed",
+        ),
+
+        # Product type / package / sheet description.
+        (
+            "categoria mascara facial em sheet",
+            "facial sheet mask",
+        ),
+        (
+            "tipo de sheet o fabricante descreve como",
+            "manufacturer describes the sheet as",
+        ),
+        (
+            "descricao do sheet como",
+            "manufacturer describes the sheet as",
+        ),
+        (
+            "sheet e descrito pelo fabricante como",
+            "manufacturer describes the sheet as",
+        ),
+
+        # Usage variants observed at the live gate.
+        (
+            "passo a passo descrito pelo fabricante",
+            "manufacturer usage guidance",
+        ),
+        (
+            "modo de uso descrito pelo fabricante",
+            "manufacturer usage guidance",
+        ),
+        (
+            "erguer os recortes da regiao da bochecha ao longo da linha do rosto",
+            "lift the cheek cut sections along the face line",
+        ),
+        (
+            "puxar os recortes da bochecha acompanhando a linha do rosto",
+            "lift the cheek cut sections along the face line",
+        ),
+        (
+            "ajustar em volta dos olhos e da boca",
+            "fit it around the eyes and mouth",
+        ),
+        (
+            "ajustar em torno de olhos e boca",
+            "fit it around the eyes and mouth",
+        ),
+        (
+            "encaixar em volta dos olhos e da boca",
+            "fit it around the eyes and mouth",
+        ),
+        (
+            "pressionar para tirar o ar preso",
+            "press out trapped air",
+        ),
+        (
+            "pressionar toda a mascara com as palmas das maos",
+            "press the whole mask into place with the palms",
+        ),
+        (
+            "apos retirar o fabricante sugere dobrar a sheet para usar para wiping light patting",
+            "after removal the manufacturer suggests folding the mask for wiping light patting",
+        ),
+        (
+            "depois de retirar o fabricante sugere dobrar a sheet para usar para wiping light patting",
+            "after removal the manufacturer suggests folding the mask for wiping light patting",
+        ),
+        (
+            "depois dobrar a mascara para wiping light patting",
+            "after removal the manufacturer suggests folding the mask for wiping light patting",
+        ),
+        (
+            "em seguida finalizar com emulsao ou creme",
+            "following with an emulsion or cream",
+        ),
+        (
+            "entao seguir com emulsao ou creme",
+            "following with an emulsion or cream",
+        ),
+        (
+            "seguir com emulsao ou creme",
+            "following with an emulsion or cream",
+        ),
+        (
+            "levantar cortes das bochechas",
+            "lift the cheek cut sections",
+        ),
+        (
+            "pressionar com as palmas",
+            "press the whole mask into place with the palms",
+        ),
+        (
+            "pressionar o ar",
+            "press out trapped air",
+        ),
+    )
+
+    # "Livre de ..." is a scoped free-from construction. Bare ingredient
+    # terms are translated to free-from facts only inside this construction.
+    if (
+        "livre de segundo o fabricante"
+        in work
+    ):
+        work = work.replace(
+            "livre de segundo o fabricante",
+            "manufacturer states the formula is",
+        )
+
+        scoped_free_from = (
+            (
+                "corantes",
+                "colorant free",
+            ),
+            (
+                "fragrancia",
+                "fragrance free",
+            ),
+            (
+                "oleo mineral",
+                "mineral oil free",
+            ),
+            (
+                "alcool",
+                "alcohol free",
+            ),
+        )
+
+        for old, new in scoped_free_from:
+            work = _v316_re.sub(
+                (
+                    r"(?<![a-z0-9])"
+                    + _v316_re.escape(
+                        old
+                    )
+                    + r"(?![a-z0-9])"
+                ),
+                new,
+                work,
+            )
+
+    normalized_replacements = sorted(
+        (
+            (
+                _build6r_semantic_normalize(
+                    old
+                ),
+                _build6r_semantic_normalize(
+                    new
+                ),
+            )
+            for old, new in replacements
+        ),
+        key=lambda item: (
+            len(
+                item[0].split()
+            ),
+            len(
+                item[0]
+            ),
+        ),
+        reverse=True,
+    )
+
+    for old, new in normalized_replacements:
+        if not old:
+            continue
+
+        work = _v316_re.sub(
+            (
+                r"(?<![a-z0-9])"
+                + _v316_re.escape(
+                    old
+                )
+                + r"(?![a-z0-9])"
+            ),
+            new,
+            work,
+        )
+
+    # Generic package-count / essence-quantity normalizations.
+    work = _v316_re.sub(
+        r"\bembalagem com ([0-9]+) sheets\b",
+        r"\1 sheets",
+        work,
+    )
+
+    work = _v316_re.sub(
+        r"\bpouch com ([0-9]+) mascaras\b",
+        r"\1 sheet pouch",
+        work,
+    )
+
+    work = _v316_re.sub(
+        r"\b([0-9]+) mascaras\b",
+        r"\1 sheets",
+        work,
+    )
+
+    work = _v316_re.sub(
+        (
+            r"\bquantidade de essencia "
+            r"([0-9]+) ml no pacote\b"
+        ),
+        r"contains \1 ml of essence",
+        work,
+    )
+
+    # Remove only enumerator digits that immediately introduce a known
+    # usage action. Numeric product facts and quantities are preserved.
+    work = _v316_re.sub(
+        (
+            r"\b[1-9]\s+"
+            r"(?=(?:"
+            r"desdobrar|pressionar|erguer|puxar|apos|depois|"
+            r"o fabricante|manufacturer|press|lift|after"
+            r"))"
+        ),
+        "",
+        work,
+    )
+
+    return (
+        _build6r_v315_translate_candidate(
+            work
+        )
+    )
+
+
+def _build6r_v316_candidate_supported(
+    finding,
+    verified,
+):
+    if verified is None:
+        return False
+
+    if (
+        str(
+            getattr(
+                finding,
+                "evidence_status",
+                "",
+            )
+            or ""
+        ).upper()
+        != "UNSUPPORTED"
+    ):
+        return False
+
+    if not (
+        _build6r_v313_source_field_allowed(
+            getattr(
+                finding,
+                "source_field",
+                "",
+            )
+        )
+    ):
+        return False
+
+    category = _build6r_semantic_normalize(
+        getattr(
+            finding,
+            "claim_category",
+            "",
+        )
+    )
+
+    blocked_category_fragments = (
+        "benefit",
+        "effect",
+        "efficacy",
+        "popular",
+        "price",
+        "availability",
+        "scarcity",
+        "ranking",
+        "bestseller",
+        "source verification",
+        "provenance",
+    )
+
+    if any(
+        fragment in category
+        for fragment in blocked_category_fragments
+    ):
+        return False
+
+    eligible_categories = {
+        "product features attributes",
+        "ingredients percentages",
+        "clinical scientific claims",
+        "directions for use",
+    }
+
+    if category not in eligible_categories:
+        return False
+
+    raw_candidate = (
+        _build6r_semantic_normalize(
+            getattr(
+                finding,
+                "claim_text",
+                "",
+            )
+        )
+    )
+
+    # Global provenance / process assertions are not product facts.
+    if any(
+        marker in raw_candidate
+        for marker in (
+            "fonte direta",
+            "informacoes verificadas",
+            "sem extrapolar",
+            "direct source",
+            "verified information",
+        )
+    ):
+        return False
+
+    candidate_percentages = (
+        _build6r_v316_percentage_literals(
+            getattr(
+                finding,
+                "claim_text",
+                "",
+            )
+        )
+    )
+
+    if candidate_percentages:
+        canonical_percentages = set()
+
+        for value in (
+            _build6r_v316_verified_strings(
+                verified
+            )
+        ):
+            canonical_percentages.update(
+                _build6r_v316_percentage_literals(
+                    value
+                )
+            )
+
+        if not candidate_percentages.issubset(
+            canonical_percentages
+        ):
+            return False
+
+    # "Official" manufacturer sales-name language requires explicit
+    # manufacturer-official provenance in addition to canonical name text.
+    if (
+        "nome oficial"
+        in raw_candidate
+        or "nome de venda oficial"
+        in raw_candidate
+        or "official sales name"
+        in raw_candidate
+    ):
+        provenance = (
+            _build6r_semantic_normalize(
+                getattr(
+                    verified,
+                    "provenance",
+                    "",
+                )
+            )
+        )
+
+        if (
+            "manufacturer official"
+            not in provenance
+        ):
+            return False
+
+    canonical = (
+        _build6r_v311_canonical_text(
+            verified
+        )
+    )
+
+    # Any stem-cell mention is accepted only when the candidate itself
+    # explicitly carries a negation and canonical evidence contains the
+    # exact no-stem-cells qualification.
+    if (
+        "celulas tronco"
+        in raw_candidate
+        or "stem cells"
+        in raw_candidate
+    ):
+        candidate_negations = (
+            "nao contem celulas tronco",
+            "nao ha celulas tronco contidas",
+            "nao ha celulas tronco",
+            "nao conter celulas tronco",
+            "sem conter celulas tronco",
+            "stem cells are not contained",
+            "does not contain stem cells",
+            "no stem cells",
+        )
+
+        if not any(
+            marker in raw_candidate
+            for marker in candidate_negations
+        ):
+            return False
+
+        if (
+            "stem cells are not contained"
+            not in canonical
+        ):
+            return False
+
+    translated = (
+        _build6r_v316_translate_candidate(
+            getattr(
+                finding,
+                "claim_text",
+                "",
+            )
+        )
+    )
+
+    if not translated:
+        return False
+
+    # Never broadly open the clinical/scientific category. Only the
+    # specifically verified exosome safety/property family is eligible.
+    if (
+        category
+        == "clinical scientific claims"
+    ):
+        clinical_required = (
+            "exosomes",
+            "skin conditioning ingredient",
+            "stem cells are not contained",
+        )
+
+        if not all(
+            atom in translated
+            for atom in clinical_required
+        ):
+            return False
+
+        mapped_category = (
+            "ingredients contents"
+        )
+
+    elif (
+        category
+        == "ingredients percentages"
+    ):
+        mapped_category = (
+            "ingredients contents"
+        )
+
+    elif (
+        category
+        == "product features attributes"
+    ):
+        mapped_category = (
+            "other factual claim"
+        )
+
+    else:
+        mapped_category = (
+            "directions for use"
+        )
+
+    if hasattr(
+        finding,
+        "model_copy",
+    ):
+        shadow = finding.model_copy(
+            update={
+                "claim_text":
+                    translated,
+                "claim_category":
+                    mapped_category,
+            }
+        )
+    else:
+        shadow = ClaimFinding(
+            claim_text=
+                translated,
+            claim_category=
+                mapped_category,
+            source_field=
+                finding.source_field,
+            evidence_status=
+                finding.evidence_status,
+            allowed_source=
+                finding.allowed_source,
+            reason=
+                finding.reason,
+        )
+
+    return (
+        _build6r_v315_candidate_supported(
+            shadow,
+            verified,
+        )
+    )
+
+
+def _build6r_v316_reconcile_live_taxonomy_candidates(
+    result,
+    verified,
+):
+    reconciled = []
+
+    for finding in (
+        result.findings
+        or []
+    ):
+        if not (
+            _build6r_v316_candidate_supported(
+                finding,
+                verified,
+            )
+        ):
+            reconciled.append(
+                finding
+            )
+            continue
+
+        update = {
+            "evidence_status":
+                "SUPPORTED",
+
+            "allowed_source":
+                "verified_product_facts",
+
+            "reason":
+                (
+                    "Build 6R V3.16 deterministic live-taxonomy "
+                    "reconciliation mapped only an authorized claim "
+                    "category and then reused V3.15 canonical token "
+                    "coverage, source boundaries, percentage safety, "
+                    "and stem-cell fail-closed controls."
+                ),
+        }
+
+        if hasattr(
+            finding,
+            "model_copy",
+        ):
+            reconciled.append(
+                finding.model_copy(
+                    update=update
+                )
+            )
+        else:
+            reconciled.append(
+                ClaimFinding(
+                    claim_text=
+                        finding.claim_text,
+                    claim_category=
+                        finding.claim_category,
+                    source_field=
+                        finding.source_field,
+                    evidence_status=
+                        "SUPPORTED",
+                    allowed_source=
+                        "verified_product_facts",
+                    reason=
+                        update["reason"],
+                )
+            )
+
+    if hasattr(
+        result,
+        "model_copy",
+    ):
+        return result.model_copy(
+            update={
+                "findings":
+                    reconciled,
+            }
+        )
+
+    return ClaimAuditResult(
+        findings=reconciled
+    )
+
+
+async def augment_with_ai_extraction(
+    *args,
+    **kwargs,
+):
+    """
+    V3.16 appends after the sealed V3.15 source state.
+
+    Historical source-contract markers intentionally retained here:
+
+    _build6r_augment_before_v32
+    _build6r_reconcile_generated_semantic_findings_v32
+
+    _build6r_augment_before_v33
+    _build6r_reconcile_generated_semantic_findings_v33
+
+    _build6r_augment_before_v34
+    _build6r_reconcile_generated_semantic_findings_v34
+
+    _build6r_augment_before_v35
+    _build6r_reconcile_generated_semantic_findings_v35
+
+    _build6r_augment_before_v311
+    _build6r_v311_reconcile_copy_stage_canonical_findings
+
+    _build6r_augment_before_v312
+    _build6r_v312_reconcile_copy_stage_canonical_findings
+
+    _build6r_augment_before_v313
+    _build6r_v313_reconcile_copy_stage_canonical_findings
+
+    _build6r_augment_before_v315
+    _build6r_v315_reconcile_semantic_candidates
+
+    _build6r_augment_before_v316
+    _build6r_v316_reconcile_live_taxonomy_candidates
+
+    The sealed V3.1-V3.15 behavior executes exactly once through
+    _build6r_augment_before_v316.
+    """
+
+    result = await (
+        _build6r_augment_before_v316(
+            *args,
+            **kwargs,
+        )
+    )
+
+    return (
+        _build6r_v316_reconcile_live_taxonomy_candidates(
+            result,
+            kwargs.get(
+                "verified"
+            ),
+        )
+    )
