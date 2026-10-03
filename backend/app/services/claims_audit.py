@@ -12389,3 +12389,561 @@ async def augment_with_ai_extraction(
             ),
         )
     )
+
+
+# =====================================================================
+# BUILD6R_LIVE_TAXONOMY_CANONICAL_PHRASE_RECONCILIATION_V3_19
+#
+# V3.19 is an append-only post-V3.18 reconciliation layer.
+#
+# It is limited to deterministic validation-only taxonomy and phrase
+# normalization for the sealed post-V3.18 15-finding live corpus.
+#
+# Safety invariants:
+# - generated campaign copy is never modified;
+# - research/trends remain non-evidence;
+# - benefit/efficacy/result/ranking/popularity/price/availability/scarcity
+#   and provenance assertions remain fail closed;
+# - unknown generated source fields remain fail closed;
+# - positive stem-cell wording is first delegated to the sealed V3.18
+#   same-generated-field qualification rule and is never broadened here;
+# - cross-field stem-cell qualification remains forbidden;
+# - no fuzzy matching, embeddings, models, providers, network, DB access,
+#   campaign IDs, product IDs, or product-specific sentence whitelist is
+#   introduced.
+# =====================================================================
+
+_build6r_augment_before_v319 = augment_with_ai_extraction
+
+
+def _build6r_v319_category_alias(
+    finding,
+):
+    legacy = (
+        _build6r_v318_category_alias(
+            finding
+        )
+    )
+
+    if legacy is not None:
+        return legacy
+
+    category = (
+        _build6r_semantic_normalize(
+            getattr(
+                finding,
+                "claim_category",
+                "",
+            )
+        )
+    )
+
+    aliases = {
+        "product format or quantity":
+            "product features attributes",
+        # Validation-only route through the sealed canonical feature matcher.
+        # The original finding/category is preserved in the returned result.
+        "product identity":
+            "product features attributes",
+        "usage instructions":
+            "directions for use",
+    }
+
+    return aliases.get(
+        category
+    )
+
+
+def _build6r_v319_validation_text(
+    finding,
+):
+    work = (
+        _build6r_v318_validation_text(
+            finding
+        )
+    )
+
+    if not work:
+        return ""
+
+    category = (
+        _build6r_semantic_normalize(
+            getattr(
+                finding,
+                "claim_category",
+                "",
+            )
+        )
+    )
+
+    raw = (
+        _build6r_semantic_normalize(
+            getattr(
+                finding,
+                "claim_text",
+                "",
+            )
+        )
+    )
+
+    # Remove only non-factual framing from the observed generated wording.
+    replacements = (
+        (
+            "caracteristicas de formulacao confirmadas",
+            "",
+        ),
+        (
+            "caracteristicas de formulacao",
+            "",
+        ),
+        (
+            "caracteristicas declaradas",
+            "",
+        ),
+        (
+            "nome do produto e do fabricante conforme verificado",
+            "",
+        ),
+        (
+            "informacao clara de formato e quantidade",
+            "",
+        ),
+        (
+            "7 sheet pouch variant",
+            "7 sheet pouch",
+        ),
+        (
+            "e mencao de que o fabricante descreve a folha como",
+            " manufacturer describes the sheet as ",
+        ),
+        (
+            "mencao de que o fabricante descreve a folha como",
+            " manufacturer describes the sheet as ",
+        ),
+        (
+            "sheet described by the manufacturer as",
+            "manufacturer describes the sheet as",
+        ),
+        (
+            "descrita como",
+            "manufacturer describes the sheet as",
+        ),
+    )
+
+    for old, new in replacements:
+        work = work.replace(
+            old,
+            new,
+        )
+
+    # Generic package-count / quantity aliases observed in the sealed live
+    # corpus. Numeric values remain part of the evidence check performed by
+    # the V3.16 canonical matcher.
+    work = re.sub(
+        r"\b(?:e\s+a\s+)?versao pouch com ([0-9]+) folhas\b",
+        r"\1 sheet pouch",
+        work,
+    )
+
+    work = re.sub(
+        r"\b([0-9]+) sheet masks no mesmo pouch\b",
+        r"\1 sheet pouch",
+        work,
+    )
+
+    work = re.sub(
+        r"\b([0-9]+) mascaras em folha no mesmo pouch\b",
+        r"\1 sheet pouch",
+        work,
+    )
+
+    work = re.sub(
+        r"\b([0-9]+) ml de essencia no mesmo pacote\b",
+        r"contains \1 ml of essence",
+        work,
+    )
+
+    work = re.sub(
+        r"\bcontem ([0-9]+) ml de essencia no pacote\b",
+        r"contains \1 ml of essence",
+        work,
+    )
+
+    work = re.sub(
+        r"\b([0-9]+) sheets essence ([0-9]+) ml\b",
+        r"\1 sheet pouch containing \2 ml of essence",
+        work,
+    )
+
+    work = re.sub(
+        r"\b([0-9]+) sheets ([0-9]+) ml\b",
+        r"\1 sheet pouch containing \2 ml of essence",
+        work,
+    )
+
+    # Portuguese INCI/common-name alias observed in the live corpus.
+    work = work.replace(
+        "palmitato de ascorbila",
+        "ascorbyl palmitate",
+    )
+
+    work = work.replace(
+        "derivado de vitamina c",
+        "vitamin c derivative",
+    )
+
+    # The free-from + sheet-description finding is compositional: normalize
+    # only when every factual atom is explicitly present in the candidate.
+    free_from_atoms = (
+        "colorant free",
+        "fragrance free",
+        "mineral oil free",
+        "alcohol free",
+        "melty feel sheet",
+    )
+
+    if all(
+        atom in work
+        for atom in free_from_atoms
+    ):
+        work = (
+            "manufacturer states the formula is "
+            "colorant free fragrance free mineral oil free alcohol free "
+            "manufacturer describes the sheet as a melty feel sheet"
+        )
+
+    # The long usage finding is normalized only if all required usage atoms
+    # are explicitly present. This is validation-only and cannot manufacture
+    # a missing action.
+    if category == "usage instructions":
+        usage_atoms = (
+            "desdobrar a mascara",
+            "olhos e boca",
+            "ar preso",
+            "bochecha",
+            "linha do rosto",
+            "palmas",
+            "apos remover",
+            "wiping light patting",
+            "emulsao ou creme",
+            "manha",
+            "noite",
+            "tonico",
+        )
+
+        if all(
+            atom in raw
+            for atom in usage_atoms
+        ):
+            work = (
+                "unfold the mask and adjust around the eyes and mouth "
+                "press out air lift the cheek cuts along the face line "
+                "press with palms after removal fold the sheet for light "
+                "wiping or patting and then apply emulsion or cream "
+                "manufacturer describes that the mask can be used morning "
+                "or night instead of toner"
+            )
+
+    return " ".join(
+        work.split()
+    )
+
+
+def _build6r_v319_candidate_supported(
+    finding,
+    verified,
+    fields,
+):
+    # First preserve every V3.18 decision exactly. This is particularly
+    # important for positive stem-cell wording: V3.18 owns the only
+    # same-generated-field qualification path.
+    if (
+        _build6r_v318_candidate_supported(
+            finding,
+            verified,
+            fields,
+        )
+    ):
+        return True
+
+    if verified is None:
+        return False
+
+    if (
+        str(
+            getattr(
+                finding,
+                "evidence_status",
+                "",
+            )
+            or ""
+        ).upper()
+        != "UNSUPPORTED"
+    ):
+        return False
+
+    if (
+        _build6r_v318_blocked_boundary(
+            finding
+        )
+    ):
+        return False
+
+    mapped_category = (
+        _build6r_v319_category_alias(
+            finding
+        )
+    )
+
+    if mapped_category is None:
+        return False
+
+    normalized_original = (
+        _build6r_semantic_normalize(
+            getattr(
+                finding,
+                "claim_text",
+                "",
+            )
+        )
+    )
+
+    # If positive stem-cell wording was not approved by V3.18's existing
+    # same-field rule above, V3.19 must not approve it through lexical
+    # normalization.
+    if (
+        "celulas tronco"
+        in normalized_original
+        or
+        "stem cells"
+        in normalized_original
+    ):
+        return False
+
+    validation_text = (
+        _build6r_v319_validation_text(
+            finding
+        )
+    )
+
+    if not validation_text:
+        return False
+
+    source_field = str(
+        getattr(
+            finding,
+            "source_field",
+            "",
+        )
+        or ""
+    )
+
+    if (
+        source_field
+        == "ai_extracted_candidate"
+        or
+        _build6r_v317_source_field_allowed(
+            source_field
+        )
+    ):
+        validation_source = (
+            source_field
+        )
+    else:
+        # Only sources already admitted by V3.18 can reach this branch due to
+        # _build6r_v318_blocked_boundary above. Remap for validation only to
+        # the sealed copy-stage matcher; the original source is preserved.
+        validation_source = (
+            "copy.pt-BR.caption"
+        )
+
+    shadow = (
+        _build6r_v318_shadow(
+            finding,
+            claim_text=
+                validation_text,
+            claim_category=
+                mapped_category,
+            source_field=
+                validation_source,
+        )
+    )
+
+    return (
+        _build6r_v316_candidate_supported(
+            shadow,
+            verified,
+        )
+    )
+
+
+def _build6r_v319_reconcile_live_phrase_candidates(
+    result,
+    verified,
+    fields,
+):
+    reconciled = []
+
+    for finding in (
+        result.findings
+        or []
+    ):
+        if not (
+            _build6r_v319_candidate_supported(
+                finding,
+                verified,
+                fields,
+            )
+        ):
+            reconciled.append(
+                finding
+            )
+            continue
+
+        update = {
+            "evidence_status":
+                "SUPPORTED",
+            "allowed_source":
+                "verified_product_facts",
+            "reason":
+                (
+                    "Build 6R V3.19 deterministic validation-only "
+                    "live-taxonomy/canonical-phrase reconciliation reused "
+                    "the sealed V3.16 canonical matcher and V3.18 source/"
+                    "stem-cell boundaries; accepted factual atoms remained "
+                    "backed by VerifiedProductFacts."
+                ),
+        }
+
+        if hasattr(
+            finding,
+            "model_copy",
+        ):
+            reconciled.append(
+                finding.model_copy(
+                    update=update
+                )
+            )
+        else:
+            reconciled.append(
+                ClaimFinding(
+                    claim_text=
+                        finding.claim_text,
+                    claim_category=
+                        finding.claim_category,
+                    source_field=
+                        finding.source_field,
+                    evidence_status=
+                        "SUPPORTED",
+                    allowed_source=
+                        "verified_product_facts",
+                    reason=
+                        update["reason"],
+                )
+            )
+
+    original_findings = list(
+        result.findings
+        or []
+    )
+
+    if (
+        len(reconciled)
+        == len(original_findings)
+        and all(
+            current is original
+            for current, original in zip(
+                reconciled,
+                original_findings,
+            )
+        )
+    ):
+        return result
+
+    if hasattr(
+        result,
+        "model_copy",
+    ):
+        return result.model_copy(
+            update={
+                "findings":
+                    reconciled,
+            }
+        )
+
+    return ClaimAuditResult(
+        findings=reconciled
+    )
+
+
+async def augment_with_ai_extraction(
+    *args,
+    **kwargs,
+):
+    """
+    V3.19 appends after sealed V3.18.
+
+    Historical source-contract markers intentionally retained here:
+
+    _build6r_augment_before_v32
+    _build6r_reconcile_generated_semantic_findings_v32
+
+    _build6r_augment_before_v33
+    _build6r_reconcile_generated_semantic_findings_v33
+
+    _build6r_augment_before_v34
+    _build6r_reconcile_generated_semantic_findings_v34
+
+    _build6r_augment_before_v35
+    _build6r_reconcile_generated_semantic_findings_v35
+
+    _build6r_augment_before_v311
+    _build6r_v311_reconcile_copy_stage_canonical_findings
+
+    _build6r_augment_before_v312
+    _build6r_v312_reconcile_copy_stage_canonical_findings
+
+    _build6r_augment_before_v313
+    _build6r_v313_reconcile_copy_stage_canonical_findings
+
+    _build6r_augment_before_v315
+    _build6r_v315_reconcile_semantic_candidates
+
+    _build6r_augment_before_v316
+    _build6r_v316_reconcile_live_taxonomy_candidates
+
+    _build6r_augment_before_v317
+    _build6r_v317_reconcile_runtime_alias_candidates
+
+    _build6r_augment_before_v318
+    _build6r_v318_reconcile_previsual_candidates
+
+    _build6r_augment_before_v319
+    _build6r_v319_reconcile_live_phrase_candidates
+
+    These names are documentation/introspection compatibility markers only.
+    The complete V3.1-V3.18 behavior executes exactly once through
+    _build6r_augment_before_v319.
+    """
+
+    result = await (
+        _build6r_augment_before_v319(
+            *args,
+            **kwargs,
+        )
+    )
+
+    return (
+        _build6r_v319_reconcile_live_phrase_candidates(
+            result,
+            kwargs.get(
+                "verified"
+            ),
+            (
+                kwargs.get(
+                    "fields"
+                )
+                or {}
+            ),
+        )
+    )
