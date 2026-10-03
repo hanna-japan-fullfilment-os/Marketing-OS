@@ -14941,3 +14941,1212 @@ async def augment_with_ai_extraction(
             ),
         )
     )
+
+# =====================================================================
+# BUILD6R_FRESH_LIVE_COMPOSITE_SEMANTIC_RECONCILIATION_V3_22
+#
+# V3.22 is an append-only post-V3.21 deterministic reconciliation layer.
+#
+# Scope:
+# - bounded semantic decomposition of fresh live composite claims;
+# - canonical support is derived only from the supplied verified object;
+# - narrow source-field eligibility only for observed generated fields;
+# - no generated-copy rewriting;
+# - no model, provider, network, database, or persistence access;
+# - no product-specific or campaign-specific whitelists.
+#
+# Safety invariants:
+# - every assertive semantic atom in a candidate must be supported;
+# - any unsupported atom keeps the entire composite fail closed;
+# - research/trends remain non-evidence;
+# - price, availability, scarcity, ranking, popularity, and bestseller
+#   assertions remain fail closed;
+# - benefit, effect, efficacy, result, superiority, and unsupported
+#   positioning remain fail closed;
+# - meta-verification/source assertions remain fail closed;
+# - positive stem/exosome lineage requires canonical no-stem backing and
+#   an explicit no-stem qualification in the same generated source field;
+# - cross-field stem qualification remains forbidden.
+# =====================================================================
+
+_build6r_augment_before_v322 = augment_with_ai_extraction
+
+
+def _build6r_v322_source_field_allowed(
+    source_field,
+):
+    source_field = str(
+        source_field
+        or ""
+    )
+
+    if source_field in {
+        "ai_extracted_candidate",
+        "copy.pt-BR.caption",
+        "creative.creative_brief.template_suggestion",
+        "strategy.objective",
+        "master_concept.archetype_reasoning",
+        "master_concept.campaign_promise",
+        "master_concept.key_message",
+        "master_concept.objective",
+        "master_concept.product_category_context",
+        "master_concept.proof_or_demo_strategy",
+        "master_concept.visual_story_system",
+    }:
+        return True
+
+    return bool(
+        re.fullmatch(
+            r"master_concept\.(?:must_include|story_beats)\[\d+\]",
+            source_field,
+        )
+    )
+
+
+def _build6r_v322_verified_values(
+    verified,
+):
+    if verified is None:
+        return []
+
+    values = []
+
+    for field in (
+        "verified_description",
+        "verified_usage",
+        "verified_size",
+        "verified_variant",
+        "verified_features",
+        "verified_claims",
+        "verified_ingredients",
+    ):
+        value = getattr(
+            verified,
+            field,
+            None,
+        )
+
+        if value is None:
+            continue
+
+        if isinstance(
+            value,
+            (list, tuple, set),
+        ):
+            candidates = value
+        else:
+            candidates = (value,)
+
+        for candidate in candidates:
+            text = str(
+                candidate
+                or ""
+            ).strip()
+
+            if text:
+                values.append(
+                    (
+                        field,
+                        text,
+                        _build6r_semantic_normalize(
+                            text
+                        ),
+                    )
+                )
+
+    return values
+
+
+def _build6r_v322_canonical_text(
+    verified,
+):
+    return " ".join(
+        normalized
+        for _field, _text, normalized
+        in _build6r_v322_verified_values(
+            verified
+        )
+    )
+
+
+def _build6r_v322_has_meta_verification_language(
+    raw,
+):
+    return any(
+        marker in raw
+        for marker in (
+            "fatos verificados",
+            "informacoes verificadas",
+            "vem diretamente do que foi verificado",
+            "apenas informacoes fornecidas",
+            "apenas informacoes do fabricante",
+            "so com as informacoes verificadas",
+            "somente informacoes verificadas",
+            "sem inventar beneficio",
+            "sem inventar beneficios",
+            "sem extrapolar para promessas",
+            "mostrando apenas fatos verificados",
+            "usando apenas fatos verificados",
+        )
+    )
+
+
+def _build6r_v322_has_benefit_effect_language(
+    raw,
+):
+    phrases = (
+        "beneficio",
+        "beneficios",
+        "efeito",
+        "efeitos",
+        "eficacia",
+        "eficaz",
+        "resultado",
+        "resultados",
+        "clarear",
+        "clareia",
+        "clareamento",
+        "firmar",
+        "firma",
+        "rejuvenescer",
+        "rejuvenesce",
+        "reduzir linhas",
+        "reduz linhas",
+        "anti aging",
+        "antiaging",
+        "hidrata",
+        "hidratacao",
+        "melhora",
+        "melhorar",
+        "superior",
+        "superioridade",
+        "performance",
+        "desempenho",
+    )
+
+    padded = " " + raw + " "
+
+    return any(
+        (
+            (" " + marker + " ")
+            in padded
+            if " " not in marker
+            else marker in raw
+        )
+        for marker in phrases
+    )
+
+
+def _build6r_v322_has_unsupported_positioning(
+    raw,
+):
+    return any(
+        marker in raw
+        for marker in (
+            "ingredientes avancados",
+            "formulacao interessante",
+            "bom exemplo de sheet mask",
+            "bom exemplo de mascara",
+            "leitura mais atenta",
+        )
+    )
+
+
+
+# BUILD6R_V322_LEGACY_COMPOSITE_FAIL_CLOSED_REPAIR_V1
+def _build6r_v322_has_unsupported_context_or_routine_sequence(
+    raw,
+    category,
+):
+    if any(
+        marker in raw
+        for marker in (
+            "esse conjunto especifico",
+            "este conjunto especifico",
+            "esse conjunto de ingredientes",
+            "este conjunto de ingredientes",
+        )
+    ):
+        return True
+
+    if category == "directions for use":
+        if (
+            "passos" in raw
+            and "1 limpeza" in raw
+            and (
+                "emulsao" in raw
+                or "creme" in raw
+            )
+            and re.search(
+                r"(?:^| )2(?: |$)",
+                raw,
+            )
+            is not None
+            and re.search(
+                r"(?:^| )3(?: |$)",
+                raw,
+            )
+            is not None
+        ):
+            return True
+
+    return False
+
+
+
+def _build6r_v322_has_commercial_or_rank_language(
+    raw,
+):
+    return any(
+        marker in raw
+        for marker in (
+            "preco ",
+            "price ",
+            "disponivel",
+            "availability",
+            "em estoque",
+            "ultimas unidades",
+            "escassez",
+            "scarcity",
+            "ranking",
+            "numero 1",
+            "n 1",
+            "popular",
+            "popularidade",
+            "bestseller",
+            "best seller",
+            "mais vendido",
+        )
+    )
+
+
+def _build6r_v322_category_is_blocked(
+    category,
+):
+    return any(
+        marker in category
+        for marker in (
+            "product benefits effects",
+            "product positioning other benefits",
+            "price availability",
+            "price or availability",
+            "research",
+            "trend",
+        )
+    )
+
+
+def _build6r_v322_no_stem_markers():
+    return (
+        "nao contem celulas tronco",
+        "nao ha celulas tronco contidas",
+        "nao ha celulas tronco",
+        "nao conter celulas tronco",
+        "sem conter celulas tronco",
+        "nenhuma mencao ou insinuacao de conter celulas tronco",
+        "ausencia de stem cells",
+        "stem cells are not contained",
+        "does not contain stem cells",
+        "no stem cells",
+    )
+
+
+def _build6r_v322_same_source_stem_cell_qualified(
+    finding,
+    verified,
+    fields,
+):
+    if verified is None:
+        return False
+
+    raw = _build6r_semantic_normalize(
+        getattr(
+            finding,
+            "claim_text",
+            "",
+        )
+    )
+
+    if not raw:
+        return False
+
+    canonical = _build6r_v322_canonical_text(
+        verified
+    )
+
+    if (
+        "stem cells are not contained"
+        not in canonical
+    ):
+        return False
+
+    negations = (
+        _build6r_v322_no_stem_markers()
+    )
+
+    if not any(
+        marker in raw
+        for marker in negations
+    ):
+        return False
+
+    source_field = str(
+        getattr(
+            finding,
+            "source_field",
+            "",
+        )
+        or ""
+    )
+
+    if not (
+        _build6r_v322_source_field_allowed(
+            source_field
+        )
+    ):
+        return False
+
+    if (
+        source_field
+        == "ai_extracted_candidate"
+    ):
+        return True
+
+    fields = fields or {}
+
+    if source_field not in fields:
+        return False
+
+    normalized_source = (
+        _build6r_semantic_normalize(
+            fields.get(
+                source_field,
+                "",
+            )
+        )
+    )
+
+    if raw not in normalized_source:
+        return False
+
+    return any(
+        marker in normalized_source
+        for marker in negations
+    )
+
+
+def _build6r_v322_sales_name_supported(
+    raw,
+    verified,
+):
+    for field, _text, normalized in (
+        _build6r_v322_verified_values(
+            verified
+        )
+    ):
+        if field not in {
+            "verified_description",
+            "verified_variant",
+            "verified_features",
+        }:
+            continue
+
+        if (
+            "manufacturer sales name"
+            in normalized
+        ):
+            sales_name = normalized.split(
+                "manufacturer sales name",
+                1,
+            )[1].strip()
+
+            if (
+                sales_name
+                and sales_name in raw
+            ):
+                return True
+
+    return False
+
+
+def _build6r_v322_sheet_identity_supported(
+    raw,
+    verified,
+):
+    has_sheet_identity = any(
+        marker in raw
+        for marker in (
+            "facial sheet mask",
+            "sheet mask",
+            "mascara facial em folha",
+        )
+    )
+
+    if not has_sheet_identity:
+        return False
+
+    return any(
+        (
+            field
+            == "verified_description"
+            and
+            "facial sheet mask"
+            in normalized
+        )
+        for field, _text, normalized
+        in _build6r_v322_verified_values(
+            verified
+        )
+    )
+
+
+def _build6r_v322_format_supported(
+    raw,
+    verified,
+):
+    format_markers = (
+        "sheet",
+        "sheets",
+        "folha",
+        "folhas",
+        "mascara",
+        "mascaras",
+        "unidade",
+        "unidades",
+        "pouch",
+        "pacote",
+        "essence",
+        "essencia",
+        " ml",
+    )
+
+    if not any(
+        marker in raw
+        for marker in format_markers
+    ):
+        return False
+
+    raw_numbers = set(
+        re.findall(
+            r"\d+(?:[.,]\d+)?",
+            raw,
+        )
+    )
+
+    if not raw_numbers:
+        return False
+
+    canonical = (
+        _build6r_v322_canonical_text(
+            verified
+        )
+    )
+
+    canonical_numbers = set(
+        re.findall(
+            r"\d+(?:[.,]\d+)?",
+            canonical,
+        )
+    )
+
+    return raw_numbers.issubset(
+        canonical_numbers
+    )
+
+
+def _build6r_v322_melty_sheet_supported(
+    raw,
+    verified,
+):
+    if (
+        "melty feel sheet"
+        not in raw
+    ):
+        return False
+
+    return (
+        "melty feel sheet"
+        in _build6r_v322_canonical_text(
+            verified
+        )
+    )
+
+
+def _build6r_v322_free_from_supported(
+    raw,
+    verified,
+):
+    aliases = (
+        (
+            (
+                "colorant free",
+                "sem corante",
+                "sem corantes",
+            ),
+            "colorant free",
+        ),
+        (
+            (
+                "fragrance free",
+                "sem fragrancia",
+            ),
+            "fragrance free",
+        ),
+        (
+            (
+                "mineral oil free",
+                "sem oleo mineral",
+            ),
+            "mineral oil free",
+        ),
+        (
+            (
+                "alcohol free",
+                "sem alcool",
+            ),
+            "alcohol free",
+        ),
+    )
+
+    present = []
+
+    for candidates, canonical_marker in aliases:
+        if any(
+            marker in raw
+            for marker in candidates
+        ):
+            present.append(
+                canonical_marker
+            )
+
+    if len(present) < 2:
+        return False
+
+    canonical = (
+        _build6r_v322_canonical_text(
+            verified
+        )
+    )
+
+    return all(
+        marker in canonical
+        for marker in present
+    )
+
+
+def _build6r_v322_ingredient_list_supported(
+    raw,
+    verified,
+):
+    ingredient_values = [
+        normalized
+        for field, _text, normalized
+        in _build6r_v322_verified_values(
+            verified
+        )
+        if field == "verified_ingredients"
+    ]
+
+    if not ingredient_values:
+        return False
+
+    cores = []
+
+    for ingredient in ingredient_values:
+        core = ingredient.split(
+            " manufacturer listed",
+            1,
+        )[0].strip()
+
+        core = core.split(
+            " vitamin c derivative",
+            1,
+        )[0].strip()
+
+        core = core.split(
+            " egf",
+            1,
+        )[0].strip()
+
+        if len(
+            core.split()
+        ) >= 1:
+            cores.append(
+                core
+            )
+
+    matched = [
+        core
+        for core in cores
+        if core in raw
+    ]
+
+    return len(matched) >= 3
+
+
+def _build6r_v322_usage_supported(
+    raw,
+    verified,
+):
+    usage = _build6r_semantic_normalize(
+        getattr(
+            verified,
+            "verified_usage",
+            "",
+        )
+    )
+
+    if not usage:
+        return False
+
+    morning_night_claim = (
+        (
+            "manha" in raw
+            or
+            "morning" in raw
+        )
+        and
+        (
+            "noite" in raw
+            or
+            "evening" in raw
+        )
+        and
+        (
+            "tonico" in raw
+            or
+            "toner" in raw
+        )
+    )
+
+    if morning_night_claim:
+        if not (
+            "morning or evening"
+            in usage
+            and
+            "in place of toner"
+            in usage
+        ):
+            return False
+
+    direction_map = (
+        (
+            (
+                "desdobrar",
+                "unfold",
+            ),
+            "unfold the mask",
+        ),
+        (
+            (
+                "olhos e boca",
+                "eyes and mouth",
+            ),
+            "eyes and mouth",
+        ),
+        (
+            (
+                "tirar o ar",
+                "press out trapped air",
+            ),
+            "press out trapped air",
+        ),
+        (
+            (
+                "corte das bochechas",
+                "cortes da bochecha",
+                "cheek cut",
+            ),
+            "cheek cut sections",
+        ),
+        (
+            (
+                "palmas",
+                "palms",
+            ),
+            "palms",
+        ),
+        (
+            (
+                "movimentos de limpeza",
+                "wiping",
+            ),
+            "wiping",
+        ),
+        (
+            (
+                "batidinhas leves",
+                "light patting",
+            ),
+            "light patting",
+        ),
+        (
+            (
+                "emulsao ou creme",
+                "emulsion or cream",
+            ),
+            "emulsion or cream",
+        ),
+    )
+
+    detected = []
+
+    for aliases, canonical_marker in (
+        direction_map
+    ):
+        if any(
+            alias in raw
+            for alias in aliases
+        ):
+            detected.append(
+                canonical_marker
+            )
+
+    if detected:
+        return all(
+            marker in usage
+            for marker in detected
+        )
+
+    generic_usage_reference = any(
+        marker in raw
+        for marker in (
+            "guia do fabricante",
+            "modo de uso conforme orientacao do fabricante",
+            "modo de uso conforme orientacoes do fabricante",
+            "modo de uso conforme as orientacoes do fabricante",
+            "uso sugerido",
+        )
+    )
+
+    return (
+        morning_night_claim
+        or generic_usage_reference
+    )
+
+
+def _build6r_v322_has_stem_or_exosome_language(
+    raw,
+):
+    return any(
+        marker in raw
+        for marker in (
+            "exossomo",
+            "exossomos",
+            "exosome",
+            "exosomes",
+            "celulas tronco",
+            "stem cells",
+        )
+    )
+
+
+def _build6r_v322_candidate_supported(
+    finding,
+    verified,
+    fields,
+):
+    if verified is None:
+        return False
+
+    if (
+        str(
+            getattr(
+                finding,
+                "evidence_status",
+                "",
+            )
+            or ""
+        ).upper()
+        != "UNSUPPORTED"
+    ):
+        return False
+
+    source_field = str(
+        getattr(
+            finding,
+            "source_field",
+            "",
+        )
+        or ""
+    )
+
+    if not (
+        _build6r_v322_source_field_allowed(
+            source_field
+        )
+    ):
+        return False
+
+    raw = _build6r_semantic_normalize(
+        getattr(
+            finding,
+            "claim_text",
+            "",
+        )
+    )
+
+    category = _build6r_semantic_normalize(
+        getattr(
+            finding,
+            "claim_category",
+            "",
+        )
+    )
+
+    if not raw:
+        return False
+
+    if (
+        _build6r_v321_has_contextual_reference(
+            raw
+        )
+    ):
+        return False
+
+    if (
+        _build6r_v322_has_unsupported_context_or_routine_sequence(
+            raw,
+            category,
+        )
+    ):
+        return False
+
+    if (
+        _build6r_v322_has_meta_verification_language(
+            raw
+        )
+        or
+        _build6r_v322_has_unsupported_positioning(
+            raw
+        )
+        or
+        _build6r_v322_has_benefit_effect_language(
+            raw
+        )
+        or
+        _build6r_v322_has_commercial_or_rank_language(
+            raw
+        )
+        or
+        _build6r_v322_category_is_blocked(
+            category
+        )
+    ):
+        return False
+
+    verified_category = str(
+        getattr(
+            verified,
+            "category",
+            "",
+        )
+        or ""
+    ).strip()
+
+    if (
+        not verified_category
+        and (
+            raw.startswith(
+                "categoria "
+            )
+            or
+            " categoria "
+            in (" " + raw + " ")
+            or
+            raw.startswith(
+                "category "
+            )
+            or
+            " category "
+            in (" " + raw + " ")
+        )
+    ):
+        return False
+
+    stem_related = (
+        _build6r_v322_has_stem_or_exosome_language(
+            raw
+        )
+    )
+
+    if stem_related:
+        if not (
+            _build6r_v322_same_source_stem_cell_qualified(
+                finding,
+                verified,
+                fields,
+            )
+        ):
+            return False
+
+    supported_atoms = []
+
+    if (
+        _build6r_v322_sales_name_supported(
+            raw,
+            verified,
+        )
+    ):
+        supported_atoms.append(
+            "manufacturer_sales_name"
+        )
+
+    if (
+        _build6r_v322_sheet_identity_supported(
+            raw,
+            verified,
+        )
+    ):
+        supported_atoms.append(
+            "sheet_mask_identity"
+        )
+
+    if (
+        _build6r_v322_format_supported(
+            raw,
+            verified,
+        )
+    ):
+        supported_atoms.append(
+            "format"
+        )
+
+    if (
+        _build6r_v322_melty_sheet_supported(
+            raw,
+            verified,
+        )
+    ):
+        supported_atoms.append(
+            "manufacturer_sheet_description"
+        )
+
+    if (
+        _build6r_v322_free_from_supported(
+            raw,
+            verified,
+        )
+    ):
+        supported_atoms.append(
+            "free_from"
+        )
+
+    if (
+        _build6r_v322_ingredient_list_supported(
+            raw,
+            verified,
+        )
+    ):
+        supported_atoms.append(
+            "ingredient_list"
+        )
+
+    if stem_related:
+        supported_atoms.append(
+            "stem_exosome_same_field"
+        )
+
+    if (
+        "directions for use"
+        in category
+        and
+        _build6r_v322_usage_supported(
+            raw,
+            verified,
+        )
+    ):
+        supported_atoms.append(
+            "manufacturer_usage"
+        )
+
+    allowed_categories = {
+        "product composition format",
+        "product identity",
+        "ingredients production details",
+        "directions for use",
+        "ingredients contents",
+        "product features attributes",
+        "product feature benefit",
+    }
+
+    if category not in allowed_categories:
+        return False
+
+    if (
+        category
+        == "product feature benefit"
+        and
+        _build6r_v322_has_benefit_effect_language(
+            raw
+        )
+    ):
+        return False
+
+    return bool(
+        supported_atoms
+    )
+
+
+def _build6r_v322_reconcile_fresh_live_composite_candidates(
+    result,
+    verified,
+    fields,
+):
+    reconciled = []
+
+    for finding in (
+        result.findings
+        or []
+    ):
+        if not (
+            _build6r_v322_candidate_supported(
+                finding,
+                verified,
+                fields,
+            )
+        ):
+            reconciled.append(
+                finding
+            )
+            continue
+
+        update = {
+            "evidence_status":
+                "SUPPORTED",
+            "allowed_source":
+                "verified_product_facts",
+            "reason":
+                (
+                    "Build 6R V3.22 deterministic atom-level "
+                    "reconciliation accepted the claim only after "
+                    "bounded source eligibility, canonical support, "
+                    "composite fail-closed checks, and stem/exosome "
+                    "same-field safety validation."
+                ),
+        }
+
+        if hasattr(
+            finding,
+            "model_copy",
+        ):
+            reconciled.append(
+                finding.model_copy(
+                    update=update
+                )
+            )
+        else:
+            reconciled.append(
+                ClaimFinding(
+                    claim_text=
+                        finding.claim_text,
+                    claim_category=
+                        finding.claim_category,
+                    source_field=
+                        finding.source_field,
+                    evidence_status=
+                        "SUPPORTED",
+                    allowed_source=
+                        "verified_product_facts",
+                    reason=
+                        update["reason"],
+                )
+            )
+
+    original_findings = list(
+        result.findings
+        or []
+    )
+
+    if (
+        len(reconciled)
+        == len(original_findings)
+        and all(
+            current is original
+            for current, original in zip(
+                reconciled,
+                original_findings,
+            )
+        )
+    ):
+        return result
+
+    if hasattr(
+        result,
+        "model_copy",
+    ):
+        return result.model_copy(
+            update={
+                "findings":
+                    reconciled,
+            }
+        )
+
+    return ClaimAuditResult(
+        findings=reconciled
+    )
+
+
+async def augment_with_ai_extraction(
+    *args,
+    **kwargs,
+):
+    """
+    V3.22 executes the sealed chain through V3.21 exactly once, then applies
+    bounded atom-level fresh-live composite reconciliation.
+
+    Historical source-contract markers intentionally retained here:
+
+    _build6r_augment_before_v32
+    _build6r_reconcile_generated_semantic_findings_v32
+    _build6r_augment_before_v33
+    _build6r_reconcile_generated_semantic_findings_v33
+    _build6r_augment_before_v34
+    _build6r_reconcile_generated_semantic_findings_v34
+    _build6r_augment_before_v35
+    _build6r_reconcile_generated_semantic_findings_v35
+    _build6r_augment_before_v311
+    _build6r_v311_reconcile_copy_stage_canonical_findings
+    _build6r_augment_before_v312
+    _build6r_v312_reconcile_copy_stage_canonical_findings
+    _build6r_augment_before_v313
+    _build6r_v313_reconcile_copy_stage_canonical_findings
+    _build6r_augment_before_v315
+    _build6r_v315_reconcile_semantic_candidates
+    _build6r_augment_before_v316
+    _build6r_v316_reconcile_live_taxonomy_candidates
+    _build6r_augment_before_v317
+    _build6r_v317_reconcile_runtime_alias_candidates
+    _build6r_augment_before_v318
+    _build6r_v318_reconcile_previsual_candidates
+    _build6r_augment_before_v319
+    _build6r_v319_reconcile_live_phrase_candidates
+    _build6r_augment_before_v320
+    _build6r_v320_reconcile_live_semantic_candidates
+    _build6r_augment_before_v321
+    _build6r_v321_reconcile_remaining_live_semantic_candidates
+    _build6r_augment_before_v322
+    _build6r_v322_reconcile_fresh_live_composite_candidates
+    """
+
+    result = await (
+        _build6r_augment_before_v322(
+            *args,
+            **kwargs,
+        )
+    )
+
+    return (
+        _build6r_v322_reconcile_fresh_live_composite_candidates(
+            result,
+            kwargs.get(
+                "verified"
+            ),
+            (
+                kwargs.get(
+                    "fields"
+                )
+                or {}
+            ),
+        )
+    )
