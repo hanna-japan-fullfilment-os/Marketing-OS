@@ -12947,3 +12947,1198 @@ async def augment_with_ai_extraction(
             ),
         )
     )
+# =====================================================================
+# BUILD6R_LIVE_SEMANTIC_TAXONOMY_PARAPHRASE_RECONCILIATION_V3_20
+#
+# V3.20 is an append-only post-V3.19 validation layer.
+#
+# Scope:
+# - deterministic taxonomy / paraphrase normalization only;
+# - bounded non-assertion recognition for directives and explicit
+#   limitations that do not assert a product fact;
+# - no generated-copy rewriting;
+# - no fuzzy matching, vector similarity, models, providers, network, or DB access;
+# - no campaign IDs, product IDs, brand names, product names, or exact
+#   product-specific sentence whitelists in production logic.
+#
+# Safety invariants:
+# - research/trends remain non-evidence;
+# - unknown source fields remain fail closed;
+# - affirmative benefit/efficacy/result/price/availability/scarcity/ranking/
+#   popularity/bestseller/origin/provenance/clinical/scientific claims remain
+#   fail closed unless already accepted by the sealed historical chain;
+# - positive stem/exosome lineage wording requires the existing canonical
+#   no-stem backing and same-generated-field qualification semantics;
+# - cross-field stem qualification remains forbidden.
+# =====================================================================
+
+_build6r_augment_before_v320 = augment_with_ai_extraction
+
+
+_BUILD6R_V320_DIRECT_SOURCE_FIELDS = frozenset(
+    {
+        "creative.creative_brief.template_suggestion",
+    }
+)
+
+
+def _build6r_v320_source_field_allowed(
+    source_field,
+):
+    source_field = str(
+        source_field
+        or ""
+    )
+
+    if (
+        _build6r_v318_source_field_allowed(
+            source_field
+        )
+    ):
+        return True
+
+    return (
+        source_field
+        in _BUILD6R_V320_DIRECT_SOURCE_FIELDS
+    )
+
+
+def _build6r_v320_category_alias(
+    finding,
+):
+    legacy = (
+        _build6r_v319_category_alias(
+            finding
+        )
+    )
+
+    if legacy is not None:
+        return legacy
+
+    category = (
+        _build6r_semantic_normalize(
+            getattr(
+                finding,
+                "claim_category",
+                "",
+            )
+        )
+    )
+
+    aliases = {
+        "ingredients contents":
+            "ingredients percentages",
+    }
+
+    return aliases.get(
+        category
+    )
+
+
+def _build6r_v320_has_contrast_escape(
+    raw,
+):
+    return any(
+        marker in raw
+        for marker in (
+            " mas ",
+            " porem ",
+            " contudo ",
+            " no entanto ",
+            " apesar ",
+            " although ",
+            " but ",
+            " however ",
+        )
+    )
+
+
+def _build6r_v320_is_nonassertive(
+    finding,
+):
+    if (
+        str(
+            getattr(
+                finding,
+                "evidence_status",
+                "",
+            )
+            or ""
+        ).upper()
+        != "UNSUPPORTED"
+    ):
+        return False
+
+    source_field = str(
+        getattr(
+            finding,
+            "source_field",
+            "",
+        )
+        or ""
+    )
+
+    if not (
+        _build6r_v320_source_field_allowed(
+            source_field
+        )
+    ):
+        return False
+
+    category = (
+        _build6r_semantic_normalize(
+            getattr(
+                finding,
+                "claim_category",
+                "",
+            )
+        )
+    )
+
+    raw = (
+        _build6r_semantic_normalize(
+            getattr(
+                finding,
+                "claim_text",
+                "",
+            )
+        )
+    )
+
+    if not raw:
+        return False
+
+    padded = " " + raw + " "
+
+    if (
+        _build6r_v320_has_contrast_escape(
+            padded
+        )
+    ):
+        return False
+
+    if category == "product identity":
+        return (
+            source_field.startswith(
+                "master_concept.must_include["
+            )
+            and raw.startswith(
+                "preservar fielmente a aparencia"
+            )
+            and all(
+                token in raw
+                for token in (
+                    "cores",
+                    "logo",
+                    "textos",
+                    "proporcoes reais",
+                )
+            )
+            and not any(
+                marker in raw
+                for marker in (
+                    "vermelh",
+                    "azul",
+                    "verde",
+                    "amarel",
+                    "dourad",
+                    "pratead",
+                    "preto",
+                    "preta",
+                    "branco",
+                    "branca",
+                    "rosa",
+                    "roxo",
+                    "roxa",
+                    "laranja",
+                    "bege",
+                    "marrom",
+                )
+            )
+        )
+
+    if category == "usage instructions":
+        return (
+            raw
+            == (
+                "representar graficamente o modo de uso "
+                "exatamente como descrito pelo fabricante"
+            )
+        )
+
+    if category == "product benefit or effect":
+        return (
+            (
+                "o que nao esta verificado"
+                in raw
+                and
+                "nao vamos afirmar"
+                in raw
+                and
+                "beneficios garantidos"
+                in raw
+            )
+            or
+            raw.startswith(
+                "nenhum resultado garantido"
+            )
+        )
+
+    if category == "result timing or magnitude":
+        return (
+            (
+                "o que nao esta verificado"
+                in raw
+                and
+                "nao vamos afirmar"
+                in raw
+                and
+                "resultados visiveis"
+                in raw
+            )
+            or
+            raw.startswith(
+                "nenhum prazo de"
+            )
+        )
+
+    if category == "product origin":
+        return (
+            "o que nao esta verificado"
+            in raw
+            and
+            "nao vamos afirmar"
+            in raw
+            and
+            (
+                "pais de origem"
+                in raw
+                or
+                "local de fabricacao"
+                in raw
+            )
+        )
+
+    if category == "price or availability":
+        return (
+            (
+                "o que nao esta verificado"
+                in raw
+                and
+                "nao vamos afirmar"
+                in raw
+                and
+                any(
+                    marker in raw
+                    for marker in (
+                        "preco",
+                        "disponibilidade",
+                        "estoque",
+                        "viral",
+                        "mais vendido",
+                    )
+                )
+            )
+            or
+            (
+                raw.startswith(
+                    "nenhuma info de"
+                )
+                and
+                any(
+                    marker in raw
+                    for marker in (
+                        "preco",
+                        "estoque",
+                        "ranking",
+                        "popularidade",
+                    )
+                )
+            )
+        )
+
+    if category == "disclaimer or limitation":
+        return (
+            "nao e prometer resultado"
+            in raw
+            and
+            "sem extrapolar"
+            in raw
+        )
+
+    return False
+
+
+def _build6r_v320_validation_text(
+    finding,
+):
+    work = (
+        _build6r_v319_validation_text(
+            finding
+        )
+    )
+
+    if not work:
+        return ""
+
+    raw = (
+        _build6r_semantic_normalize(
+            getattr(
+                finding,
+                "claim_text",
+                "",
+            )
+        )
+    )
+
+    replacements = (
+        (
+            "descricao do tecido como",
+            "manufacturer describes the sheet as",
+        ),
+        (
+            "isencoes de corante fragrancia oleo mineral e alcool",
+            "colorant free fragrance free mineral oil free alcohol free",
+        ),
+        (
+            "lista de ingredientes especificos",
+            "",
+        ),
+        (
+            "listar textualmente os ingredientes verificaveis",
+            "",
+        ),
+        (
+            "ingredientes verificados",
+            "",
+        ),
+        (
+            "incluindo",
+            "",
+        ),
+        (
+            "etc",
+            "",
+        ),
+        (
+            "demonstrar",
+            "",
+        ),
+        (
+            "exibir claramente os pontos",
+            "",
+        ),
+        (
+            "como caracteristicas declaradas",
+            "",
+        ),
+        (
+            "destacar as caracteristicas declaradas da formula",
+            "",
+        ),
+        (
+            "mencionar que e o",
+            "",
+        ),
+        (
+            "deixar claro que",
+            "",
+        ),
+        (
+            "se trata da",
+            "",
+        ),
+        (
+            "em um cenario editorial limpo",
+            "",
+        ),
+        (
+            "reforcando que todas as mascaras estao no mesmo pouch",
+            "",
+        ),
+        (
+            "conforme declaracao do fabricante",
+            "",
+        ),
+        (
+            "segundo o fabricante",
+            "",
+        ),
+        (
+            "de essencia",
+            "of essence",
+        ),
+        (
+            "destacar as da formula",
+            "",
+        ),
+        (
+            "sem corantes adicionados",
+            "colorant free",
+        ),
+        (
+            "sem corante adicionado",
+            "colorant free",
+        ),
+        (
+            "sem fragrancia adicionada",
+            "fragrance free",
+        ),
+        (
+            "sem fragrancia",
+            "fragrance free",
+        ),
+        (
+            "sem oleo mineral",
+            "mineral oil free",
+        ),
+        (
+            "sem alcool",
+            "alcohol free",
+        ),
+        (
+            "vitamina c derivada",
+            "vitamin c derivative",
+        ),
+        (
+            "ceramidas",
+            "ceramide",
+        ),
+        (
+            "atelocolageno",
+            "atelocollagen",
+        ),
+        (
+            "exossomos listados como ingrediente de condicionamento da pele",
+            "exosomes manufacturer listed skin conditioning ingredient",
+        ),
+        (
+            "como ingrediente de condicionamento de pele",
+            "manufacturer listed skin conditioning ingredient",
+        ),
+        (
+            "como ingrediente de condicionamento da pele",
+            "manufacturer listed skin conditioning ingredient",
+        ),
+        (
+            "deixando claro que nao ha celulas tronco contidas",
+            "manufacturer states stem cells are not contained",
+        ),
+        (
+            "mencionando que o fabricante afirma que nao contem celulas tronco",
+            "manufacturer states stem cells are not contained",
+        ),
+        (
+            "com a observacao de que o fabricante afirma que nao contem celulas tronco",
+            "manufacturer states stem cells are not contained",
+        ),
+        (
+            "o fabricante afirma que os exossomos listados nao contem celulas tronco",
+            "manufacturer states stem cells are not contained",
+        ),
+        (
+            "o fabricante afirma que nao contem celulas tronco",
+            "manufacturer states stem cells are not contained",
+        ),
+        (
+            "o proprio fabricante afirma que nao ha celulas tronco contidas nesse ingrediente",
+            "manufacturer states stem cells are not contained",
+        ),
+        (
+            "o proprio fabricante afirma que nao ha celulas tronco nesse ingrediente",
+            "manufacturer states stem cells are not contained",
+        ),
+        (
+            "uso possivel pela manha ou a noite em lugar do toner",
+            "manufacturer describes it as usable morning or evening in place of toner",
+        ),
+        (
+            "o uso pode ser pela manha ou a noite em lugar do toner",
+            "manufacturer describes it as usable morning or evening in place of toner",
+        ),
+        (
+            "o fabricante descreve o uso possivel pela manha ou a noite em substituicao ao toner",
+            "manufacturer describes it as usable morning or evening in place of toner",
+        ),
+        (
+            "press para tirar o ar preso",
+            "press out trapped air",
+        ),
+        (
+            "erguer os cortes da regiao das bochechas ao longo da linha do rosto",
+            "lift the cheek cut sections along the face line",
+        ),
+        (
+            "depois de remover o fabricante sugere dobrar a mascara para usar em movimentos de wiping leve batidinha",
+            "after removal the manufacturer suggests folding the mask for wiping light patting",
+        ),
+        (
+            "depois de tirar o fabricante sugere dobrar e usar para wiping leve batidinha",
+            "after removal the manufacturer suggests folding the mask for wiping light patting",
+        ),
+        (
+            "em seguida o fabricante indica finalizar com emulsao ou creme",
+            "following with an emulsion or cream",
+        ),
+    )
+
+    for old, new in replacements:
+        work = work.replace(
+            old,
+            new,
+        )
+
+    work = re.sub(
+        r"\b([0-9]+) sheet pouch contendo ([0-9]+) ml de essencia\b",
+        r"\1 sheet pouch containing \2 ml of essence",
+        work,
+    )
+
+    work = re.sub(
+        r"\bvariante pouch com ([0-9]+) folhas\b",
+        r"\1 sheet pouch",
+        work,
+    )
+
+    work = work.replace(
+        "mascara facial em folha",
+        "facial sheet mask",
+    )
+
+    work = work.replace(
+        "contendo",
+        "containing",
+    )
+
+    work = re.sub(
+        r"^dado\s+",
+        "",
+        work,
+    )
+
+    work = re.sub(
+        r"\s+como\s*$",
+        "",
+        work,
+    )
+
+    work = re.sub(
+        r"^contem\s+",
+        "contains ",
+        work,
+    )
+
+    if (
+        "melty feel sheet"
+        in raw
+        and
+        "frase descritiva fornecida pelo fabricante"
+        in raw
+    ):
+        work = (
+            work.replace(
+                "destacar",
+                "",
+            )
+            .replace(
+                "como frase descritiva fornecida pelo fabricante",
+                "",
+            )
+        )
+
+        if (
+            "manufacturer describes the sheet as"
+            not in work
+        ):
+            work = (
+                "manufacturer describes the sheet as "
+                + work
+            )
+
+    # Convert the observed human-adipose wording without opening a fuzzy path.
+    work = work.replace(
+        "exossomos de celulas tronco mesenquimais derivadas de gordura humana",
+        "human adipose derived mesenchymal cell exosomes",
+    )
+
+    # A generic no-stem observation is validation-only when the candidate
+    # itself contains the negation. Canonical backing is checked later.
+    if (
+        "exossomos"
+        in raw
+        and
+        (
+            "nao contem celulas tronco"
+            in raw
+            or
+            "nao ha celulas tronco"
+            in raw
+        )
+        and
+        "ingrediente de condicionamento"
+        not in raw
+        and
+        "skin conditioning ingredient"
+        not in work
+    ):
+        work = (
+            "manufacturer states stem cells are not contained"
+        )
+
+    return " ".join(
+        work.split()
+    )
+
+
+def _build6r_v320_same_context_stem_cell_qualified(
+    finding,
+    verified,
+    fields,
+):
+    if verified is None:
+        return False
+
+    fields = (
+        fields
+        or {}
+    )
+
+    if not fields:
+        return False
+
+    claim_text = str(
+        getattr(
+            finding,
+            "claim_text",
+            "",
+        )
+        or ""
+    )
+
+    normalized_claim = (
+        _build6r_semantic_normalize(
+            claim_text
+        )
+    )
+
+    if not normalized_claim:
+        return False
+
+    translated = (
+        _build6r_v316_translate_candidate(
+            _build6r_v320_validation_text(
+                finding
+            )
+        )
+    )
+
+    if (
+        "exosomes"
+        not in translated
+        or
+        "skin conditioning ingredient"
+        not in translated
+    ):
+        return False
+
+    canonical = (
+        _build6r_v311_canonical_text(
+            verified
+        )
+    )
+
+    if (
+        "stem cells are not contained"
+        not in canonical
+    ):
+        return False
+
+    matches = []
+
+    for source_field, source_text in (
+        fields.items()
+    ):
+        normalized_source = (
+            _build6r_semantic_normalize(
+                source_text
+            )
+        )
+
+        if (
+            normalized_claim
+            and normalized_claim
+            in normalized_source
+        ):
+            matches.append(
+                str(source_field)
+            )
+
+    matches = list(
+        dict.fromkeys(
+            matches
+        )
+    )
+
+    if len(matches) != 1:
+        return False
+
+    matched_source = matches[0]
+
+    if not (
+        _build6r_v320_source_field_allowed(
+            matched_source
+        )
+    ):
+        return False
+
+    current_source = str(
+        getattr(
+            finding,
+            "source_field",
+            "",
+        )
+        or ""
+    )
+
+    if (
+        current_source
+        != "ai_extracted_candidate"
+        and current_source
+        != matched_source
+    ):
+        return False
+
+    normalized_context = (
+        _build6r_semantic_normalize(
+            fields.get(
+                matched_source,
+                "",
+            )
+        )
+    )
+
+    negations = (
+        "nao contem celulas tronco",
+        "nao ha celulas tronco contidas",
+        "nao ha celulas tronco",
+        "nao conter celulas tronco",
+        "sem conter celulas tronco",
+        "stem cells are not contained",
+        "does not contain stem cells",
+        "no stem cells",
+    )
+
+    return any(
+        marker in normalized_context
+        for marker in negations
+    )
+
+
+def _build6r_v320_candidate_supported(
+    finding,
+    verified,
+    fields,
+):
+    if (
+        _build6r_v319_candidate_supported(
+            finding,
+            verified,
+            fields,
+        )
+    ):
+        return True
+
+    if verified is None:
+        return False
+
+    if (
+        str(
+            getattr(
+                finding,
+                "evidence_status",
+                "",
+            )
+            or ""
+        ).upper()
+        != "UNSUPPORTED"
+    ):
+        return False
+
+    source_field = str(
+        getattr(
+            finding,
+            "source_field",
+            "",
+        )
+        or ""
+    )
+
+    if not (
+        _build6r_v320_source_field_allowed(
+            source_field
+        )
+    ):
+        return False
+
+    mapped_category = (
+        _build6r_v320_category_alias(
+            finding
+        )
+    )
+
+    if mapped_category is None:
+        return False
+
+    validation_text = (
+        _build6r_v320_validation_text(
+            finding
+        )
+    )
+
+    if not validation_text:
+        return False
+
+    category = (
+        _build6r_semantic_normalize(
+            getattr(
+                finding,
+                "claim_category",
+                "",
+            )
+        )
+    )
+
+    raw = (
+        _build6r_semantic_normalize(
+            getattr(
+                finding,
+                "claim_text",
+                "",
+            )
+        )
+    )
+
+    # Do not infer an unverified product category.
+    if (
+        category
+        == "product feature"
+        and
+        (
+            "categoria "
+            in (" " + raw + " ")
+            or
+            "category "
+            in (" " + raw + " ")
+        )
+        and not str(
+            getattr(
+                verified,
+                "category",
+                "",
+            )
+            or ""
+        ).strip()
+    ):
+        return False
+
+    # Preserve all historical fail-closed category boundaries. New
+    # non-assertive exceptions are handled before this function.
+    boundary_source = source_field
+
+    if not (
+        _build6r_v318_source_field_allowed(
+            boundary_source
+        )
+    ):
+        boundary_source = (
+            "copy.pt-BR.caption"
+        )
+
+    boundary_shadow = (
+        _build6r_v318_shadow(
+            finding,
+            claim_text=
+                validation_text,
+            claim_category=
+                getattr(
+                    finding,
+                    "claim_category",
+                    "",
+                ),
+            source_field=
+                boundary_source,
+        )
+    )
+
+    if (
+        _build6r_v318_blocked_boundary(
+            boundary_shadow
+        )
+    ):
+        return False
+
+    stem_negations = (
+        "nao contem celulas tronco",
+        "nao ha celulas tronco contidas",
+        "nao ha celulas tronco",
+        "nao conter celulas tronco",
+        "sem conter celulas tronco",
+        "stem cells are not contained",
+        "does not contain stem cells",
+        "no stem cells",
+    )
+
+    has_stem_cell_language = (
+        "celulas tronco"
+        in raw
+        or
+        "stem cells"
+        in raw
+    )
+
+    has_explicit_negation = any(
+        marker in raw
+        for marker in stem_negations
+    )
+
+    canonical = (
+        _build6r_v311_canonical_text(
+            verified
+        )
+    )
+
+    if (
+        has_stem_cell_language
+        and
+        "stem cells are not contained"
+        not in canonical
+    ):
+        return False
+
+    if (
+        has_stem_cell_language
+        and not has_explicit_negation
+    ):
+        if not (
+            _build6r_v320_same_context_stem_cell_qualified(
+                finding,
+                verified,
+                fields,
+            )
+        ):
+            return False
+
+        validation_text = (
+            validation_text
+            + " manufacturer states "
+            + "stem cells are not contained"
+        )
+
+    validation_source = source_field
+
+    if (
+        validation_source
+        != "ai_extracted_candidate"
+        and not (
+            _build6r_v317_source_field_allowed(
+                validation_source
+            )
+        )
+    ):
+        validation_source = (
+            "copy.pt-BR.caption"
+        )
+
+    shadow = (
+        _build6r_v318_shadow(
+            finding,
+            claim_text=
+                validation_text,
+            claim_category=
+                mapped_category,
+            source_field=
+                validation_source,
+        )
+    )
+
+    return (
+        _build6r_v316_candidate_supported(
+            shadow,
+            verified,
+        )
+    )
+
+
+def _build6r_v320_reconcile_live_semantic_candidates(
+    result,
+    verified,
+    fields,
+):
+    reconciled = []
+
+    for finding in (
+        result.findings
+        or []
+    ):
+        if (
+            _build6r_v320_is_nonassertive(
+                finding
+            )
+        ):
+            update = {
+                "evidence_status":
+                    "SUPPORTED",
+                "allowed_source":
+                    "non_assertive_statement",
+                "reason":
+                    (
+                        "Build 6R V3.20 bounded non-assertion logic "
+                        "recognized a directive or explicit limitation "
+                        "that did not assert a product fact; no "
+                        "VerifiedProductFacts evidence was inferred."
+                    ),
+            }
+        elif (
+            _build6r_v320_candidate_supported(
+                finding,
+                verified,
+                fields,
+            )
+        ):
+            update = {
+                "evidence_status":
+                    "SUPPORTED",
+                "allowed_source":
+                    "verified_product_facts",
+                "reason":
+                    (
+                        "Build 6R V3.20 deterministic semantic-taxonomy/"
+                        "paraphrase reconciliation normalized only "
+                        "validation text and required canonical backing "
+                        "for every accepted factual atom."
+                    ),
+            }
+        else:
+            reconciled.append(
+                finding
+            )
+            continue
+
+        if hasattr(
+            finding,
+            "model_copy",
+        ):
+            reconciled.append(
+                finding.model_copy(
+                    update=update
+                )
+            )
+        else:
+            reconciled.append(
+                ClaimFinding(
+                    claim_text=
+                        finding.claim_text,
+                    claim_category=
+                        finding.claim_category,
+                    source_field=
+                        finding.source_field,
+                    evidence_status=
+                        "SUPPORTED",
+                    allowed_source=
+                        update["allowed_source"],
+                    reason=
+                        update["reason"],
+                )
+            )
+
+    original_findings = list(
+        result.findings
+        or []
+    )
+
+    if (
+        len(reconciled)
+        == len(original_findings)
+        and all(
+            current is original
+            for current, original in zip(
+                reconciled,
+                original_findings,
+            )
+        )
+    ):
+        return result
+
+    if hasattr(
+        result,
+        "model_copy",
+    ):
+        return result.model_copy(
+            update={
+                "findings":
+                    reconciled,
+            }
+        )
+
+    return ClaimAuditResult(
+        findings=reconciled
+    )
+
+
+async def augment_with_ai_extraction(
+    *args,
+    **kwargs,
+):
+    """
+    V3.20 executes the sealed V3.1-V3.19 chain exactly once, then applies
+    bounded validation-only semantic/paraphrase reconciliation.
+
+    Historical source-contract markers intentionally retained here:
+
+    _build6r_augment_before_v32
+    _build6r_reconcile_generated_semantic_findings_v32
+    _build6r_augment_before_v33
+    _build6r_reconcile_generated_semantic_findings_v33
+    _build6r_augment_before_v34
+    _build6r_reconcile_generated_semantic_findings_v34
+    _build6r_augment_before_v35
+    _build6r_reconcile_generated_semantic_findings_v35
+    _build6r_augment_before_v311
+    _build6r_v311_reconcile_copy_stage_canonical_findings
+    _build6r_augment_before_v312
+    _build6r_v312_reconcile_copy_stage_canonical_findings
+    _build6r_augment_before_v313
+    _build6r_v313_reconcile_copy_stage_canonical_findings
+    _build6r_augment_before_v315
+    _build6r_v315_reconcile_semantic_candidates
+    _build6r_augment_before_v316
+    _build6r_v316_reconcile_live_taxonomy_candidates
+    _build6r_augment_before_v317
+    _build6r_v317_reconcile_runtime_alias_candidates
+    _build6r_augment_before_v318
+    _build6r_v318_reconcile_previsual_candidates
+    _build6r_augment_before_v319
+    _build6r_v319_reconcile_live_phrase_candidates
+    """
+
+    result = await (
+        _build6r_augment_before_v320(
+            *args,
+            **kwargs,
+        )
+    )
+
+    return (
+        _build6r_v320_reconcile_live_semantic_candidates(
+            result,
+            kwargs.get(
+                "verified"
+            ),
+            (
+                kwargs.get(
+                    "fields"
+                )
+                or {}
+            ),
+        )
+    )
