@@ -14142,3 +14142,802 @@ async def augment_with_ai_extraction(
             ),
         )
     )
+# =====================================================================
+# BUILD6R_REMAINING_LIVE_SEMANTIC_RECONCILIATION_V3_21
+#
+# V3.21 is an append-only post-V3.20 deterministic validation layer.
+#
+# Scope:
+# - bounded framing, taxonomy, and lexical normalization only;
+# - no generated-copy rewriting or atom splitting;
+# - no new evidence sources or source-field admission;
+# - no model, provider, network, or persistence access;
+# - no product-specific or campaign-specific sentence whitelists.
+#
+# Safety invariants:
+# - mixed claims that include an unverified category remain fail closed;
+# - vague contextual references remain fail closed;
+# - benefit, efficacy, effect, result, superiority, and performance
+#   assertions remain fail closed unless accepted by the sealed chain;
+# - research/trends remain non-evidence;
+# - price, availability, scarcity, ranking, and popularity remain fail closed;
+# - stem/exosome lineage wording requires canonical no-stem backing and
+#   an explicit no-stem qualification in the same generated source field;
+# - cross-field stem qualification remains forbidden.
+# =====================================================================
+
+_build6r_augment_before_v321 = augment_with_ai_extraction
+
+
+def _build6r_v321_has_contextual_reference(
+    raw,
+):
+    return any(
+        marker in raw
+        for marker in (
+            "essa combinacao",
+            "esta combinacao",
+            "esse modo de uso",
+            "este modo de uso",
+            "esses ingredientes",
+            "estas informacoes",
+            "essas informacoes",
+            "como descrito acima",
+            "como mencionado acima",
+        )
+    )
+
+
+def _build6r_v321_has_benefit_effect_language(
+    raw,
+):
+    return any(
+        marker in raw
+        for marker in (
+            "beneficio",
+            "beneficios",
+            "efeito",
+            "efeitos",
+            "eficacia",
+            "eficaz",
+            "resultado",
+            "resultados",
+            "clarear",
+            "clareia",
+            "clareamento",
+            "firmar",
+            "firma",
+            "rejuvenescer",
+            "rejuvenesce",
+            "reduzir linhas",
+            "reduz linhas",
+            "anti aging",
+            "antiaging",
+            "hidrata",
+            "hidratacao",
+            "melhora",
+            "melhorar",
+            "superior",
+            "superioridade",
+            "performance",
+            "desempenho",
+        )
+    )
+
+
+def _build6r_v321_category_alias(
+    finding,
+):
+    legacy = (
+        _build6r_v320_category_alias(
+            finding
+        )
+    )
+
+    if legacy is not None:
+        return legacy
+
+    category = (
+        _build6r_semantic_normalize(
+            getattr(
+                finding,
+                "claim_category",
+                "",
+            )
+        )
+    )
+
+    raw = (
+        _build6r_semantic_normalize(
+            getattr(
+                finding,
+                "claim_text",
+                "",
+            )
+        )
+    )
+
+    if (
+        category
+        == "product feature benefit"
+        and not (
+            _build6r_v321_has_benefit_effect_language(
+                raw
+            )
+        )
+    ):
+        return "product features attributes"
+
+    return None
+
+
+def _build6r_v321_validation_text(
+    finding,
+):
+    work = (
+        _build6r_v320_validation_text(
+            finding
+        )
+    )
+
+    if not work:
+        return ""
+
+    replacements = (
+        (
+            "nome completo do produto",
+            "",
+        ),
+        (
+            "mencao clara ao formato",
+            "",
+        ),
+        (
+            "lista factual dos ingredientes confirmados pelo fabricante",
+            "",
+        ),
+        (
+            "caracteristicas de formulacao verificadas",
+            "",
+        ),
+        (
+            "caracteristicas de formulacao",
+            "",
+        ),
+        (
+            "mencao de que o fabricante descreve o tecido como",
+            "manufacturer describes the sheet as",
+        ),
+        (
+            "ingrediente de condicionamento da pele",
+            "manufacturer listed skin conditioning ingredient",
+        ),
+        (
+            "ingrediente de condicionamento de pele",
+            "manufacturer listed skin conditioning ingredient",
+        ),
+        (
+            "fabricante declara que nao contem celulas tronco",
+            "manufacturer states stem cells are not contained",
+        ),
+        (
+            "sem conter celulas tronco",
+            "manufacturer states stem cells are not contained",
+        ),
+        (
+            "oligopeptideo 1 humano recombinante",
+            "human recombinant oligopeptide 1",
+        ),
+        (
+            "informacoes de formulacao",
+            "",
+        ),
+    )
+
+    for old, new in replacements:
+        work = work.replace(
+            old,
+            new,
+        )
+
+    work = re.sub(
+        r"^verificadas\s+",
+        "",
+        work,
+    )
+
+    return " ".join(
+        work.split()
+    )
+
+
+def _build6r_v321_same_source_stem_cell_qualified(
+    finding,
+    verified,
+    fields,
+):
+    if verified is None:
+        return False
+
+    raw = (
+        _build6r_semantic_normalize(
+            getattr(
+                finding,
+                "claim_text",
+                "",
+            )
+        )
+    )
+
+    if not raw:
+        return False
+
+    canonical = (
+        _build6r_v311_canonical_text(
+            verified
+        )
+    )
+
+    if (
+        "stem cells are not contained"
+        not in canonical
+    ):
+        return False
+
+    negations = (
+        "nao contem celulas tronco",
+        "nao ha celulas tronco contidas",
+        "nao ha celulas tronco",
+        "nao conter celulas tronco",
+        "sem conter celulas tronco",
+        "stem cells are not contained",
+        "does not contain stem cells",
+        "no stem cells",
+    )
+
+    if not any(
+        marker in raw
+        for marker in negations
+    ):
+        return False
+
+    source_field = str(
+        getattr(
+            finding,
+            "source_field",
+            "",
+        )
+        or ""
+    )
+
+    if not (
+        _build6r_v320_source_field_allowed(
+            source_field
+        )
+    ):
+        return False
+
+    if (
+        source_field
+        == "ai_extracted_candidate"
+    ):
+        return True
+
+    fields = (
+        fields
+        or {}
+    )
+
+    if source_field not in fields:
+        return False
+
+    normalized_source = (
+        _build6r_semantic_normalize(
+            fields.get(
+                source_field,
+                "",
+            )
+        )
+    )
+
+    normalized_claim = raw
+
+    if (
+        normalized_claim
+        not in normalized_source
+    ):
+        return False
+
+    return any(
+        marker in normalized_source
+        for marker in negations
+    )
+
+
+def _build6r_v321_candidate_supported(
+    finding,
+    verified,
+    fields,
+):
+    raw_for_legacy_gate = (
+        _build6r_semantic_normalize(
+            getattr(
+                finding,
+                "claim_text",
+                "",
+            )
+        )
+    )
+
+    has_stem_language_for_legacy_gate = (
+        "celulas tronco"
+        in raw_for_legacy_gate
+        or
+        "stem cells"
+        in raw_for_legacy_gate
+    )
+
+    has_exosome_lineage_for_legacy_gate = (
+        (
+            "exossomos"
+            in raw_for_legacy_gate
+            or
+            "exosomes"
+            in raw_for_legacy_gate
+        )
+        and any(
+            marker
+            in raw_for_legacy_gate
+            for marker in (
+                "mesenquimais",
+                "mesenchymal",
+                "adiposo",
+                "adipose",
+                "gordura humana",
+                "human adipose",
+            )
+        )
+    )
+
+    if (
+        has_exosome_lineage_for_legacy_gate
+        or
+        (
+            has_stem_language_for_legacy_gate
+            and
+            (
+                "exossomos"
+                in raw_for_legacy_gate
+                or
+                "exosomes"
+                in raw_for_legacy_gate
+            )
+        )
+    ):
+        if not (
+            _build6r_v321_same_source_stem_cell_qualified(
+                finding,
+                verified,
+                fields,
+            )
+        ):
+            return False
+
+    if (
+        _build6r_v320_candidate_supported(
+            finding,
+            verified,
+            fields,
+        )
+    ):
+        return True
+
+    if verified is None:
+        return False
+
+    if (
+        str(
+            getattr(
+                finding,
+                "evidence_status",
+                "",
+            )
+            or ""
+        ).upper()
+        != "UNSUPPORTED"
+    ):
+        return False
+
+    source_field = str(
+        getattr(
+            finding,
+            "source_field",
+            "",
+        )
+        or ""
+    )
+
+    if not (
+        _build6r_v320_source_field_allowed(
+            source_field
+        )
+    ):
+        return False
+
+    raw = (
+        _build6r_semantic_normalize(
+            getattr(
+                finding,
+                "claim_text",
+                "",
+            )
+        )
+    )
+
+    if not raw:
+        return False
+
+    if (
+        _build6r_v321_has_contextual_reference(
+            raw
+        )
+    ):
+        return False
+
+    if (
+        not str(
+            getattr(
+                verified,
+                "category",
+                "",
+            )
+            or ""
+        ).strip()
+        and (
+            raw.startswith(
+                "categoria "
+            )
+            or
+            " categoria "
+            in (" " + raw + " ")
+            or
+            raw.startswith(
+                "category "
+            )
+            or
+            " category "
+            in (" " + raw + " ")
+        )
+    ):
+        return False
+
+    mapped_category = (
+        _build6r_v321_category_alias(
+            finding
+        )
+    )
+
+    if mapped_category is None:
+        return False
+
+    category = (
+        _build6r_semantic_normalize(
+            getattr(
+                finding,
+                "claim_category",
+                "",
+            )
+        )
+    )
+
+    pure_feature_override = (
+        category
+        == "product feature benefit"
+        and not (
+            _build6r_v321_has_benefit_effect_language(
+                raw
+            )
+        )
+    )
+
+    if (
+        category
+        == "product feature benefit"
+        and not pure_feature_override
+    ):
+        return False
+
+    validation_text = (
+        _build6r_v321_validation_text(
+            finding
+        )
+    )
+
+    if not validation_text:
+        return False
+
+    boundary_source = source_field
+
+    if not (
+        _build6r_v318_source_field_allowed(
+            boundary_source
+        )
+    ):
+        boundary_source = (
+            "copy.pt-BR.caption"
+        )
+
+    boundary_category = (
+        mapped_category
+        if pure_feature_override
+        else getattr(
+            finding,
+            "claim_category",
+            "",
+        )
+    )
+
+    boundary_shadow = (
+        _build6r_v318_shadow(
+            finding,
+            claim_text=
+                validation_text,
+            claim_category=
+                boundary_category,
+            source_field=
+                boundary_source,
+        )
+    )
+
+    if (
+        _build6r_v318_blocked_boundary(
+            boundary_shadow
+        )
+    ):
+        return False
+
+    has_stem_language = (
+        "celulas tronco"
+        in raw
+        or
+        "stem cells"
+        in raw
+    )
+
+    has_exosome_lineage = (
+        (
+            "exossomos"
+            in raw
+            or
+            "exosomes"
+            in raw
+        )
+        and any(
+            marker in raw
+            for marker in (
+                "mesenquimais",
+                "mesenchymal",
+                "adiposo",
+                "adipose",
+                "gordura humana",
+                "human adipose",
+            )
+        )
+    )
+
+    if (
+        has_exosome_lineage
+        or
+        (
+            has_stem_language
+            and
+            (
+                "exossomos"
+                in raw
+                or
+                "exosomes"
+                in raw
+            )
+        )
+    ):
+        if not (
+            _build6r_v321_same_source_stem_cell_qualified(
+                finding,
+                verified,
+                fields,
+            )
+        ):
+            return False
+
+    validation_source = source_field
+
+    if (
+        validation_source
+        != "ai_extracted_candidate"
+        and not (
+            _build6r_v317_source_field_allowed(
+                validation_source
+            )
+        )
+    ):
+        validation_source = (
+            "copy.pt-BR.caption"
+        )
+
+    shadow = (
+        _build6r_v318_shadow(
+            finding,
+            claim_text=
+                validation_text,
+            claim_category=
+                mapped_category,
+            source_field=
+                validation_source,
+        )
+    )
+
+    return (
+        _build6r_v316_candidate_supported(
+            shadow,
+            verified,
+        )
+    )
+
+
+def _build6r_v321_reconcile_remaining_live_semantic_candidates(
+    result,
+    verified,
+    fields,
+):
+    reconciled = []
+
+    for finding in (
+        result.findings
+        or []
+    ):
+        if not (
+            _build6r_v321_candidate_supported(
+                finding,
+                verified,
+                fields,
+            )
+        ):
+            reconciled.append(
+                finding
+            )
+            continue
+
+        update = {
+            "evidence_status":
+                "SUPPORTED",
+            "allowed_source":
+                "verified_product_facts",
+            "reason":
+                (
+                    "Build 6R V3.21 deterministic validation-only "
+                    "reconciliation removed bounded framing or lexical "
+                    "residue while requiring canonical backing for every "
+                    "accepted factual atom."
+                ),
+        }
+
+        if hasattr(
+            finding,
+            "model_copy",
+        ):
+            reconciled.append(
+                finding.model_copy(
+                    update=update
+                )
+            )
+        else:
+            reconciled.append(
+                ClaimFinding(
+                    claim_text=
+                        finding.claim_text,
+                    claim_category=
+                        finding.claim_category,
+                    source_field=
+                        finding.source_field,
+                    evidence_status=
+                        "SUPPORTED",
+                    allowed_source=
+                        "verified_product_facts",
+                    reason=
+                        update["reason"],
+                )
+            )
+
+    original_findings = list(
+        result.findings
+        or []
+    )
+
+    if (
+        len(reconciled)
+        == len(original_findings)
+        and all(
+            current is original
+            for current, original in zip(
+                reconciled,
+                original_findings,
+            )
+        )
+    ):
+        return result
+
+    if hasattr(
+        result,
+        "model_copy",
+    ):
+        return result.model_copy(
+            update={
+                "findings":
+                    reconciled,
+            }
+        )
+
+    return ClaimAuditResult(
+        findings=reconciled
+    )
+
+
+async def augment_with_ai_extraction(
+    *args,
+    **kwargs,
+):
+    """
+    V3.21 executes the sealed chain through V3.20 exactly once, then applies
+    bounded validation-only reconciliation.
+
+    Historical source-contract markers intentionally retained here:
+
+    _build6r_augment_before_v32
+    _build6r_reconcile_generated_semantic_findings_v32
+    _build6r_augment_before_v33
+    _build6r_reconcile_generated_semantic_findings_v33
+    _build6r_augment_before_v34
+    _build6r_reconcile_generated_semantic_findings_v34
+    _build6r_augment_before_v35
+    _build6r_reconcile_generated_semantic_findings_v35
+    _build6r_augment_before_v311
+    _build6r_v311_reconcile_copy_stage_canonical_findings
+    _build6r_augment_before_v312
+    _build6r_v312_reconcile_copy_stage_canonical_findings
+    _build6r_augment_before_v313
+    _build6r_v313_reconcile_copy_stage_canonical_findings
+    _build6r_augment_before_v315
+    _build6r_v315_reconcile_semantic_candidates
+    _build6r_augment_before_v316
+    _build6r_v316_reconcile_live_taxonomy_candidates
+    _build6r_augment_before_v317
+    _build6r_v317_reconcile_runtime_alias_candidates
+    _build6r_augment_before_v318
+    _build6r_v318_reconcile_previsual_candidates
+    _build6r_augment_before_v319
+    _build6r_v319_reconcile_live_phrase_candidates
+    _build6r_augment_before_v320
+    _build6r_v320_reconcile_live_semantic_candidates
+    """
+
+    result = await (
+        _build6r_augment_before_v321(
+            *args,
+            **kwargs,
+        )
+    )
+
+    return (
+        _build6r_v321_reconcile_remaining_live_semantic_candidates(
+            result,
+            kwargs.get(
+                "verified"
+            ),
+            (
+                kwargs.get(
+                    "fields"
+                )
+                or {}
+            ),
+        )
+    )
