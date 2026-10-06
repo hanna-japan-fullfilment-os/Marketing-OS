@@ -478,7 +478,7 @@ def _claims_boundary_instruction() -> str:
     boundary later never means finding and editing four separate strings.
     """
     return (
-        "CLAIMS BOUNDARY (read carefully — this overrides any temptation to write punchier copy): "
+        ("CLAIMS BOUNDARY (read carefully — this overrides any temptation to write punchier copy): "
         "(1) VERIFIED PRODUCT FACTS, when given above, are the ONLY facts you may state as true about "
         "this specific product. (2) Research insights, when given, are market/trend CONTEXT ONLY — they "
         "may shape your angle, tone, or which pain point you lead with, but must NEVER become a stated "
@@ -498,7 +498,7 @@ def _claims_boundary_instruction() -> str:
         "but it must not become a factual claim about cultural norms, common consumer behavior or prevalence, "
         "pharmacy presence or shelf prevalence, product availability, national usage habits, or Hanna Japan's "
         "curation/market role unless that exact fact is present in VERIFIED PRODUCT FACTS or explicit "
-        "owner-confirmed brand facts."
+        "owner-confirmed brand facts." + " Build 6R V3.23 SEMANTIC BOUNDARY: Never invent evaluative product positioning such as advanced/avancado, superior, innovative, premium, or equivalent quality positioning unless that exact assertion is explicitly supported by VERIFIED PRODUCT FACTS. Research, trends, strategy, audience, funnel, planning, creative briefs, and other AI-generated context never provide product-fact evidence. If exosome or stem-lineage information is mentioned and the VERIFIED PRODUCT FACTS carry a no-stem-cell qualification, keep that qualification in the SAME generated textual field; never rely on another field for that safety qualification. Funnel stage and similar planning concepts are campaign metadata, not product facts.")
     )
 
 

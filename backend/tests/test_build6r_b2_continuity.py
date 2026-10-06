@@ -128,7 +128,7 @@ def test_qa_revision_preserves_archetype():
 
 def test_all_build6r_prompt_versions_are_now_1_1():
     expected = {
-        "master_campaign_concept": "1.4.0",
+        "master_campaign_concept": "1.5.0",
         "platform_adaptation": '1.2.0',
         "creative_direction": '1.2.0',
         "scene_generation": "1.1.0",

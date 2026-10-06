@@ -119,7 +119,7 @@ def test_run_copy_stage_contains_universal_archetype_decision():
 def test_master_concept_prompt_version_is_bumped():
     spec = PROMPT_VERSIONS["master_campaign_concept"]
 
-    assert spec.version == "1.4.0"
+    assert spec.version == "1.5.0"
     assert "product_category_context" in spec.variables
     assert "campaign_archetype_catalog" in spec.variables
     assert "verified_product_facts" in spec.variables

@@ -16150,3 +16150,702 @@ async def augment_with_ai_extraction(
             ),
         )
     )
+# BUILD6R_V323_RESIDUAL_LIVE_SEMANTIC_BOUNDARY_V1
+#
+# V3.23 intentionally wraps the sealed V3.22 chain rather than mutating
+# historical V3.17-V3.22 reconciliation logic.
+
+
+def _build6r_v323_category(value):
+    return (
+        _build6r_semantic_normalize(
+            value
+        )
+        .replace("_", " ")
+        .strip()
+    )
+
+
+def _build6r_v323_is_non_product_planning_meta(
+    finding,
+):
+    category = _build6r_v323_category(
+        getattr(
+            finding,
+            "claim_category",
+            "",
+        )
+    )
+
+    raw = _build6r_semantic_normalize(
+        getattr(
+            finding,
+            "claim_text",
+            "",
+        )
+    )
+
+    if category != "marketing or promotion terms":
+        return False
+
+    # Narrowly proven planning-only residual. This is deliberately not a
+    # taxonomy-wide exemption: mixed product-factual language still fails.
+    planning_only = {
+        "top of funil sem pressao de compra",
+        "topo de funil sem pressao de compra",
+    }
+
+    if raw not in planning_only:
+        return False
+
+    product_fact_markers = (
+        "produto",
+        "product",
+        "mascara",
+        "mask",
+        "sheet",
+        "folha",
+        "ml",
+        "ingrediente",
+        "ingredient",
+        "exossomo",
+        "exosome",
+        "celula",
+        "stem",
+        "contem",
+        "contains",
+        "beneficio",
+        "benefit",
+        "resultado",
+        "result",
+    )
+
+    return not any(
+        marker in raw
+        for marker in product_fact_markers
+    )
+
+
+def _build6r_v323_format_quantity_supported(
+    raw,
+    verified,
+):
+    raw = _build6r_semantic_normalize(
+        raw
+    )
+
+    canonical = _build6r_semantic_normalize(
+        _build6r_v322_canonical_text(
+            verified
+        )
+    )
+
+    raw_numbers = set(
+        re.findall(
+            r"\d+(?:[.,]\d+)?",
+            raw,
+        )
+    )
+
+    canonical_numbers = set(
+        re.findall(
+            r"\d+(?:[.,]\d+)?",
+            canonical,
+        )
+    )
+
+    if (
+        not raw_numbers
+        or
+        not raw_numbers.issubset(
+            canonical_numbers
+        )
+    ):
+        return False
+
+    checks = []
+
+    sheet_markers = (
+        "sheet",
+        "sheets",
+        "folha",
+        "folhas",
+    )
+
+    if any(
+        marker in raw
+        for marker in sheet_markers
+    ):
+        sheet_supported = any(
+            (
+                number + " sheet"
+                in canonical
+            )
+            or
+            (
+                number + " sheets"
+                in canonical
+            )
+            or
+            (
+                number + " folha"
+                in canonical
+            )
+            or
+            (
+                number + " folhas"
+                in canonical
+            )
+            for number
+            in raw_numbers
+        )
+
+        checks.append(
+            sheet_supported
+        )
+
+    if (
+        " ml" in raw
+        or
+        raw.endswith("ml")
+    ):
+        ml_supported = any(
+            (
+                number + " ml"
+                in canonical
+            )
+            for number
+            in raw_numbers
+        )
+
+        if (
+            "essencia" in raw
+            or
+            "essence" in raw
+        ):
+            ml_supported = (
+                ml_supported
+                and
+                (
+                    "essencia"
+                    in canonical
+                    or
+                    "essence"
+                    in canonical
+                )
+            )
+
+        checks.append(
+            ml_supported
+        )
+
+    if (
+        "pouch" in raw
+        or
+        "pacote" in raw
+        or
+        "package" in raw
+    ):
+        checks.append(
+            (
+                "pouch"
+                in canonical
+            )
+            or
+            (
+                "pacote"
+                in canonical
+            )
+            or
+            (
+                "package"
+                in canonical
+            )
+        )
+
+    return bool(
+        checks
+    ) and all(
+        checks
+    )
+
+
+def _build6r_v323_usage_supported(
+    raw,
+    verified,
+):
+    raw = _build6r_semantic_normalize(
+        raw
+    )
+
+    usage = _build6r_semantic_normalize(
+        getattr(
+            verified,
+            "verified_usage",
+            "",
+        )
+    )
+
+    if not usage:
+        return False
+
+    # Keep all previously supported V3.22 usage behavior.
+    if _build6r_v322_usage_supported(
+        raw,
+        verified,
+    ):
+        return True
+
+    checks = []
+
+    if (
+        "depois de remover"
+        in raw
+        or
+        "apos remover"
+        in raw
+        or
+        "after removal"
+        in raw
+    ):
+        checks.append(
+            (
+                "after removal"
+                in usage
+            )
+            or
+            (
+                "depois de remover"
+                in usage
+            )
+            or
+            (
+                "apos remover"
+                in usage
+            )
+        )
+
+    if (
+        "dobrar"
+        in raw
+        or
+        "fold"
+        in raw
+    ):
+        checks.append(
+            (
+                "fold"
+                in usage
+            )
+            or
+            (
+                "dobrar"
+                in usage
+            )
+        )
+
+    if (
+        "leves batidinhas"
+        in raw
+        or
+        "light patting"
+        in raw
+    ):
+        checks.append(
+            (
+                "light patting"
+                in usage
+            )
+            or
+            (
+                "batidinhas leves"
+                in usage
+            )
+            or
+            (
+                "leves batidinhas"
+                in usage
+            )
+        )
+
+    if (
+        "como lenco"
+        in raw
+        or
+        "as a wipe"
+        in raw
+        or
+        "for wiping"
+        in raw
+    ):
+        checks.append(
+            (
+                "wiping"
+                in usage
+            )
+            or
+            (
+                "como lenco"
+                in usage
+            )
+            or
+            (
+                "as a wipe"
+                in usage
+            )
+        )
+
+    # This V3.23 extension is intentionally compositional and narrow:
+    # at least two independently canonicalized direction atoms are required.
+    return (
+        len(
+            checks
+        )
+        >= 2
+        and
+        all(
+            checks
+        )
+    )
+
+
+def _build6r_v323_candidate_supported(
+    finding,
+    verified,
+    fields,
+):
+    if verified is None:
+        return False
+
+    if (
+        str(
+            getattr(
+                finding,
+                "evidence_status",
+                "",
+            )
+            or ""
+        ).upper()
+        != "UNSUPPORTED"
+    ):
+        return False
+
+    source_field = str(
+        getattr(
+            finding,
+            "source_field",
+            "",
+        )
+        or ""
+    )
+
+    if not _build6r_v322_source_field_allowed(
+        source_field
+    ):
+        return False
+
+    raw = _build6r_semantic_normalize(
+        getattr(
+            finding,
+            "claim_text",
+            "",
+        )
+    )
+
+    category = _build6r_v323_category(
+        getattr(
+            finding,
+            "claim_category",
+            "",
+        )
+    )
+
+    if not raw:
+        return False
+
+    # BUILD6R_V323_REUSE_V322_ROUTINE_FAIL_CLOSED_GUARD_V1
+    #
+    # V3.23 must not bypass the sealed V3.22 fail-closed protection for
+    # vague composite references or invented numbered routine sequences.
+    # The V3.23 usage reconciler is narrower than the full V3.22 candidate
+    # contract, so this guard must run before any V3.23 category-specific
+    # support decision.
+    if (
+        _build6r_v322_has_unsupported_context_or_routine_sequence(
+            raw,
+            category,
+        )
+    ):
+        return False
+
+    # V3.17/V3.22 stem-exosome safety remains exclusively owned by the
+    # sealed previous chain. V3.23 never rescues a residual stem/exosome claim.
+    if (
+        "exosome" in raw
+        or
+        "exossomo" in raw
+        or
+        "stem cell" in raw
+        or
+        "celula tronco" in raw
+    ):
+        return False
+
+    if _build6r_v322_has_unsupported_positioning(
+        raw
+    ):
+        return False
+
+    if _build6r_v322_has_benefit_effect_language(
+        raw
+    ):
+        return False
+
+    if _build6r_v322_has_meta_verification_language(
+        raw
+    ):
+        return False
+
+    if (
+        category
+        == "format quantity or dosage"
+    ):
+        return (
+            _build6r_v323_format_quantity_supported(
+                raw,
+                verified,
+            )
+        )
+
+    if category == "directions for use":
+        return (
+            _build6r_v323_usage_supported(
+                raw,
+                verified,
+            )
+        )
+
+    return False
+
+
+def _build6r_v323_updated_finding(
+    finding,
+    *,
+    allowed_source,
+    reason,
+):
+    update = {
+        "evidence_status":
+            "SUPPORTED",
+        "allowed_source":
+            allowed_source,
+        "reason":
+            reason,
+    }
+
+    if hasattr(
+        finding,
+        "model_copy",
+    ):
+        return finding.model_copy(
+            update=update
+        )
+
+    return ClaimFinding(
+        claim_text=
+            finding.claim_text,
+        claim_category=
+            finding.claim_category,
+        source_field=
+            finding.source_field,
+        evidence_status=
+            "SUPPORTED",
+        allowed_source=
+            allowed_source,
+        reason=
+            reason,
+    )
+
+
+def _build6r_v323_reconcile_residual_live_semantic_boundaries(
+    result,
+    verified,
+    fields,
+):
+    reconciled = []
+
+    for finding in (
+        result.findings
+        or []
+    ):
+        if _build6r_v323_is_non_product_planning_meta(
+            finding
+        ):
+            reconciled.append(
+                _build6r_v323_updated_finding(
+                    finding,
+                    allowed_source=
+                        "campaign_planning_metadata",
+                    reason=(
+                        "Build 6R V3.23 excluded a narrowly proven "
+                        "campaign-planning-only phrase from product-fact "
+                        "grounding. Product-factual assertions remain "
+                        "fail-closed."
+                    ),
+                )
+            )
+            continue
+
+        if _build6r_v323_candidate_supported(
+            finding,
+            verified,
+            fields,
+        ):
+            reconciled.append(
+                _build6r_v323_updated_finding(
+                    finding,
+                    allowed_source=
+                        "verified_product_facts",
+                    reason=(
+                        "Build 6R V3.23 bounded residual reconciliation "
+                        "accepted the claim only after independent canonical "
+                        "format/quantity or directions-for-use atom checks."
+                    ),
+                )
+            )
+            continue
+
+        reconciled.append(
+            finding
+        )
+
+    original = list(
+        result.findings
+        or []
+    )
+
+    if (
+        len(
+            original
+        )
+        == len(
+            reconciled
+        )
+        and
+        all(
+            left is right
+            for left, right
+            in zip(
+                original,
+                reconciled,
+            )
+        )
+    ):
+        return result
+
+    if hasattr(
+        result,
+        "model_copy",
+    ):
+        return result.model_copy(
+            update={
+                "findings":
+                    reconciled,
+            }
+        )
+
+    return ClaimAuditResult(
+        findings=reconciled
+    )
+
+
+_build6r_augment_before_v323 = (
+    augment_with_ai_extraction
+)
+
+
+async def augment_with_ai_extraction(
+    *args,
+    **kwargs,
+):
+    """
+    V3.23 executes the complete sealed V3.22 chain exactly once, then applies
+    only the residual bounded semantic-boundary reconciliation defined above.
+
+    BUILD6R_V323_HISTORICAL_WRAPPER_MARKER_LEDGER_V1
+
+    Historical wrapper/reconciliation contract markers retained for governed
+    source-introspection compatibility only. These names are documentation
+    references here; runtime execution still occurs exactly once through
+    _build6r_augment_before_v323.
+
+    _build6r_augment_before_v32
+    _build6r_reconcile_generated_semantic_findings_v32
+
+    _build6r_augment_before_v33
+    _build6r_reconcile_generated_semantic_findings_v33
+
+    _build6r_augment_before_v34
+    _build6r_reconcile_generated_semantic_findings_v34
+
+    _build6r_augment_before_v35
+    _build6r_reconcile_generated_semantic_findings_v35
+
+    _build6r_augment_before_v311
+    _build6r_v311_reconcile_copy_stage_canonical_findings
+
+    _build6r_augment_before_v312
+    _build6r_v312_reconcile_copy_stage_canonical_findings
+
+    _build6r_augment_before_v313
+    _build6r_v313_reconcile_copy_stage_canonical_findings
+
+    _build6r_augment_before_v315
+    _build6r_v315_reconcile_semantic_candidates
+
+    _build6r_augment_before_v316
+    _build6r_v316_reconcile_live_taxonomy_candidates
+
+    _build6r_augment_before_v317
+    _build6r_v317_reconcile_runtime_alias_candidates
+
+    _build6r_augment_before_v318
+    _build6r_v318_reconcile_previsual_candidates
+
+    _build6r_augment_before_v319
+    _build6r_v319_reconcile_live_phrase_candidates
+
+    _build6r_augment_before_v320
+    _build6r_v320_reconcile_live_semantic_candidates
+
+    _build6r_augment_before_v321
+    _build6r_v321_reconcile_remaining_live_semantic_candidates
+
+    _build6r_augment_before_v322
+    _build6r_v322_reconcile_fresh_live_composite_candidates
+
+    _build6r_augment_before_v323
+    _build6r_v323_reconcile_residual_live_semantic_boundaries
+    """
+
+    result = await (
+        _build6r_augment_before_v323(
+            *args,
+            **kwargs,
+        )
+    )
+
+    return (
+        _build6r_v323_reconcile_residual_live_semantic_boundaries(
+            result,
+            kwargs.get(
+                "verified"
+            ),
+            (
+                kwargs.get(
+                    "fields"
+                )
+                or {}
+            ),
+        )
+    )

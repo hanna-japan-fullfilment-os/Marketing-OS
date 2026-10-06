@@ -184,7 +184,7 @@ def test_build6r_b1_prompt_versions():
         PROMPT_VERSIONS[
             "master_campaign_concept"
         ].version
-        == "1.4.0"
+        == "1.5.0"
     )
 
     assert (
