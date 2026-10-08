@@ -668,7 +668,7 @@ export function useCreatePublication(campaignId: string | undefined) {
 export function useAutoPublishCampaign(campaignId: string | undefined) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (payload: { provider: 'facebook_page' | 'instagram'; slide_number?: number }) =>
+    mutationFn: (payload: { provider: 'facebook_page' | 'instagram' | 'pinterest'; slide_number?: number }) =>
       api.post<Publication>(`/api/campaigns/${campaignId}/publish`, payload),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['campaign-publications', campaignId] })

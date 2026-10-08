@@ -102,6 +102,8 @@ export interface SettingsData {
   facebook_configured: boolean
   instagram_business_account_id: string
   public_base_url: string
+  pinterest_board_id: string
+  pinterest_configured: boolean
 }
 
 export interface DashboardSummary {

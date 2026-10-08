@@ -70,6 +70,10 @@ class Settings(BaseSettings):
     # posts, which upload the file directly.
     public_base_url: str = ""
 
+    # --- Pinterest organic Pin publishing (MKT-PUB-0002) ---
+    pinterest_access_token: str = ""
+    pinterest_board_id: str = ""
+
     # --- Database ---
     database_url: str = "sqlite:///./data/app.db"
 

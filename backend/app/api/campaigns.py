@@ -69,6 +69,7 @@ from ..services.prompt_registry import record_prompt_usage
 from ..services.qa_engine import run_qa_stage
 from ..services.review_engine import LEVELS, apply_requested_revision, record_review_feedback
 from ..services.publishing.meta_provider import MetaPublishingProvider
+from ..services.publishing.pinterest_provider import PinterestPublishingProvider
 
 router = APIRouter(prefix="/api/campaigns", tags=["campaigns"])
 
@@ -1588,7 +1589,7 @@ def create_campaign_publication(campaign_id: str, payload: PublicationCreate, db
 
 
 class AutoPublishRequest(BaseModel):
-    provider: str  # facebook_page | instagram
+    provider: str  # facebook_page | instagram | pinterest
     slide_number: int = 1
 
 
@@ -1611,31 +1612,37 @@ async def auto_publish_campaign(campaign_id: str, payload: AutoPublishRequest, d
         raise HTTPException(
             400, f"Campaign must be approved before publishing (current status: {campaign.status}).",
         )
-    if payload.provider not in ("facebook_page", "instagram"):
-        raise HTTPException(400, "provider must be 'facebook_page' or 'instagram'.")
+    if payload.provider not in ("facebook_page", "instagram", "pinterest"):
+        raise HTTPException(400, "provider must be 'facebook_page', 'instagram', or 'pinterest'.")
 
     effective = settings_store.get_effective_settings(db)
-    access_token = effective.get("facebook_page_access_token")
-    if not access_token:
-        raise HTTPException(
-            400, "Facebook Page access token is not configured. Set it in Settings first — see the README's "
-            "'Facebook Page / Instagram auto-publish' section.",
-        )
-
     public_asset_url: str | None = None
-    if payload.provider == "facebook_page":
-        external_id = effective.get("facebook_page_id")
+    if payload.provider == "pinterest":
+        access_token = effective.get("pinterest_access_token")
+        if not access_token:
+            raise HTTPException(400, "Pinterest access token is not configured. Set it in Settings first.")
+        external_id = effective.get("pinterest_board_id")
         if not external_id:
-            raise HTTPException(400, "Facebook Page ID is not configured. Set it in Settings first.")
-    else:
-        external_id = effective.get("instagram_business_account_id")
-        if not external_id:
-            raise HTTPException(400, "Instagram Business Account ID is not configured. Set it in Settings first.")
+            raise HTTPException(400, "Pinterest board ID is not configured. Set it in Settings first.")
         public_base_url = effective.get("public_base_url")
-        if public_base_url:
-            public_asset_url = (
-                f"{public_base_url.rstrip('/')}/api/campaigns/{campaign_id}/slides/{payload.slide_number}/image"
-            )
+        if not public_base_url:
+            raise HTTPException(400, "Public base URL is required for Pinterest publishing. Set it in Settings first.")
+        public_asset_url = f"{public_base_url.rstrip('/')}/api/campaigns/{campaign_id}/slides/{payload.slide_number}/image"
+    else:
+        access_token = effective.get("facebook_page_access_token")
+        if not access_token:
+            raise HTTPException(400, "Facebook Page access token is not configured. Set it in Settings first 窶・see the README's 'Facebook Page / Instagram auto-publish' section.")
+        if payload.provider == "facebook_page":
+            external_id = effective.get("facebook_page_id")
+            if not external_id:
+                raise HTTPException(400, "Facebook Page ID is not configured. Set it in Settings first.")
+        else:
+            external_id = effective.get("instagram_business_account_id")
+            if not external_id:
+                raise HTTPException(400, "Instagram Business Account ID is not configured. Set it in Settings first.")
+            public_base_url = effective.get("public_base_url")
+            if public_base_url:
+                public_asset_url = f"{public_base_url.rstrip('/')}/api/campaigns/{campaign_id}/slides/{payload.slide_number}/image"
 
     slide = next((s for s in campaign.slides if s.slide_number == payload.slide_number), None)
     if slide is None or not slide.rendered_asset_path or not Path(slide.rendered_asset_path).exists():
@@ -1647,7 +1654,10 @@ async def auto_publish_campaign(campaign_id: str, payload: AutoPublishRequest, d
 
     target = PublishTarget(provider=payload.provider, external_id=external_id, public_asset_url=public_asset_url)
     copy = PublishCopy(caption=caption, hashtags=hashtags)
-    provider = MetaPublishingProvider(access_token, api_version=get_settings().meta_graph_api_version)
+    if payload.provider == "pinterest":
+        provider = PinterestPublishingProvider(access_token)
+    else:
+        provider = MetaPublishingProvider(access_token, api_version=get_settings().meta_graph_api_version)
 
     result = await provider.publish(target=target, assets=[Path(slide.rendered_asset_path)], copy=copy)
     if not result.success:

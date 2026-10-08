@@ -13,7 +13,7 @@ class Publication(Base, UUIDPKMixin, TimestampMixin):
     __tablename__ = "publications"
 
     campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.id", ondelete="CASCADE"), index=True)
-    provider: Mapped[str] = mapped_column(String(30))  # facebook_page | instagram | manual
+    provider: Mapped[str] = mapped_column(String(30))  # facebook_page | instagram | pinterest | manual
     external_post_id: Mapped[str] = mapped_column(String(200), default="")
     url: Mapped[str] = mapped_column(String(2000), default="")
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

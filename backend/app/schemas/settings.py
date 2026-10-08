@@ -29,6 +29,8 @@ class SettingsOut(ORMModel):
     facebook_configured: bool
     instagram_business_account_id: str
     public_base_url: str
+    pinterest_board_id: str
+    pinterest_configured: bool
 
 
 class SettingsUpdate(ORMModel):
@@ -55,3 +57,5 @@ class SettingsUpdate(ORMModel):
     facebook_page_access_token: str | None = None
     instagram_business_account_id: str | None = None
     public_base_url: str | None = None
+    pinterest_access_token: str | None = None
+    pinterest_board_id: str | None = None

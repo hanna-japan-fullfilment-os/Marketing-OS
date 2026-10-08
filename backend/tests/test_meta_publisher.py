@@ -141,7 +141,7 @@ async def test_graph_api_error_response_becomes_a_clear_publish_failure(tmp_path
 async def test_unknown_provider_fails_cleanly():
     provider = MetaPublishingProvider("page-token")
     result = await provider.publish(
-        target=PublishTarget(provider="pinterest", external_id="x"), assets=[], copy=PublishCopy(caption="hi"),
+        target=PublishTarget(provider="linkedin", external_id="x"), assets=[], copy=PublishCopy(caption="hi"),
     )
     assert result.success is False
     assert "Unknown publish provider" in result.error

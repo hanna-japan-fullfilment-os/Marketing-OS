@@ -37,6 +37,8 @@ def get_settings(db: Session = Depends(get_db)):
         facebook_configured=bool(effective["facebook_page_access_token"]),
         instagram_business_account_id=effective["instagram_business_account_id"],
         public_base_url=effective["public_base_url"],
+        pinterest_board_id=effective["pinterest_board_id"],
+        pinterest_configured=bool(effective["pinterest_access_token"]),
     )
 
 

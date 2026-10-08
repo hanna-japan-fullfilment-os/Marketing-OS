@@ -109,7 +109,7 @@ export default function CampaignDetail() {
 
   const { data: settings } = useSettings()
   const autoPublish = useAutoPublishCampaign(campaignId)
-  const [autoPublishProvider, setAutoPublishProvider] = useState<'facebook_page' | 'instagram'>('facebook_page')
+  const [autoPublishProvider, setAutoPublishProvider] = useState<'facebook_page' | 'instagram' | 'pinterest'>('facebook_page')
   const [autoPublishSlide, setAutoPublishSlide] = useState(1)
 
   const [assetId, setAssetId] = useState('')
@@ -831,11 +831,12 @@ export default function CampaignDetail() {
               <div className="flex flex-wrap items-center gap-2">
                 <Select
                   value={autoPublishProvider}
-                  onChange={(e) => setAutoPublishProvider(e.target.value as 'facebook_page' | 'instagram')}
+                  onChange={(e) => setAutoPublishProvider(e.target.value as 'facebook_page' | 'instagram' | 'pinterest')}
                   className="w-48"
                 >
                   <option value="facebook_page">Facebook Page</option>
                   <option value="instagram">Instagram</option>
+                  <option value="pinterest">Pinterest</option>
                 </Select>
                 <Select
                   value={autoPublishSlide}
@@ -851,7 +852,7 @@ export default function CampaignDetail() {
                 <Button
                   disabled={
                     autoPublish.isPending ||
-                    (autoPublishProvider === 'facebook_page' ? !settings?.facebook_configured : !settings?.instagram_business_account_id)
+                    (autoPublishProvider === 'facebook_page' ? !settings?.facebook_configured : autoPublishProvider === 'instagram' ? !settings?.instagram_business_account_id : !settings?.pinterest_configured || !settings?.pinterest_board_id || !settings?.public_base_url)
                   }
                   onClick={() => autoPublish.mutate({ provider: autoPublishProvider, slide_number: autoPublishSlide })}
                 >
@@ -865,6 +866,9 @@ export default function CampaignDetail() {
               )}
               {autoPublishProvider === 'instagram' && !settings?.instagram_business_account_id && (
                 <p className="text-xs text-amber-700">Set an Instagram Business Account ID in Settings first.</p>
+              )}
+              {autoPublishProvider === 'pinterest' && (!settings?.pinterest_configured || !settings?.pinterest_board_id || !settings?.public_base_url) && (
+                <p className="text-xs text-amber-700">Set a Pinterest access token, board ID, and Public base URL in Settings first.</p>
               )}
               {autoPublish.isError && <p className="text-xs text-red-700">{(autoPublish.error as Error).message}</p>}
               {autoPublish.isSuccess && (
@@ -884,6 +888,7 @@ export default function CampaignDetail() {
             <Select value={pubProvider} onChange={(e) => setPubProvider(e.target.value)} className="w-48">
               <option value="facebook_page">Facebook Page</option>
               <option value="instagram">Instagram</option>
+              <option value="pinterest">Pinterest</option>
               <option value="manual">Manual / Group</option>
             </Select>
             <Input

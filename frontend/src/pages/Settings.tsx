@@ -18,6 +18,8 @@ export default function SettingsPage() {
     facebook_page_access_token: '',
     instagram_business_account_id: '',
     public_base_url: '',
+    pinterest_access_token: '',
+    pinterest_board_id: '',
   })
 
   useEffect(() => {
@@ -33,6 +35,7 @@ export default function SettingsPage() {
         facebook_page_id: settings.facebook_page_id,
         instagram_business_account_id: settings.instagram_business_account_id,
         public_base_url: settings.public_base_url,
+        pinterest_board_id: settings.pinterest_board_id,
       }))
     }
   }, [settings])
@@ -41,6 +44,7 @@ export default function SettingsPage() {
     const payload = { ...form }
     if (!payload.openai_api_key) delete (payload as Record<string, unknown>).openai_api_key
     if (!payload.facebook_page_access_token) delete (payload as Record<string, unknown>).facebook_page_access_token
+    if (!payload.pinterest_access_token) delete (payload as Record<string, unknown>).pinterest_access_token
     update.mutate(payload)
   }
 
@@ -142,17 +146,31 @@ export default function SettingsPage() {
           </div>
         </div>
         <div>
-          <Label>Public base URL (Instagram only)</Label>
+          <Label>Public base URL (Instagram / Pinterest)</Label>
           <Input
             placeholder="https://your-tunnel.ngrok.app"
             value={form.public_base_url}
             onChange={(e) => setForm({ ...form, public_base_url: e.target.value })}
           />
           <p className="mt-1 text-xs text-stone-400">
-            Instagram's API fetches the image itself and can't accept a direct upload, so it needs a URL Meta's
-            servers can reach — a tunnel (e.g. ngrok) pointed at this backend. Not needed for Facebook Page
-            posts, which upload the file directly.
+            Instagram and Pinterest fetch the image from a public URL. Use a tunnel (e.g. ngrok) pointed at this
+            backend. Facebook Page posts continue to upload the local rendered file directly.
           </p>
+        </div>
+      </Card>
+
+      <Card className="space-y-4">
+        <div>
+          <h2 className="font-medium">Pinterest publishing</h2>
+          <p className="mt-1 text-xs text-stone-500">Configure an OAuth access token and destination board.</p>
+        </div>
+        <div>
+          <Label>Pinterest access token {settings?.pinterest_configured && <span className="text-emerald-600">configured</span>}</Label>
+          <Input type="password" placeholder={settings?.pinterest_configured ? '****************' : 'pina_...'} value={form.pinterest_access_token} onChange={(e) => setForm({ ...form, pinterest_access_token: e.target.value })} />
+        </div>
+        <div>
+          <Label>Pinterest board ID</Label>
+          <Input value={form.pinterest_board_id} onChange={(e) => setForm({ ...form, pinterest_board_id: e.target.value })} />
         </div>
       </Card>
 

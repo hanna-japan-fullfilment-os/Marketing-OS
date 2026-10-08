@@ -115,8 +115,8 @@ class ImageProvider(Protocol):
 
 
 class PublishTarget(BaseModel):
-    provider: str  # facebook_page | instagram
-    external_id: str  # the Page ID (facebook_page) or IG Business Account ID (instagram)
+    provider: str  # facebook_page | instagram | pinterest
+    external_id: str  # Page ID, IG Business Account ID, or Pinterest board ID
     # A publicly-fetchable URL for the image to post. Unused for `facebook_page`
     # (that provider uploads the local file directly). Required for `instagram` —
     # Meta's Content Publishing API only accepts an `image_url` its own servers

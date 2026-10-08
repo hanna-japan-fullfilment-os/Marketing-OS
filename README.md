@@ -150,7 +150,7 @@ you can:
   campaign is still running — see "How deleting a campaign works" below.
 
 **Not yet built** (optional refinement, not a missing phase): a second
-`PublishingProvider` connector beyond Facebook Page/Instagram (e.g. Pinterest) if
+`PublishingProvider` connector beyond Facebook Page/Instagram (Pinterest is implemented by MKT-PUB-0002; other providers remain optional) if
 you ever want one — the Protocol and the `/publish` endpoint's shape already
 generalize to more than one provider without a rewrite.
 

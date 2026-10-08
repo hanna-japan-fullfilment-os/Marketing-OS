@@ -20,7 +20,7 @@ OVERRIDABLE_KEYS = {
     "trend_research_ttl_hours", "category_research_ttl_hours",
     "novelty_too_similar_threshold", "novelty_acceptable_threshold",
     "facebook_page_id", "facebook_page_access_token", "instagram_business_account_id",
-    "public_base_url",
+    "public_base_url", "pinterest_access_token", "pinterest_board_id",
 }
 
 
@@ -55,6 +55,8 @@ def get_effective_settings(db: Session) -> dict:
         "facebook_page_access_token": base.facebook_page_access_token,
         "instagram_business_account_id": base.instagram_business_account_id,
         "public_base_url": base.public_base_url,
+        "pinterest_access_token": base.pinterest_access_token,
+        "pinterest_board_id": base.pinterest_board_id,
     }
     rows = db.query(SettingRow).filter(SettingRow.key.in_(OVERRIDABLE_KEYS)).all()
     for row in rows:
