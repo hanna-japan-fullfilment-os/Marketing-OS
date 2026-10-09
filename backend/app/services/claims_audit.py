@@ -17920,3 +17920,1694 @@ async def augment_with_ai_extraction(
             ),
         )
     )
+
+# =====================================================================
+# BUILD6R_V325_BOUNDED_CANONICAL_USAGE_NONFACTUAL_DIRECTIVE_RECONCILIATION_V1
+#
+# Append-only post-V3.24 repair.
+#
+# Purpose:
+# - reconcile canonically verified usage / feature / format facts when the
+#   live semantic extractor emits a taxonomy label that differs from the
+#   sealed vocabulary;
+# - require complete, deterministic residual accounting for usage claims so
+#   one supported instruction can never rescue additional unsupported text;
+# - exclude only narrowly proven non-factual visual/layout directives from
+#   product-fact findings, reusing the sealed V3.5 contract;
+# - preserve research/trend context as ineligible product-fact evidence;
+# - preserve all sealed benefit/effect, efficacy, ranking/popularity,
+#   commercial/availability, origin, and stem/exosome safety boundaries;
+# - no fuzzy matching, approximate semantic matching, provider calls,
+#   network calls, persistence access, or product-specific production logic.
+# =====================================================================
+
+
+def _build6r_v325_strip_numbered_step_labels(
+    value,
+):
+    """
+    Remove only explicit list enumerators such as ``1.`` or ``2)``.
+
+    Bare numbers are preserved so quantities/durations remain factual residue
+    and are checked against canonical evidence below.
+    """
+    return re.sub(
+        r"(?<!\w)\d{1,2}\s*[\.\):]\s*",
+        " ",
+        str(
+            value
+            or ""
+        ),
+    )
+
+
+def _build6r_v325_usage_alias_groups():
+    """
+    Product-agnostic Portuguese/English usage concepts.
+
+    The first tuple contains claim-side aliases.  The second tuple contains
+    canonical markers; at least one canonical marker must exist in
+    ``verified_usage`` before the aliases are admitted.
+    """
+    return (
+        (
+            (
+                "em lugar do tonico",
+                "no lugar do tonico",
+                "em substituicao ao tonico",
+                "em substituicao do tonico",
+                "in place of toner",
+            ),
+            (
+                "in place of toner",
+                "em lugar do tonico",
+                "no lugar do tonico",
+            ),
+        ),
+        (
+            (
+                "manha",
+                "morning",
+            ),
+            (
+                "morning",
+                "manha",
+            ),
+        ),
+        (
+            (
+                "noite",
+                "evening",
+            ),
+            (
+                "evening",
+                "noite",
+            ),
+        ),
+        (
+            (
+                "tonico",
+                "locao",
+                "toner",
+            ),
+            (
+                "toner",
+                "tonico",
+                "locao",
+            ),
+        ),
+        (
+            (
+                "desdobrar",
+                "desdobre",
+                "unfold",
+            ),
+            (
+                "unfold",
+                "desdobrar",
+            ),
+        ),
+        (
+            (
+                "olhos e boca",
+                "olhos e da boca",
+                "olhos e da boca",
+                "ao redor dos olhos e boca",
+                "ao redor dos olhos e da boca",
+                "em volta dos olhos e boca",
+                "em volta dos olhos e da boca",
+                "eyes and mouth",
+            ),
+            (
+                "eyes and mouth",
+                "olhos e boca",
+            ),
+        ),
+        (
+            (
+                "tirar o ar",
+                "tirar o ar preso",
+                "pressionar para tirar o ar",
+                "pressionar o ar para fora",
+                "press out trapped air",
+                "trapped air",
+            ),
+            (
+                "press out trapped air",
+                "tirar o ar",
+            ),
+        ),
+        (
+            (
+                "cortes da regiao das bochechas",
+                "cortes das bochechas",
+                "cortes da bochecha",
+                "recortes das bochechas",
+                "recortes da bochecha",
+                "cheek cut",
+                "cheek cuts",
+            ),
+            (
+                "cheek cut sections",
+                "cortes da bochecha",
+                "cortes das bochechas",
+            ),
+        ),
+        (
+            (
+                "linha do rosto",
+                "contorno do rosto",
+                "face line",
+            ),
+            (
+                "face line",
+                "linha do rosto",
+                "contorno do rosto",
+            ),
+        ),
+        (
+            (
+                "palmas",
+                "palmas das maos",
+                "palms",
+            ),
+            (
+                "palms",
+                "palmas",
+            ),
+        ),
+        (
+            (
+                "apos remover",
+                "depois de remover",
+                "after removal",
+                "after removing",
+            ),
+            (
+                "after removal",
+                "apos remover",
+                "depois de remover",
+            ),
+        ),
+        (
+            (
+                "dobrar a mascara",
+                "mascara dobrada",
+                "fold the mask",
+                "folding the mask",
+            ),
+            (
+                "folding the mask",
+                "fold the mask",
+                "dobrar a mascara",
+            ),
+        ),
+        (
+            (
+                "movimentos de limpeza",
+                "passar na pele",
+                "usar como lenco",
+                "wiping",
+                "wipe",
+            ),
+            (
+                "wiping",
+                "movimentos de limpeza",
+            ),
+        ),
+        (
+            (
+                "batidinhas leves",
+                "leves batidinhas",
+                "leves toques",
+                "dar leves batidinhas",
+                "light patting",
+                "light pats",
+            ),
+            (
+                "light patting",
+                "batidinhas leves",
+            ),
+        ),
+        (
+            (
+                "emulsao ou creme",
+                "finalizar com emulsao ou creme",
+                "seguir com emulsao ou creme",
+                "emulsion or cream",
+            ),
+            (
+                "emulsion or cream",
+                "emulsao ou creme",
+            ),
+        ),
+    )
+
+
+def _build6r_v325_usage_requirement_present(
+    usage,
+    requirements,
+):
+    return any(
+        marker in usage
+        for marker in requirements
+    )
+
+
+def _build6r_v325_verified_context_text(
+    verified,
+):
+    """
+    Canonical product context allowed for usage/feature/format residual checks.
+
+    Deliberately excludes benefits, price, availability, origin, prohibited
+    claims, research, and all campaign metadata.
+    """
+    if verified is None:
+        return ""
+
+    parts = []
+
+    for attribute in (
+        "verified_name",
+        "verified_description",
+        "verified_size",
+        "verified_variant",
+        "verified_usage",
+    ):
+        value = getattr(
+            verified,
+            attribute,
+            "",
+        )
+
+        if value:
+            parts.append(
+                str(value)
+            )
+
+    features = getattr(
+        verified,
+        "verified_features",
+        None,
+    )
+
+    if isinstance(
+        features,
+        (
+            list,
+            tuple,
+            set,
+        ),
+    ):
+        parts.extend(
+            str(value)
+            for value in features
+            if value
+        )
+
+    elif features:
+        parts.append(
+            str(features)
+        )
+
+    return _build6r_semantic_normalize(
+        " ".join(parts)
+    )
+
+
+def _build6r_v325_usage_context_is_bounded(
+    raw,
+    verified,
+):
+    """
+    Require complete lexical accounting for a usage claim.
+
+    Tokens may come only from:
+    - canonically verified usage / identity / feature / format context;
+    - bounded grammar / attribution / campaign-planning framing;
+    - a small bilingual companion vocabulary whose canonical concept is
+      independently present.
+
+    Any unknown residue fails closed.
+    """
+    if verified is None:
+        return False
+
+    usage = _build6r_semantic_normalize(
+        getattr(
+            verified,
+            "verified_usage",
+            "",
+        )
+    )
+
+    if not usage:
+        return False
+
+    normalized = _build6r_semantic_normalize(
+        _build6r_v325_strip_numbered_step_labels(
+            raw
+        )
+    )
+
+    if not normalized:
+        return False
+
+    canonical = (
+        _build6r_v325_verified_context_text(
+            verified
+        )
+    )
+
+    canonical_tokens = set(
+        re.findall(
+            r"\d+(?:[.,]\d+)?|[a-z]+",
+            canonical,
+        )
+    )
+
+    raw_tokens = re.findall(
+        r"\d+(?:[.,]\d+)?|[a-z]+",
+        normalized,
+    )
+
+    raw_numbers = {
+        token.replace(
+            ",",
+            ".",
+        )
+        for token in raw_tokens
+        if re.fullmatch(
+            r"\d+(?:[.,]\d+)?",
+            token,
+        )
+    }
+
+    canonical_numbers = {
+        token.replace(
+            ",",
+            ".",
+        )
+        for token in canonical_tokens
+        if re.fullmatch(
+            r"\d+(?:[.,]\d+)?",
+            token,
+        )
+    }
+
+    if not raw_numbers.issubset(
+        canonical_numbers
+    ):
+        return False
+
+    allowed = set(
+        canonical_tokens
+    )
+
+    # Neutral grammar, attribution and non-evaluative planning framing only.
+    allowed.update(
+        {
+            "a",
+            "ao",
+            "aos",
+            "as",
+            "o",
+            "os",
+            "um",
+            "uma",
+            "uns",
+            "umas",
+            "de",
+            "do",
+            "da",
+            "dos",
+            "das",
+            "em",
+            "no",
+            "na",
+            "nos",
+            "nas",
+            "por",
+            "para",
+            "pela",
+            "pelo",
+            "pelas",
+            "pelos",
+            "com",
+            "e",
+            "ou",
+            "que",
+            "como",
+            "se",
+            "ser",
+            "ela",
+            "ele",
+            "essa",
+            "esse",
+            "esta",
+            "este",
+            "depois",
+            "apos",
+            "seguida",
+            "seguindo",
+            "em",
+            "seguinte",
+            "conforme",
+            "segundo",
+            "fabricante",
+            "manufacturer",
+            "orientacao",
+            "orientacoes",
+            "orienta",
+            "indica",
+            "sugere",
+            "sugestao",
+            "descreve",
+            "descrito",
+            "descrita",
+            "descricao",
+            "uso",
+            "usada",
+            "usar",
+            "tecido",
+            "usado",
+            "utilizavel",
+            "usavel",
+            "pode",
+            "possivel",
+            "modo",
+            "guia",
+            "etapa",
+            "cuidado",
+            "facial",
+            "formato",
+            "conscientizar",
+            "sobre",
+            "posicionada",
+            "exemplo",
+            "concreto",
+            "concreta",
+            "pressionar",
+            "ajustar",
+            "ajuste",
+            "erguer",
+            "levantar",
+            "acompanhando",
+            "longo",
+            "regiao",
+            "inteira",
+            "entre",
+            "inteiro",
+            "conjunto",
+            "maos",
+            "remover",
+            "remocao",
+            "dobrar",
+            "dobrada",
+            "dobrado",
+            "passar",
+            "pele",
+            "dar",
+            "toques",
+            "leves",
+            "finalizar",
+            "seguir",
+            "substituicao",
+            "lugar",
+            "the",
+            "of",
+            "in",
+            "on",
+            "at",
+            "around",
+            "with",
+            "and",
+            "or",
+            "to",
+            "from",
+            "according",
+            "manufacturer",
+            "guidance",
+            "use",
+            "usage",
+        }
+    )
+
+    # Admit bilingual companion terms only when the canonical family exists.
+    companions = (
+        (
+            ("mask", "masks"),
+            ("mascara", "mascaras"),
+        ),
+        (
+            ("sheet", "sheets"),
+            ("folha", "folhas", "tecido"),
+        ),
+        (
+            ("essence",),
+            ("essencia",),
+        ),
+        (
+            ("manufacturer",),
+            ("fabricante",),
+        ),
+        (
+            ("toner",),
+            ("tonico", "locao"),
+        ),
+        (
+            ("morning",),
+            ("manha",),
+        ),
+        (
+            ("evening",),
+            ("noite",),
+        ),
+        (
+            ("eyes", "mouth"),
+            ("olhos", "boca"),
+        ),
+        (
+            ("cheek", "cut", "sections"),
+            ("bochecha", "bochechas", "corte", "cortes", "recorte", "recortes"),
+        ),
+        (
+            ("palms",),
+            ("palmas",),
+        ),
+        (
+            ("wiping",),
+            ("lenco", "limpeza"),
+        ),
+        (
+            ("light", "patting"),
+            ("batidinhas", "toques"),
+        ),
+        (
+            ("emulsion", "cream"),
+            ("emulsao", "creme"),
+        ),
+    )
+
+    for canonical_side, companion_side in companions:
+        if any(
+            token in canonical_tokens
+            for token in canonical_side
+        ):
+            allowed.update(
+                companion_side
+            )
+
+    # If canonical usage contains a concept, admit only its bounded aliases.
+    for aliases, requirements in (
+        _build6r_v325_usage_alias_groups()
+    ):
+        if _build6r_v325_usage_requirement_present(
+            usage,
+            requirements,
+        ):
+            for alias in aliases:
+                allowed.update(
+                    re.findall(
+                        r"[a-z]+",
+                        _build6r_semantic_normalize(
+                            alias
+                        ),
+                    )
+                )
+
+    # Unit/count companion used by verified package-format clauses.
+    if (
+        "sheet" in canonical_tokens
+        or
+        "sheets" in canonical_tokens
+        or
+        "mask" in canonical_tokens
+        or
+        "masks" in canonical_tokens
+    ):
+        allowed.update(
+            {
+                "unidade",
+                "unidades",
+            }
+        )
+
+    return all(
+        (
+            token.replace(
+                ",",
+                ".",
+            )
+            in canonical_numbers
+            if re.fullmatch(
+                r"\d+(?:[.,]\d+)?",
+                token,
+            )
+            else token in allowed
+        )
+        for token in raw_tokens
+    )
+
+
+def _build6r_v325_usage_relations_are_bounded(
+    normalized,
+    usage,
+):
+    # Preserve canonical relationships regardless of canonical language.
+
+    def claim_has_any(
+        *markers,
+    ):
+        return any(
+            marker in normalized
+            for marker in markers
+        )
+
+    def canonical_has_any(
+        *markers,
+    ):
+        return any(
+            marker in usage
+            for marker in markers
+        )
+
+    toner_relation = (
+        "in place of toner",
+        "em lugar do tonico",
+        "no lugar do tonico",
+        "em substituicao ao tonico",
+        "em substituicao do tonico",
+    )
+
+    if (
+        claim_has_any(
+            "toner",
+            "tonico",
+            "locao",
+        )
+        and
+        canonical_has_any(
+            *toner_relation
+        )
+        and
+        not claim_has_any(
+            *toner_relation
+        )
+    ):
+        return False
+
+    eye_mouth_relation = (
+        "fit it around the eyes and mouth",
+        "fit around the eyes and mouth",
+        "fit around eyes and mouth",
+        "ajustar ao redor dos olhos e boca",
+        "ajustar ao redor dos olhos e da boca",
+        "ajustar em volta dos olhos e boca",
+        "ajustar em volta dos olhos e da boca",
+    )
+
+    claim_eye_mouth = (
+        (
+            "eyes" in normalized
+            and
+            "mouth" in normalized
+        )
+        or
+        (
+            "olhos" in normalized
+            and
+            "boca" in normalized
+        )
+    )
+
+    if (
+        claim_eye_mouth
+        and
+        canonical_has_any(
+            *eye_mouth_relation
+        )
+        and
+        not claim_has_any(
+            *eye_mouth_relation
+        )
+    ):
+        return False
+
+    trapped_air_relation = (
+        "press out trapped air",
+        "pressionar para tirar o ar",
+        "pressionar o ar para fora",
+        "tirar o ar preso",
+        "tirar o ar",
+    )
+
+    if (
+        claim_has_any(
+            "trapped air",
+            "ar preso",
+            "tirar o ar",
+        )
+        and
+        canonical_has_any(
+            *trapped_air_relation
+        )
+        and
+        not claim_has_any(
+            *trapped_air_relation
+        )
+    ):
+        return False
+
+    cheek_lift_relation = (
+        "lift the cheek cut",
+        "lift cheek cut",
+        "erguer os cortes",
+        "erguer os recortes",
+        "levantar os cortes",
+        "levantar os recortes",
+    )
+
+    cheek_cut = claim_has_any(
+        "cheek cut",
+        "cheek cuts",
+        "cortes da bochecha",
+        "cortes das bochechas",
+        "cortes da regiao das bochechas",
+        "recortes da bochecha",
+        "recortes das bochechas",
+    )
+
+    if (
+        cheek_cut
+        and
+        canonical_has_any(
+            *cheek_lift_relation
+        )
+        and
+        not claim_has_any(
+            *cheek_lift_relation
+        )
+    ):
+        return False
+
+    palms_press_relation = (
+        "press the whole mask",
+        "press with the palms",
+        "press the mask with the palms",
+        "pressionar a mascara",
+        "pressionar o conjunto",
+        "pressionar com as palmas",
+    )
+
+    if (
+        claim_has_any(
+            "palms",
+            "palmas",
+        )
+        and
+        canonical_has_any(
+            *palms_press_relation
+        )
+        and
+        not claim_has_any(
+            *palms_press_relation
+        )
+    ):
+        return False
+
+    fold_markers = (
+        "fold the mask",
+        "folding the mask",
+        "dobrar a mascara",
+        "mascara dobrada",
+    )
+
+    after_removal_markers = (
+        "after removal",
+        "after removing",
+        "apos remover",
+        "depois de remover",
+    )
+
+    fold_claim = claim_has_any(
+        *fold_markers
+    )
+
+    canonical_fold_after_removal = (
+        canonical_has_any(
+            *fold_markers
+        )
+        and
+        canonical_has_any(
+            *after_removal_markers
+        )
+    )
+
+    if (
+        fold_claim
+        and
+        canonical_fold_after_removal
+        and
+        not claim_has_any(
+            *after_removal_markers
+        )
+    ):
+        return False
+
+    post_use_markers = (
+        "wiping",
+        "wipe",
+        "movimentos de limpeza",
+        "passar na pele",
+        "usar como lenco",
+        "light patting",
+        "light pats",
+        "batidinhas leves",
+        "leves batidinhas",
+        "leves toques",
+    )
+
+    post_use_claim = claim_has_any(
+        *post_use_markers
+    )
+
+    canonical_post_use = (
+        canonical_has_any(
+            *post_use_markers
+        )
+        and
+        canonical_fold_after_removal
+    )
+
+    if (
+        post_use_claim
+        and
+        canonical_post_use
+    ):
+        if not fold_claim:
+            return False
+
+        if not claim_has_any(
+            *after_removal_markers
+        ):
+            return False
+
+    emulsion_follow_relation = (
+        "following with an emulsion or cream",
+        "follow with an emulsion or cream",
+        "follow with emulsion or cream",
+        "seguir com emulsao ou creme",
+        "finalizar com emulsao ou creme",
+    )
+
+    emulsion_claim = (
+        (
+            "emulsion" in normalized
+            and
+            "cream" in normalized
+        )
+        or
+        (
+            "emulsao" in normalized
+            and
+            "creme" in normalized
+        )
+    )
+
+    if (
+        emulsion_claim
+        and
+        canonical_has_any(
+            *emulsion_follow_relation
+        )
+        and
+        not claim_has_any(
+            *emulsion_follow_relation
+        )
+    ):
+        return False
+
+    return True
+
+
+def _build6r_v325_usage_supported(
+    raw,
+    verified,
+):
+    if not (
+        _build6r_v325_usage_context_is_bounded(
+            raw,
+            verified,
+        )
+    ):
+        return False
+
+    usage = _build6r_semantic_normalize(
+        getattr(
+            verified,
+            "verified_usage",
+            "",
+        )
+    )
+
+    normalized = _build6r_semantic_normalize(
+        _build6r_v325_strip_numbered_step_labels(
+            raw
+        )
+    )
+
+    detected = False
+
+    for aliases, requirements in (
+        _build6r_v325_usage_alias_groups()
+    ):
+        if any(
+            alias in normalized
+            for alias in aliases
+        ):
+            detected = True
+
+            if not (
+                _build6r_v325_usage_requirement_present(
+                    usage,
+                    requirements,
+                )
+            ):
+                return False
+
+    if not (
+        _build6r_v325_usage_relations_are_bounded(
+            normalized,
+            usage,
+        )
+    ):
+        return False
+
+    generic_reference = normalized in {
+        "modo de uso conforme o fabricante",
+        "modo de uso conforme orientacao do fabricante",
+        "modo de uso conforme orientacoes do fabricante",
+        "usage guidance",
+        "manufacturer usage guidance",
+    }
+
+    if detected or generic_reference:
+        return True
+
+    # Strict same-language fallback for product types outside the current
+    # bilingual alias map.
+    return normalized in usage
+
+
+def _build6r_v325_feature_context_is_bounded(
+    raw,
+    verified,
+):
+    """
+    Complete residual accounting for a canonically supported feature/format
+    claim whose live taxonomy is incorrectly evaluative.
+    """
+    normalized = _build6r_semantic_normalize(
+        raw
+    )
+
+    if not normalized:
+        return False
+
+    canonical = (
+        _build6r_v325_verified_context_text(
+            verified
+        )
+    )
+
+    canonical_tokens = set(
+        re.findall(
+            r"\d+(?:[.,]\d+)?|[a-z]+",
+            canonical,
+        )
+    )
+
+    raw_tokens = re.findall(
+        r"\d+(?:[.,]\d+)?|[a-z]+",
+        normalized,
+    )
+
+    neutral = {
+        "a",
+        "o",
+        "os",
+        "as",
+        "um",
+        "uma",
+        "de",
+        "do",
+        "da",
+        "dos",
+        "das",
+        "em",
+        "no",
+        "na",
+        "com",
+        "e",
+        "que",
+        "como",
+        "segundo",
+        "fabricante",
+        "manufacturer",
+        "descricao",
+        "descreve",
+        "descrita",
+        "descrito",
+        "pelo",
+        "pela",
+        "the",
+        "of",
+        "in",
+        "with",
+        "and",
+        "as",
+    }
+
+    allowed = set(
+        canonical_tokens
+    )
+    allowed.update(
+        neutral
+    )
+
+    companions = (
+        (
+            ("manufacturer",),
+            ("fabricante",),
+        ),
+        (
+            ("sheet", "sheets"),
+            ("folha", "folhas", "tecido"),
+        ),
+        (
+            ("mask", "masks"),
+            ("mask", "masks", "mascara", "mascaras"),
+        ),
+        (
+            ("essence",),
+            ("essencia",),
+        ),
+    )
+
+    for canonical_side, companion_side in companions:
+        if any(
+            token in canonical_tokens
+            for token in canonical_side
+        ):
+            allowed.update(
+                companion_side
+            )
+
+    raw_numbers = {
+        token.replace(",", ".")
+        for token in raw_tokens
+        if re.fullmatch(
+            r"\d+(?:[.,]\d+)?",
+            token,
+        )
+    }
+
+    canonical_numbers = {
+        token.replace(",", ".")
+        for token in canonical_tokens
+        if re.fullmatch(
+            r"\d+(?:[.,]\d+)?",
+            token,
+        )
+    }
+
+    if not raw_numbers.issubset(
+        canonical_numbers
+    ):
+        return False
+
+    return all(
+        (
+            token.replace(",", ".")
+            in canonical_numbers
+            if re.fullmatch(
+                r"\d+(?:[.,]\d+)?",
+                token,
+            )
+            else token in allowed
+        )
+        for token in raw_tokens
+    )
+
+
+def _build6r_v325_visual_has_factual_usage_residue(
+    finding,
+    raw,
+):
+    # Mixed factual-use + layout text must remain grounded.
+
+    category = _build6r_v323_category(
+        getattr(
+            finding,
+            "claim_category",
+            "",
+        )
+    )
+
+    if category in {
+        "instructions for use",
+        "directions for use",
+        "directions for use usage pattern",
+        "product use instructions",
+        "product use context",
+    }:
+        return True
+
+    strong_usage_markers = (
+        "modo de uso",
+        "usage guidance",
+        "instructions for use",
+        "directions for use",
+        "usar de manha",
+        "usar pela manha",
+        "usar a noite",
+        "usar de noite",
+        "use in the morning",
+        "use at night",
+        "morning or evening",
+        "in place of toner",
+        "em lugar do tonico",
+        "no lugar do tonico",
+        "em substituicao ao tonico",
+        "em substituicao do tonico",
+        "press out trapped air",
+        "pressionar para tirar o ar",
+        "lift the cheek cut",
+        "erguer os cortes",
+        "press with the palms",
+        "pressionar com as palmas",
+        "fold the mask",
+        "dobrar a mascara",
+        "following with an emulsion or cream",
+        "follow with emulsion or cream",
+        "seguir com emulsao ou creme",
+        "finalizar com emulsao ou creme",
+    )
+
+    return any(
+        marker in raw
+        for marker in strong_usage_markers
+    )
+
+
+def _build6r_v325_nonfactual_visual_instruction(
+    finding,
+):
+    """
+    Drop only proven layout/composition directions from product-fact findings.
+
+    This extends the sealed V3.5 semantics; it does not convert a visual
+    direction into a verified product fact.
+    """
+    if _build6r_v35_nonfactual_visual_instruction(
+        finding
+    ):
+        return True
+
+    if (
+        str(
+            getattr(
+                finding,
+                "evidence_status",
+                "",
+            )
+            or ""
+        ).upper()
+        != "UNSUPPORTED"
+    ):
+        return False
+
+    source_field = str(
+        getattr(
+            finding,
+            "source_field",
+            "",
+        )
+        or ""
+    )
+
+    if source_field != "master_concept.visual_identity":
+        return False
+
+    raw = _build6r_semantic_normalize(
+        getattr(
+            finding,
+            "claim_text",
+            "",
+        )
+    )
+
+    if not raw:
+        return False
+
+    if _build6r_v325_visual_has_factual_usage_residue(
+        finding,
+        raw,
+    ):
+        return False
+
+    if _build6r_v35_blocked_residue(
+        raw
+    ):
+        return False
+
+    if _build6r_v324_has_unsupported_positioning(
+        raw
+    ):
+        return False
+
+    if _build6r_v322_has_benefit_effect_language(
+        raw
+    ):
+        return False
+
+    if _build6r_v322_has_commercial_or_rank_language(
+        raw
+    ):
+        return False
+
+    if _build6r_v322_has_meta_verification_language(
+        raw
+    ):
+        return False
+
+    if _build6r_v324_has_unsupported_origin_assertion(
+        raw
+    ):
+        return False
+
+    if _build6r_v322_has_stem_or_exosome_language(
+        raw
+    ):
+        return False
+
+    if re.search(
+        r"\d",
+        raw,
+    ):
+        return False
+
+    if any(
+        marker in raw
+        for marker in (
+            "estoque",
+            "stock",
+            "disponibilidade",
+            "available",
+            "availability",
+            "limitado",
+            "limited",
+            "oferta",
+            "desconto",
+            "sale",
+        )
+    ):
+        return False
+
+    return any(
+        marker in raw
+        for marker in (
+            "centro da composicao",
+            "centro do layout",
+            "center of the composition",
+            "center of composition",
+            "produto no centro",
+            "product at the center",
+            "foco visual",
+            "visual focus",
+        )
+    )
+
+
+def _build6r_v325_candidate_supported(
+    finding,
+    verified,
+    fields,
+):
+    """
+    Product-agnostic, fail-closed post-V3.24 reconciliation.
+    """
+    if verified is None:
+        return False
+
+    if (
+        str(
+            getattr(
+                finding,
+                "evidence_status",
+                "",
+            )
+            or ""
+        ).upper()
+        != "UNSUPPORTED"
+    ):
+        return False
+
+    source_field = str(
+        getattr(
+            finding,
+            "source_field",
+            "",
+        )
+        or ""
+    )
+
+    if not (
+        _build6r_v322_source_field_allowed(
+            source_field
+        )
+    ):
+        return False
+
+    raw = _build6r_semantic_normalize(
+        _build6r_v325_strip_numbered_step_labels(
+            getattr(
+                finding,
+                "claim_text",
+                "",
+            )
+        )
+    )
+
+    if not raw:
+        return False
+
+    category = _build6r_v323_category(
+        getattr(
+            finding,
+            "claim_category",
+            "",
+        )
+    )
+
+    # Preserve the complete sealed safety envelope first.
+    if _build6r_v321_has_contextual_reference(
+        raw
+    ):
+        return False
+
+    if _build6r_v322_has_meta_verification_language(
+        raw
+    ):
+        return False
+
+    if _build6r_v324_has_unsupported_positioning(
+        raw
+    ):
+        return False
+
+    if _build6r_v322_has_benefit_effect_language(
+        raw
+    ):
+        return False
+
+    if _build6r_v322_has_commercial_or_rank_language(
+        raw
+    ):
+        return False
+
+    if _build6r_v324_has_unsupported_origin_assertion(
+        raw
+    ):
+        return False
+
+    if _build6r_v322_has_stem_or_exosome_language(
+        raw
+    ):
+        return False
+
+    # Preserve anything already proved by the complete sealed V3.24 chain.
+    if _build6r_v324_candidate_supported(
+        finding,
+        verified,
+        fields,
+    ):
+        return True
+
+    usage_categories = {
+        "instructions for use",
+        "directions for use",
+        "directions for use usage pattern",
+        "product use instructions",
+        "product use context",
+        "product benefits effects",
+        "product benefit effect",
+    }
+
+    if category in usage_categories:
+        if _build6r_v325_usage_supported(
+            raw,
+            verified,
+        ):
+            return True
+
+    # Live taxonomy can call a factual feature/format a "benefit". Rescue only
+    # after complete residual accounting and an independent canonical atom.
+    if category in {
+        "product benefits effects",
+        "product benefit effect",
+    }:
+        if not (
+            _build6r_v325_feature_context_is_bounded(
+                raw,
+                verified,
+            )
+        ):
+            return False
+
+        if (
+            _build6r_v322_melty_sheet_supported(
+                raw,
+                verified,
+            )
+            or
+            _build6r_v322_sheet_identity_supported(
+                raw,
+                verified,
+            )
+            or
+            _build6r_v322_sales_name_supported(
+                raw,
+                verified,
+            )
+            or
+            _build6r_v322_free_from_supported(
+                raw,
+                verified,
+            )
+            or
+            (
+                _build6r_v325_feature_context_is_bounded(
+                    raw,
+                    verified,
+                )
+                and
+                _build6r_v322_format_supported(
+                    raw,
+                    verified,
+                )
+            )
+        ):
+            return True
+
+    # Exact live category drift for a neutral product-format statement.
+    if category == "product category":
+        return (
+            _build6r_v325_feature_context_is_bounded(
+                raw,
+                verified,
+            )
+            and
+            _build6r_v322_format_supported(
+                raw,
+                verified,
+            )
+        )
+
+    return False
+
+
+def _build6r_v325_reconcile_bounded_usage_and_nonfactual_directives(
+    result,
+    verified,
+    fields,
+):
+    reconciled = []
+
+    for finding in (
+        result.findings
+        or []
+    ):
+        if _build6r_v325_nonfactual_visual_instruction(
+            finding
+        ):
+            # Preserve sealed V3.5 semantics: a proven layout-only direction
+            # is not a product claim and therefore disappears from findings.
+            continue
+
+        if _build6r_v325_candidate_supported(
+            finding,
+            verified,
+            fields,
+        ):
+            reconciled.append(
+                _build6r_v323_updated_finding(
+                    finding,
+                    allowed_source=
+                        "verified_product_facts",
+                    reason=(
+                        "Build 6R V3.25 deterministic reconciliation "
+                        "accepted the unchanged claim only after canonical "
+                        "usage/feature/format support and complete residual "
+                        "accounting proved it from VerifiedProductFacts; "
+                        "research and trend context remained ineligible."
+                    ),
+                )
+            )
+            continue
+
+        reconciled.append(
+            finding
+        )
+
+    original = list(
+        result.findings
+        or []
+    )
+
+    if (
+        len(original)
+        == len(reconciled)
+        and
+        all(
+            left is right
+            for left, right
+            in zip(
+                original,
+                reconciled,
+            )
+        )
+    ):
+        return result
+
+    if hasattr(
+        result,
+        "model_copy",
+    ):
+        return result.model_copy(
+            update={
+                "findings":
+                    reconciled,
+            }
+        )
+
+    return ClaimAuditResult(
+        findings=reconciled
+    )
+
+
+_build6r_augment_before_v325 = (
+    augment_with_ai_extraction
+)
+
+
+async def augment_with_ai_extraction(
+    *args,
+    **kwargs,
+):
+    """
+    BUILD6R V3.25
+
+    Execute the complete sealed V3.24 chain exactly once, then perform only
+    bounded canonical usage / feature / format reconciliation and narrow
+    non-factual visual-directive exclusion.
+
+    BUILD6R_V325_HISTORICAL_WRAPPER_MARKER_LEDGER_V1
+
+    _build6r_augment_before_v32
+    _build6r_reconcile_generated_semantic_findings_v32
+
+    _build6r_augment_before_v33
+    _build6r_reconcile_generated_semantic_findings_v33
+
+    _build6r_augment_before_v34
+    _build6r_reconcile_generated_semantic_findings_v34
+
+    _build6r_augment_before_v35
+    _build6r_reconcile_generated_semantic_findings_v35
+
+    _build6r_augment_before_v311
+    _build6r_v311_reconcile_copy_stage_canonical_findings
+
+    _build6r_augment_before_v312
+    _build6r_v312_reconcile_copy_stage_canonical_findings
+
+    _build6r_augment_before_v313
+    _build6r_v313_reconcile_copy_stage_canonical_findings
+
+    _build6r_augment_before_v315
+    _build6r_v315_reconcile_semantic_candidates
+
+    _build6r_augment_before_v316
+    _build6r_v316_reconcile_live_taxonomy_candidates
+
+    _build6r_augment_before_v317
+    _build6r_v317_reconcile_runtime_alias_candidates
+
+    _build6r_augment_before_v318
+    _build6r_v318_reconcile_previsual_candidates
+
+    _build6r_augment_before_v319
+    _build6r_v319_reconcile_live_phrase_candidates
+
+    _build6r_augment_before_v320
+    _build6r_v320_reconcile_live_semantic_candidates
+
+    _build6r_augment_before_v321
+    _build6r_v321_reconcile_remaining_live_semantic_candidates
+
+    _build6r_augment_before_v322
+    _build6r_v322_reconcile_fresh_live_composite_candidates
+
+    _build6r_augment_before_v323
+    _build6r_v323_reconcile_residual_live_semantic_boundaries
+
+    _build6r_augment_before_v324
+    _build6r_v324_reconcile_residual_canonical_semantic_atoms
+
+    _build6r_augment_before_v325
+    _build6r_v325_reconcile_bounded_usage_and_nonfactual_directives
+    """
+    result = await (
+        _build6r_augment_before_v325(
+            *args,
+            **kwargs,
+        )
+    )
+
+    return (
+        _build6r_v325_reconcile_bounded_usage_and_nonfactual_directives(
+            result,
+            kwargs.get(
+                "verified"
+            ),
+            (
+                kwargs.get(
+                    "fields"
+                )
+                or {}
+            ),
+        )
+    )
