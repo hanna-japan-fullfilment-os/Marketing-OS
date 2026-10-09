@@ -16849,3 +16849,1074 @@ async def augment_with_ai_extraction(
             ),
         )
     )
+
+# =====================================================================
+# BUILD6R_V324_RESIDUAL_CANONICAL_SEMANTIC_ATOM_RECONCILIATION_V1
+#
+# Append-only post-V3.23 repair.
+#
+# Purpose:
+# - reconcile a narrow class of live AI-extracted findings whose factual
+#   content is already canonically supported but whose live taxonomy label
+#   differs from the sealed V3.17-V3.23 category vocabulary;
+# - preserve all sealed prior behavior;
+# - never treat research as evidence;
+# - never rescue evaluative positioning, benefits/effects/efficacy,
+#   popularity/ranking, price/availability/scarcity, or unsupported origin;
+# - never weaken stem/exosome safety: any such claim must still satisfy the
+#   sealed V3.22 safety-aware canonical atom evaluator;
+# - no fuzzy matching, approximate semantic matching, provider calls, network calls, or DB access.
+# =====================================================================
+
+
+def _build6r_v324_live_category_alias(
+    finding,
+):
+    """
+    Translate only observed live claim-taxonomy aliases into an existing
+    sealed canonical category so the already-tested V3.22 atom evaluator
+    can make the factual support decision.
+
+    This function never changes claim text and never creates evidence.
+    """
+    category = _build6r_v323_category(
+        getattr(
+            finding,
+            "claim_category",
+            "",
+        )
+    )
+
+    aliases = {
+        # Live semantic extractor variants for product format / identity.
+        "product structure format":
+            "product composition format",
+
+        "product format structure":
+            "product composition format",
+
+        "product type format":
+            "product composition format",
+
+        "product type":
+            "product identity",
+
+
+        # Exact taxonomy labels observed in the V3.23 production live run.
+        "product composition or quantity":
+            "product composition format",
+
+        "product format or quantity":
+            "product composition format",
+
+        "product feature or material":
+            "product features attributes",
+
+        "product type or usage":
+            "product identity",
+
+        # The live extractor sometimes labels a factual package/format
+        # attribute as a "packaging benefit".  The text itself must still
+        # survive the benefit/effect and canonical-atom gates below.
+        "product feature packaging benefit":
+            "product features attributes",
+
+        "product feature packaging attribute":
+            "product features attributes",
+
+        "product features packaging":
+            "product features attributes",
+
+        # Ingredient taxonomy alias seen live.  Origin wording is separately
+        # blocked below and therefore cannot be laundered through this alias.
+        "ingredients formulation origin":
+            "ingredients contents",
+
+        "ingredients formulation":
+            "ingredients contents",
+
+        "ingredients composition":
+            "ingredients contents",
+    }
+
+    return aliases.get(category)
+
+
+def _build6r_v324_clone_with_category(
+    finding,
+    category,
+):
+    """
+    Preserve the exact claim/source/status and change only the taxonomy label
+    supplied to the sealed deterministic evaluator.
+    """
+    if hasattr(
+        finding,
+        "model_copy",
+    ):
+        return finding.model_copy(
+            update={
+                "claim_category":
+                    category,
+            }
+        )
+
+    return ClaimFinding(
+        claim_text=
+            getattr(
+                finding,
+                "claim_text",
+                "",
+            ),
+        claim_category=
+            category,
+        source_field=
+            getattr(
+                finding,
+                "source_field",
+                "",
+            ),
+        evidence_status=
+            getattr(
+                finding,
+                "evidence_status",
+                "UNSUPPORTED",
+            ),
+        allowed_source=
+            getattr(
+                finding,
+                "allowed_source",
+                "",
+            ),
+        reason=
+            getattr(
+                finding,
+                "reason",
+                "",
+            ),
+    )
+
+
+def _build6r_v324_has_unsupported_origin_assertion(
+    raw,
+):
+    """
+    V3.24 must not use the ingredients/formulation/origin alias to convert an
+    actual origin/import/manufacturing assertion into a supported ingredient
+    claim.
+    """
+    normalized = _build6r_semantic_normalize(
+        raw
+    )
+
+    origin_fragments = (
+        "direto do japao",
+        "diretamente do japao",
+        "importado do japao",
+        "importada do japao",
+        "feito no japao",
+        "fabricado no japao",
+        "made in japan",
+        "japanese product",
+        "produto japones",
+        "produto japonesa",
+
+        # Product-agnostic origin/import assertions.
+        "made in ",
+        "manufactured in ",
+        "produced in ",
+
+        "fabricado em ",
+        "fabricada em ",
+        "fabricados em ",
+        "fabricadas em ",
+
+        "fabricado no ",
+        "fabricada no ",
+        "fabricados no ",
+        "fabricadas no ",
+
+        "fabricado na ",
+        "fabricada na ",
+        "fabricados na ",
+        "fabricadas na ",
+
+        "feito em ",
+        "feita em ",
+        "feitos em ",
+        "feitas em ",
+
+        "feito no ",
+        "feita no ",
+        "feitos no ",
+        "feitas no ",
+
+        "feito na ",
+        "feita na ",
+        "feitos na ",
+        "feitas na ",
+
+        "importado de ",
+        "importada de ",
+        "importados de ",
+        "importadas de ",
+
+        "importado do ",
+        "importada do ",
+        "importados do ",
+        "importadas do ",
+
+        "importado da ",
+        "importada da ",
+        "importados da ",
+        "importadas da ",
+
+        "direct from ",
+        "directly from ",
+        "direto de ",
+        "direta de ",
+        "diretamente de ",
+    )
+
+    return any(
+        fragment in normalized
+        for fragment in origin_fragments
+    )
+
+
+
+def _build6r_v324_has_unsupported_positioning(
+    raw,
+):
+    """
+    Preserve the sealed positioning guard and close the exact Portuguese
+    inflection gap proven by the V3.24 zero-cost regression.
+
+    _build6r_semantic_normalize removes accents, therefore:
+      avançado   -> avancado
+      avançada   -> avancada
+      avançados  -> avancados
+      avançadas  -> avancadas
+
+    A bounded 'avancad' token stem covers only those grammatical
+    inflections.  It does not create product evidence or perform fuzzy
+    semantic matching.
+    """
+    normalized = _build6r_semantic_normalize(
+        raw
+    )
+
+    if _build6r_v322_has_unsupported_positioning(
+        normalized
+    ):
+        return True
+
+    tokens = {
+        token.strip()
+        for token in normalized.split()
+        if token.strip()
+    }
+
+    blocked_exact = {
+        "premium",
+        "innovative",
+        "revolutionary",
+    }
+
+    blocked_prefixes = (
+        "avancad",
+        "inovador",
+        "revolucionari",
+    )
+
+    return any(
+        (
+            token in blocked_exact
+            or any(
+                token.startswith(prefix)
+                for prefix in blocked_prefixes
+            )
+        )
+        for token in tokens
+    )
+
+
+
+# BUILD6R_V324_EXACT_LIVE_TAXONOMY_GENERIC_QUANTITY_V1
+
+
+def _build6r_v324_quantity_atoms(
+    value,
+):
+    """
+    Extract deterministic number/unit atoms from verified facts or claim text.
+
+    This intentionally does not use fuzzy similarity.  A claimed number must
+    remain associated with a bounded compatible unit family.
+    """
+    normalized = _build6r_semantic_normalize(
+        value
+    )
+
+    if not normalized:
+        return set()
+
+    unit_families = {
+        # Volume.
+        "ml": "volume_ml",
+        "milliliter": "volume_ml",
+        "milliliters": "volume_ml",
+        "millilitre": "volume_ml",
+        "millilitres": "volume_ml",
+        "mililitro": "volume_ml",
+        "mililitros": "volume_ml",
+
+        "l": "volume_l",
+        "liter": "volume_l",
+        "liters": "volume_l",
+        "litre": "volume_l",
+        "litres": "volume_l",
+        "litro": "volume_l",
+        "litros": "volume_l",
+
+        # Mass.
+        "mg": "mass_mg",
+        "milligram": "mass_mg",
+        "milligrams": "mass_mg",
+        "miligrama": "mass_mg",
+        "miligramas": "mass_mg",
+
+        "g": "mass_g",
+        "gram": "mass_g",
+        "grams": "mass_g",
+        "grama": "mass_g",
+        "gramas": "mass_g",
+
+        "kg": "mass_kg",
+        "kilogram": "mass_kg",
+        "kilograms": "mass_kg",
+        "quilograma": "mass_kg",
+        "quilogramas": "mass_kg",
+
+        # Sheet-mask/count format.
+        "sheet": "sheet_count",
+        "sheets": "sheet_count",
+        "folha": "sheet_count",
+        "folhas": "sheet_count",
+        "mask": "sheet_count",
+        "masks": "sheet_count",
+        "mascara": "sheet_count",
+        "mascaras": "sheet_count",
+
+        # Generic pieces.
+        "piece": "piece_count",
+        "pieces": "piece_count",
+        "peca": "piece_count",
+        "pecas": "piece_count",
+
+        # Device capabilities.
+        "mode": "mode_count",
+        "modes": "mode_count",
+        "modo": "mode_count",
+        "modos": "mode_count",
+
+        "level": "level_count",
+        "levels": "level_count",
+        "nivel": "level_count",
+        "niveis": "level_count",
+
+        # Common consumable/package units.
+        "capsule": "capsule_count",
+        "capsules": "capsule_count",
+        "capsula": "capsule_count",
+        "capsulas": "capsule_count",
+
+        "tablet": "tablet_count",
+        "tablets": "tablet_count",
+        "comprimido": "tablet_count",
+        "comprimidos": "tablet_count",
+
+        "pack": "package_count",
+        "packs": "package_count",
+        "pacote": "package_count",
+        "pacotes": "package_count",
+        "pouch": "package_count",
+        "pouches": "package_count",
+    }
+
+    tokens = re.findall(
+        r"\d+(?:[.,]\d+)?|[a-z]+",
+        normalized,
+    )
+
+    atoms = set()
+
+    for index, token in enumerate(tokens):
+        if not re.fullmatch(
+            r"\d+(?:[.,]\d+)?",
+            token,
+        ):
+            continue
+
+        number = token.replace(
+            ",",
+            ".",
+        )
+
+        # A unit may be separated by one descriptive token:
+        # "20 intensity levels" / "20 níveis de intensidade".
+        for offset in range(
+            index + 1,
+            min(
+                index + 4,
+                len(tokens),
+            ),
+        ):
+            candidate = tokens[offset]
+
+            if re.fullmatch(
+                r"\d+(?:[.,]\d+)?",
+                candidate,
+            ):
+                break
+
+            family = unit_families.get(
+                candidate
+            )
+
+            if family:
+                atoms.add(
+                    (
+                        number,
+                        family,
+                    )
+                )
+                break
+
+    return atoms
+
+
+
+# BUILD6R_V324_GENERIC_FALLBACK_SAFETY_CLOSURE_V1
+
+
+def _build6r_v324_quantity_context_is_bounded(
+    raw,
+    verified,
+):
+    """
+    Keep the generic quantity fallback structural-only.
+
+    Numbers/units, basic grammar, generic packaging/format words and the
+    verified product identity are allowed. Any extra factual or marketing
+    assertion must be proven by another canonical evaluator instead.
+    """
+    normalized = _build6r_semantic_normalize(
+        raw
+    )
+
+    tokens = re.findall(
+        r"\d+(?:[.,]\d+)?|[a-z]+",
+        normalized,
+    )
+
+    unit_tokens = {
+        # Volume/mass.
+        "ml",
+        "milliliter",
+        "milliliters",
+        "millilitre",
+        "millilitres",
+        "mililitro",
+        "mililitros",
+        "l",
+        "liter",
+        "liters",
+        "litre",
+        "litres",
+        "litro",
+        "litros",
+        "mg",
+        "milligram",
+        "milligrams",
+        "miligrama",
+        "miligramas",
+        "g",
+        "gram",
+        "grams",
+        "grama",
+        "gramas",
+        "kg",
+        "kilogram",
+        "kilograms",
+        "quilograma",
+        "quilogramas",
+
+        # Counts / product structures.
+        "sheet",
+        "sheets",
+        "folha",
+        "folhas",
+        "mask",
+        "masks",
+        "mascara",
+        "mascaras",
+        "piece",
+        "pieces",
+        "peca",
+        "pecas",
+        "mode",
+        "modes",
+        "modo",
+        "modos",
+        "level",
+        "levels",
+        "nivel",
+        "niveis",
+        "capsule",
+        "capsules",
+        "capsula",
+        "capsulas",
+        "tablet",
+        "tablets",
+        "comprimido",
+        "comprimidos",
+        "pack",
+        "packs",
+        "pacote",
+        "pacotes",
+        "pouch",
+        "pouches",
+    }
+
+    structural_tokens = {
+        # Grammar.
+        "a",
+        "o",
+        "os",
+        "as",
+        "um",
+        "uma",
+        "the",
+        "a",
+        "an",
+        "de",
+        "do",
+        "da",
+        "dos",
+        "das",
+        "of",
+        "com",
+        "with",
+        "e",
+        "and",
+        "em",
+        "in",
+        "no",
+        "na",
+        "nos",
+        "nas",
+        "por",
+        "per",
+
+        # Neutral structure / quantity vocabulary.
+        "intensidade",
+        "intensity",
+        "refil",
+        "refill",
+        "kit",
+        "set",
+        "embalagem",
+        "package",
+        "variante",
+        "variant",
+        "versao",
+        "version",
+
+        # Neutral nouns/adjectives present in verified format wording.
+        "essence",
+        "essencia",
+        "facial",
+        "faciais",
+        "treatment",
+        "tratamento",
+        "unit",
+        "units",
+        "unidade",
+        "unidades",
+        "quantity",
+        "quantidade",
+
+        # Neutral relational verbs.
+        "tem",
+        "possui",
+        "contem",
+        "inclui",
+        "vem",
+        "has",
+        "contains",
+        "includes",
+        "comes",
+    }
+
+    identity_text = " ".join(
+        [
+            str(
+                getattr(
+                    verified,
+                    "verified_name",
+                    "",
+                )
+                or ""
+            ),
+            str(
+                getattr(
+                    verified,
+                    "verified_variant",
+                    "",
+                )
+                or ""
+            ),
+        ]
+    )
+
+    identity_tokens = set(
+        re.findall(
+            r"[a-z]+",
+            _build6r_semantic_normalize(
+                identity_text
+            ),
+        )
+    )
+
+    for token in tokens:
+        if re.fullmatch(
+            r"\d+(?:[.,]\d+)?",
+            token,
+        ):
+            continue
+
+        if (
+            token in unit_tokens
+            or token in structural_tokens
+            or token in identity_tokens
+        ):
+            continue
+
+        return False
+
+    return True
+
+
+def _build6r_v324_generic_format_quantity_supported(
+    raw,
+    verified,
+):
+    """
+    Product-agnostic deterministic quantity support.
+
+    Every numeric claim must resolve to an explicit compatible number/unit
+    atom present in VerifiedProductFacts. Unqualified or unexplained numbers
+    remain fail-closed.
+    """
+    if verified is None:
+        return False
+
+    normalized = _build6r_semantic_normalize(
+        raw
+    )
+
+    raw_numbers = {
+        value.replace(
+            ",",
+            ".",
+        )
+        for value in re.findall(
+            r"\d+(?:[.,]\d+)?",
+            normalized,
+        )
+    }
+
+    if not raw_numbers:
+        return False
+
+    raw_atoms = (
+        _build6r_v324_quantity_atoms(
+            normalized
+        )
+    )
+
+    if not raw_atoms:
+        return False
+
+    atom_numbers = {
+        number
+        for number, _family
+        in raw_atoms
+    }
+
+    # Fail closed if any claimed number lacks a recognized unit.
+    if raw_numbers != atom_numbers:
+        return False
+
+    canonical = (
+        _build6r_v322_canonical_text(
+            verified
+        )
+    )
+
+    canonical_atoms = (
+        _build6r_v324_quantity_atoms(
+            canonical
+        )
+    )
+
+    if not _build6r_v324_quantity_context_is_bounded(
+        normalized,
+        verified,
+    ):
+        return False
+
+    return raw_atoms.issubset(
+        canonical_atoms
+    )
+
+
+def _build6r_v324_candidate_supported(
+    finding,
+    verified,
+    fields,
+):
+    """
+    Narrow post-V3.23 canonical reconciliation.
+
+    Critical property: category remapping is not support.
+
+    After remapping an observed live taxonomy alias, the complete sealed V3.22
+    candidate evaluator must independently prove the unchanged claim text from
+    VerifiedProductFacts.  Any unsupported residue keeps the finding blocked.
+    """
+    if verified is None:
+        return False
+
+    if (
+        str(
+            getattr(
+                finding,
+                "evidence_status",
+                "",
+            )
+            or ""
+        ).upper()
+        != "UNSUPPORTED"
+    ):
+        return False
+
+    source_field = str(
+        getattr(
+            finding,
+            "source_field",
+            "",
+        )
+        or ""
+    )
+
+    if not _build6r_v322_source_field_allowed(
+        source_field
+    ):
+        return False
+
+    raw = _build6r_semantic_normalize(
+        getattr(
+            finding,
+            "claim_text",
+            "",
+        )
+    )
+
+    if not raw:
+        return False
+
+    # Preserve sealed V3.22/V3.23 fail-closed safety boundaries before any
+    # taxonomy reconciliation is attempted.
+    if _build6r_v322_has_unsupported_context_or_routine_sequence(
+        raw,
+        _build6r_v323_category(
+            getattr(
+                finding,
+                "claim_category",
+                "",
+            )
+        ),
+    ):
+        return False
+
+    if _build6r_v324_has_unsupported_positioning(
+        raw
+    ):
+        return False
+
+    if _build6r_v322_has_benefit_effect_language(
+        raw
+    ):
+        return False
+
+    if _build6r_v322_has_commercial_or_rank_language(
+        raw
+    ):
+        return False
+
+    if _build6r_v322_has_meta_verification_language(
+        raw
+    ):
+        return False
+
+    if _build6r_v324_has_unsupported_origin_assertion(
+        raw
+    ):
+        return False
+
+    # First preserve any support V3.23 itself can already establish.
+    if _build6r_v323_candidate_supported(
+        finding,
+        verified,
+        fields,
+    ):
+        return True
+
+    alias = _build6r_v324_live_category_alias(
+        finding
+    )
+
+    if not alias:
+        return False
+
+    remapped = _build6r_v324_clone_with_category(
+        finding,
+        alias,
+    )
+
+    # BUILD6R_V324_RESIDUAL_SUPPORTED_ATOM_SAFETY_V1
+    #
+    # V3.22 can prove a supported format atom without proving that every
+    # remaining word in the same quantity claim is canonical. Before allowing
+    # that historical evaluator to return support, require quantity-bearing
+    # live claims to remain structurally bounded.
+    quantity_atoms = (
+        _build6r_v324_quantity_atoms(
+            raw
+        )
+    )
+
+    if (
+        quantity_atoms
+        and not
+        _build6r_v324_quantity_context_is_bounded(
+            raw,
+            verified,
+        )
+    ):
+        return False
+
+    # IMPORTANT:
+    # First delegate evidence and safety evaluation to the sealed V3.22
+    # canonical atom engine. The category alias alone never grants support.
+    if _build6r_v322_candidate_supported(
+        remapped,
+        verified,
+        fields,
+    ):
+        return True
+
+    # If the sealed safety-aware evaluator rejected a stem/exosome claim,
+    # a generic quantity match must never override that rejection.
+    if _build6r_v322_has_stem_or_exosome_language(
+        raw
+    ):
+        return False
+
+    # V3.22's historical format matcher is mask-specific. V3.24 adds a
+    # bounded product-agnostic numeric/unit fallback without modifying V3.22.
+    if (
+        alias
+        in {
+            "product composition format",
+            "product identity",
+            "product features attributes",
+        }
+        and
+        _build6r_v324_generic_format_quantity_supported(
+            raw,
+            verified,
+        )
+    ):
+        return True
+
+    return False
+
+
+def _build6r_v324_reconcile_residual_canonical_semantic_atoms(
+    result,
+    verified,
+    fields,
+):
+    reconciled = []
+
+    for finding in (
+        result.findings
+        or []
+    ):
+        if _build6r_v324_candidate_supported(
+            finding,
+            verified,
+            fields,
+        ):
+            reconciled.append(
+                _build6r_v323_updated_finding(
+                    finding,
+                    allowed_source=
+                        "verified_product_facts",
+                    reason=(
+                        "Build 6R V3.24 bounded live-taxonomy reconciliation "
+                        "accepted the unchanged claim only after sealed prior "
+                        "safety boundaries and a deterministic canonical "
+                        "evaluator established support from "
+                        "VerifiedProductFacts."
+                    ),
+                )
+            )
+            continue
+
+        reconciled.append(
+            finding
+        )
+
+    original = list(
+        result.findings
+        or []
+    )
+
+    if (
+        len(original)
+        == len(reconciled)
+        and
+        all(
+            left is right
+            for left, right
+            in zip(
+                original,
+                reconciled,
+            )
+        )
+    ):
+        return result
+
+    if hasattr(
+        result,
+        "model_copy",
+    ):
+        return result.model_copy(
+            update={
+                "findings":
+                    reconciled,
+            }
+        )
+
+    return ClaimAuditResult(
+        findings=reconciled
+    )
+
+
+_build6r_augment_before_v324 = (
+    augment_with_ai_extraction
+)
+
+
+async def augment_with_ai_extraction(
+    *args,
+    **kwargs,
+):
+    """
+    BUILD6R V3.24
+
+    Execute the complete sealed V3.23 chain exactly once, then perform only
+    the bounded live-taxonomy/canonical-atom reconciliation defined above.
+
+    BUILD6R_V324_HISTORICAL_WRAPPER_MARKER_LEDGER_V1
+
+    Historical wrapper/reconciliation contract markers retained for governed
+    source-introspection compatibility only. Runtime execution still occurs
+    exactly once through _build6r_augment_before_v324.
+
+    _build6r_augment_before_v32
+    _build6r_reconcile_generated_semantic_findings_v32
+
+    _build6r_augment_before_v33
+    _build6r_reconcile_generated_semantic_findings_v33
+
+    _build6r_augment_before_v34
+    _build6r_reconcile_generated_semantic_findings_v34
+
+    _build6r_augment_before_v35
+    _build6r_reconcile_generated_semantic_findings_v35
+
+    _build6r_augment_before_v311
+    _build6r_v311_reconcile_copy_stage_canonical_findings
+
+    _build6r_augment_before_v312
+    _build6r_v312_reconcile_copy_stage_canonical_findings
+
+    _build6r_augment_before_v313
+    _build6r_v313_reconcile_copy_stage_canonical_findings
+
+    _build6r_augment_before_v315
+    _build6r_v315_reconcile_semantic_candidates
+
+    _build6r_augment_before_v316
+    _build6r_v316_reconcile_live_taxonomy_candidates
+
+    _build6r_augment_before_v317
+    _build6r_v317_reconcile_runtime_alias_candidates
+
+    _build6r_augment_before_v318
+    _build6r_v318_reconcile_previsual_candidates
+
+    _build6r_augment_before_v319
+    _build6r_v319_reconcile_live_phrase_candidates
+
+    _build6r_augment_before_v320
+    _build6r_v320_reconcile_live_semantic_candidates
+
+    _build6r_augment_before_v321
+    _build6r_v321_reconcile_remaining_live_semantic_candidates
+
+    _build6r_augment_before_v322
+    _build6r_v322_reconcile_fresh_live_composite_candidates
+
+    _build6r_augment_before_v323
+    _build6r_v323_reconcile_residual_live_semantic_boundaries
+
+    _build6r_augment_before_v324
+    _build6r_v324_reconcile_residual_canonical_semantic_atoms
+    """
+    result = await (
+        _build6r_augment_before_v324(
+            *args,
+            **kwargs,
+        )
+    )
+
+    return (
+        _build6r_v324_reconcile_residual_canonical_semantic_atoms(
+            result,
+            kwargs.get(
+                "verified"
+            ),
+            (
+                kwargs.get(
+                    "fields"
+                )
+                or {}
+            ),
+        )
+    )
