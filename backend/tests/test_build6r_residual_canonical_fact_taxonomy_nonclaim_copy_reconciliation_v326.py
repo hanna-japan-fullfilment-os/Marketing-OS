@@ -361,9 +361,9 @@ def test_v326_shared_prompt_blocks_unverified_comparison():
 
 
 def test_v326_prompt_versions_are_traceable():
-    assert PROMPT_VERSIONS["campaign_copy"].version == "1.5.0"
-    assert PROMPT_VERSIONS["carousel_plan"].version == "1.5.0"
-    assert PROMPT_VERSIONS["master_campaign_concept"].version == "1.6.0"
+    assert PROMPT_VERSIONS["campaign_copy"].version == "1.6.0"
+    assert PROMPT_VERSIONS["carousel_plan"].version == "1.6.0"
+    assert PROMPT_VERSIONS["master_campaign_concept"].version == "1.7.0"
     assert "creative_brief" not in PROMPT_VERSIONS
 
 

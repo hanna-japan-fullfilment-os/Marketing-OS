@@ -20733,3 +20733,930 @@ def _build6r_v326_candidate_supported(
         verified,
         fields,
     )
+
+# =============================================================================
+# BUILD6R_V327_CANONICAL_USAGE_INGREDIENT_TAXONOMY_META_PROVENANCE_HARDENING_V1
+# Append-only post-V3.26 repair.
+# =============================================================================
+
+def _build6r_v327_clone(
+    finding,
+    *,
+    claim_category=None,
+):
+    update = {}
+    if claim_category is not None:
+        update["claim_category"] = claim_category
+
+    if hasattr(finding, "model_copy"):
+        return finding.model_copy(update=update)
+
+    return ClaimFinding(
+        claim_text=getattr(finding, "claim_text", ""),
+        claim_category=(
+            claim_category
+            if claim_category is not None
+            else getattr(finding, "claim_category", "")
+        ),
+        source_field=getattr(finding, "source_field", ""),
+        evidence_status=getattr(
+            finding,
+            "evidence_status",
+            "UNSUPPORTED",
+        ),
+        allowed_source=getattr(finding, "allowed_source", ""),
+        reason=getattr(finding, "reason", ""),
+    )
+
+
+def _build6r_v327_has_deictic_or_meta_provenance_language(raw):
+    normalized = _build6r_semantic_normalize(raw)
+
+    if not normalized:
+        return False
+
+    return any(
+        marker in normalized
+        for marker in (
+            "esses nomes",
+            "estes nomes",
+            "essas denominacoes",
+            "estas denominacoes",
+            "este ingrediente",
+            "esse ingrediente",
+            "esta substancia",
+            "essa substancia",
+            "tudo acima",
+            "acima vem diretamente",
+            "vem diretamente das informacoes do fabricante",
+            "vem diretamente de informacoes do fabricante",
+            "informacoes verificadas fornecidas pelo fabricante",
+            "informacoes verificadas do fabricante",
+            "limitado as informacoes verificadas",
+            "limitada as informacoes verificadas",
+            "conteudo limitado as informacoes verificadas",
+            "conteudo limitado a informacoes verificadas",
+        )
+    )
+
+
+
+def _build6r_v327_phrase_present(
+    text,
+    phrase,
+):
+    haystack = " " + _build6r_semantic_normalize(text) + " "
+    needle = " " + _build6r_semantic_normalize(phrase) + " "
+    return needle in haystack
+
+
+def _build6r_v327_usage_alias_groups():
+    return (
+        (
+            ("desdobrar", "desdobre", "unfold"),
+            ("unfold the mask", "unfold"),
+        ),
+        (
+            ("ajustar", "ajuste", "encaixar", "fit"),
+            ("fit it around", "fit", "around the eyes and mouth"),
+        ),
+        (
+            (
+                "olhos e boca",
+                "olhos e da boca",
+                "ao redor dos olhos e boca",
+                "ao redor dos olhos e da boca",
+                "eyes and mouth",
+            ),
+            ("eyes and mouth",),
+        ),
+        (
+            (
+                "tirar o ar preso",
+                "tirar o ar",
+                "pressionar para tirar o ar",
+                "press out trapped air",
+                "trapped air",
+            ),
+            ("press out trapped air", "trapped air"),
+        ),
+        (
+            (
+                "cortes na regiao das bochechas",
+                "cortes das bochechas",
+                "cortes da bochecha",
+                "recortes das bochechas",
+                "recortes da bochecha",
+                "cheek cut",
+                "cheek cuts",
+            ),
+            ("cheek cut sections", "cheek cut"),
+        ),
+        (
+            (
+                "linha do rosto",
+                "contorno do rosto",
+                "face line",
+            ),
+            ("face line",),
+        ),
+        (
+            (
+                "palmas",
+                "palmas das maos",
+                "palms",
+            ),
+            ("palms",),
+        ),
+        (
+            (
+                "depois de remover",
+                "depois de tirar",
+                "apos remover",
+                "after removal",
+                "after removing",
+            ),
+            ("after removal",),
+        ),
+        (
+            (
+                "dobrar a mascara",
+                "dobrar a folha",
+                "mascara dobrada",
+                "folha dobrada",
+                "fold the mask",
+                "folding the mask",
+            ),
+            ("folding the mask", "fold the mask"),
+        ),
+        (
+            (
+                "passar no rosto",
+                "passar na pele",
+                "movimentos de limpeza",
+                "wiping",
+                "wipe",
+            ),
+            ("wiping",),
+        ),
+        (
+            (
+                "patting",
+                "light patting",
+                "batidinhas leves",
+                "leves batidinhas",
+                "toques leves",
+            ),
+            ("light patting", "patting"),
+        ),
+        (
+            (
+                "emulsao ou creme",
+                "finalizar com emulsao ou creme",
+                "seguir com emulsao ou creme",
+                "emulsion or cream",
+            ),
+            ("emulsion or cream",),
+        ),
+        (
+            ("manha", "morning"),
+            ("morning",),
+        ),
+        (
+            ("noite", "evening"),
+            ("evening",),
+        ),
+        (
+            (
+                "no lugar do tonico",
+                "em lugar do tonico",
+                "em substituicao ao tonico",
+                "in place of toner",
+            ),
+            ("in place of toner",),
+        ),
+    )
+
+
+def _build6r_v327_usage_supported(
+    finding,
+    verified,
+):
+    if verified is None:
+        return False
+
+    if (
+        str(
+            getattr(finding, "evidence_status", "")
+            or ""
+        ).upper()
+        != "UNSUPPORTED"
+    ):
+        return False
+
+    source_field = str(
+        getattr(finding, "source_field", "")
+        or ""
+    )
+    if not _build6r_v322_source_field_allowed(source_field):
+        return False
+
+    category = _build6r_v323_category(
+        getattr(finding, "claim_category", "")
+    )
+    if category != "instructions or directions":
+        return False
+
+    claim_text = getattr(finding, "claim_text", "")
+    raw = _build6r_semantic_normalize(
+        claim_text
+    )
+    if not raw:
+        return False
+
+    if (
+        _build6r_v327_has_deictic_or_meta_provenance_language(raw)
+        or _build6r_v321_has_contextual_reference(raw)
+        or _build6r_v322_has_meta_verification_language(raw)
+        or _build6r_v324_has_unsupported_positioning(raw)
+        or _build6r_v322_has_benefit_effect_language(raw)
+        or _build6r_v322_has_commercial_or_rank_language(raw)
+        or _build6r_v324_has_unsupported_origin_assertion(raw)
+        or _build6r_v322_has_stem_or_exosome_language(raw)
+    ):
+        return False
+
+    # Preserve the existing invented numbered-routine guard by evaluating the
+    # live taxonomy through the sealed canonical category before any step-label
+    # stripping occurs.
+    if _build6r_v322_has_unsupported_context_or_routine_sequence(
+        raw,
+        "directions for use",
+    ):
+        return False
+
+    usage = _build6r_semantic_normalize(
+        getattr(verified, "verified_usage", "")
+    )
+    if not usage:
+        return False
+
+    normalized = _build6r_semantic_normalize(
+        _build6r_v325_strip_numbered_step_labels(
+            claim_text
+        )
+    )
+    if not normalized:
+        return False
+
+    detected = []
+    allowed_alias_tokens = set()
+
+    for aliases, requirements in _build6r_v327_usage_alias_groups():
+        if any(
+            _build6r_v327_phrase_present(
+                normalized,
+                alias,
+            )
+            for alias in aliases
+        ):
+            detected.append((aliases, requirements))
+
+            if not any(
+                _build6r_v327_phrase_present(
+                    usage,
+                    requirement,
+                )
+                for requirement in requirements
+            ):
+                return False
+
+            for alias in aliases:
+                allowed_alias_tokens.update(
+                    re.findall(
+                        r"[a-z]+",
+                        _build6r_semantic_normalize(alias),
+                    )
+                )
+
+    if not detected:
+        return False
+
+    canonical_tokens = set(
+        re.findall(
+            r"\d+(?:[.,]\d+)?|[a-z]+",
+            usage,
+        )
+    )
+    raw_tokens = re.findall(
+        r"\d+(?:[.,]\d+)?|[a-z]+",
+        normalized,
+    )
+
+    raw_numbers = {
+        token.replace(",", ".")
+        for token in raw_tokens
+        if re.fullmatch(r"\d+(?:[.,]\d+)?", token)
+    }
+    canonical_numbers = {
+        token.replace(",", ".")
+        for token in canonical_tokens
+        if re.fullmatch(r"\d+(?:[.,]\d+)?", token)
+    }
+
+    if not raw_numbers.issubset(canonical_numbers):
+        return False
+
+    allowed = set(canonical_tokens)
+    allowed.update(allowed_alias_tokens)
+
+    # Grammar / attribution only. Timing, frequency, duration, efficacy and
+    # result vocabulary are intentionally absent.
+    allowed.update(
+        {
+            "a",
+            "ao",
+            "aos",
+            "as",
+            "o",
+            "os",
+            "um",
+            "uma",
+            "de",
+            "do",
+            "da",
+            "dos",
+            "das",
+            "em",
+            "no",
+            "na",
+            "nos",
+            "nas",
+            "por",
+            "para",
+            "pra",
+            "pela",
+            "pelo",
+            "pelas",
+            "pelos",
+            "com",
+            "e",
+            "ou",
+            "que",
+            "como",
+            "se",
+            "ser",
+            "algo",
+            "sao",
+            "tambem",
+            "descreve",
+            "informa",
+            "presenca",
+            "essa",
+            "esse",
+            "esta",
+            "este",
+            "toda",
+            "todo",
+            "inteira",
+            "inteiro",
+            "depois",
+            "apos",
+            "seguida",
+            "seguinte",
+            "seguida",
+            "conforme",
+            "segundo",
+            "fabricante",
+            "manufacturer",
+            "instrucoes",
+            "instrucao",
+            "orientacao",
+            "orientacoes",
+            "sugere",
+            "descreve",
+            "oficial",
+            "oficiais",
+            "official",
+            "passo",
+            "passos",
+            "uso",
+            "usar",
+            "usada",
+            "usado",
+            "usar",
+            "utilizavel",
+            "usavel",
+            "pode",
+            "possivel",
+            "modo",
+            "guia",
+            "mascara",
+            "mascaras",
+            "folha",
+            "folhas",
+            "tecido",
+            "pressionar",
+            "ajustar",
+            "encaixar",
+            "puxar",
+            "cortes",
+            "corte",
+            "recortes",
+            "recorte",
+            "regiao",
+            "bochecha",
+            "bochechas",
+            "longo",
+            "linha",
+            "rosto",
+            "palmas",
+            "maos",
+            "remover",
+            "tirar",
+            "dobrar",
+            "passar",
+            "leve",
+            "leves",
+            "finalizar",
+            "emulsao",
+            "creme",
+            "manha",
+            "noite",
+            "lugar",
+            "tonico",
+            "the",
+            "of",
+            "in",
+            "on",
+            "at",
+            "around",
+            "with",
+            "and",
+            "or",
+            "to",
+            "from",
+            "after",
+            "then",
+            "according",
+            "guidance",
+            "use",
+            "usage",
+            "fit",
+            "press",
+            "lift",
+            "along",
+            "whole",
+            "remove",
+            "fold",
+            "follow",
+            "place",
+            "mask",
+            "sheet",
+            "eyes",
+            "mouth",
+            "trapped",
+            "air",
+            "cheek",
+            "sections",
+            "face",
+            "line",
+            "palms",
+            "wiping",
+            "patting",
+            "emulsion",
+            "cream",
+            "morning",
+            "evening",
+            "toner",
+        }
+    )
+
+    provenance = _build6r_semantic_normalize(
+        getattr(verified, "provenance", "")
+    )
+    if "manufacturer official" not in provenance:
+        for token in ("oficial", "oficiais", "official"):
+            allowed.discard(token)
+
+    return all(
+        (
+            token.replace(",", ".")
+            in canonical_numbers
+            if re.fullmatch(r"\d+(?:[.,]\d+)?", token)
+            else token in allowed
+        )
+        for token in raw_tokens
+    )
+
+
+
+def _build6r_v327_ingredient_list_header_supported(
+    claim_text,
+):
+    raw = str(claim_text or "")
+    if ":" not in raw:
+        return False
+
+    header = _build6r_semantic_normalize(
+        raw.split(":", 1)[0]
+    )
+
+    return header in {
+        "ingredientes",
+        "ingredients",
+        "ingredientes listados pelo fabricante",
+        "o fabricante informa a presenca de",
+        "o fabricante tambem informa a presenca de",
+        "fabricante informa a presenca de",
+        "fabricante tambem informa a presenca de",
+        "manufacturer lists",
+        "manufacturer also lists",
+        "manufacturer reports the presence of",
+        "contains",
+        "contem",
+    }
+
+
+def _build6r_v327_ingredient_segments(
+    claim_text,
+):
+    raw = str(claim_text or "")
+    if not raw.strip():
+        return []
+
+    # This repair is deliberately list-only. Plain prose ingredient claims
+    # remain owned by the sealed prior chain. The header is also bounded so
+    # unsupported positioning/origin language cannot be hidden before ":".
+    if not _build6r_v327_ingredient_list_header_supported(raw):
+        return []
+
+    body = raw.split(":", 1)[1]
+
+    if not re.search(r"[•·▪●;\n]", body):
+        return []
+
+    segments = [
+        segment.strip(" \t\r\n-–—•·▪●")
+        for segment in re.split(
+            r"[•·▪●;\n]+",
+            body,
+        )
+        if segment.strip(" \t\r\n-–—•·▪●")
+    ]
+
+    return segments
+
+
+def _build6r_v327_ingredient_alias_specs(
+    verified,
+):
+    values = getattr(
+        verified,
+        "verified_ingredients",
+        None,
+    )
+
+    if not isinstance(
+        values,
+        (
+            list,
+            tuple,
+            set,
+        ),
+    ):
+        return []
+
+    specs = []
+
+    for value in values:
+        original = str(value or "").strip()
+        if not original:
+            continue
+
+        base_original = original.split("(", 1)[0].strip()
+        base = _build6r_semantic_normalize(base_original)
+        full = _build6r_semantic_normalize(original)
+
+        if not base:
+            continue
+
+        aliases = {base}
+
+        # Bounded PT/EN chemical-name relation.  This is a language relation,
+        # not product evidence; the English canonical atom must exist first.
+        if base == "glutathione":
+            aliases.add("glutationa")
+
+        qualifier_tokens = set(
+            re.findall(
+                r"[a-z0-9]+",
+                full,
+            )
+        )
+        qualifier_tokens.update(
+            {
+                "de",
+                "do",
+                "da",
+                "dos",
+                "das",
+            }
+        )
+
+        if "vitamin" in qualifier_tokens:
+            qualifier_tokens.add("vitamina")
+
+        if "derivative" in qualifier_tokens:
+            qualifier_tokens.update(
+                {
+                    "derivado",
+                    "derivada",
+                }
+            )
+
+        specs.append(
+            (
+                aliases,
+                qualifier_tokens,
+            )
+        )
+
+    return specs
+
+
+def _build6r_v327_ingredient_segment_supported(
+    segment,
+    specs,
+):
+    normalized = _build6r_semantic_normalize(segment)
+    if not normalized:
+        return False
+
+    tokens = re.findall(
+        r"[a-z0-9]+",
+        normalized,
+    )
+
+    for aliases, qualifier_tokens in specs:
+        for alias in aliases:
+            if normalized == alias:
+                return True
+
+            prefix = alias + " "
+            if not normalized.startswith(prefix):
+                continue
+
+            alias_tokens = set(
+                re.findall(
+                    r"[a-z0-9]+",
+                    alias,
+                )
+            )
+            residual = [
+                token
+                for token in tokens
+                if token not in alias_tokens
+            ]
+
+            if residual and all(
+                token in qualifier_tokens
+                for token in residual
+            ):
+                return True
+
+    return False
+
+
+def _build6r_v327_explicit_ingredient_list_supported(
+    finding,
+    verified,
+):
+    if verified is None:
+        return False
+
+    if (
+        str(
+            getattr(finding, "evidence_status", "")
+            or ""
+        ).upper()
+        != "UNSUPPORTED"
+    ):
+        return False
+
+    source_field = str(
+        getattr(finding, "source_field", "")
+        or ""
+    )
+    if not _build6r_v322_source_field_allowed(source_field):
+        return False
+
+    category = _build6r_v323_category(
+        getattr(finding, "claim_category", "")
+    )
+    if category != "ingredients":
+        return False
+
+    raw = _build6r_semantic_normalize(
+        getattr(finding, "claim_text", "")
+    )
+    if not raw:
+        return False
+
+    if (
+        _build6r_v327_has_deictic_or_meta_provenance_language(raw)
+        or _build6r_v321_has_contextual_reference(raw)
+        or _build6r_v322_has_meta_verification_language(raw)
+        or _build6r_v324_has_unsupported_positioning(raw)
+        or _build6r_v322_has_benefit_effect_language(raw)
+        or _build6r_v322_has_commercial_or_rank_language(raw)
+        or _build6r_v324_has_unsupported_origin_assertion(raw)
+        or _build6r_v322_has_stem_or_exosome_language(raw)
+    ):
+        return False
+
+    segments = _build6r_v327_ingredient_segments(
+        getattr(finding, "claim_text", "")
+    )
+    if len(segments) < 2:
+        return False
+
+    specs = _build6r_v327_ingredient_alias_specs(
+        verified
+    )
+    if not specs:
+        return False
+
+    return all(
+        _build6r_v327_ingredient_segment_supported(
+            segment,
+            specs,
+        )
+        for segment in segments
+    )
+
+
+def _build6r_v327_candidate_supported(
+    finding,
+    verified,
+    fields,
+):
+    if verified is None:
+        return False
+
+    if (
+        str(
+            getattr(finding, "evidence_status", "")
+            or ""
+        ).upper()
+        != "UNSUPPORTED"
+    ):
+        return False
+
+    raw = _build6r_semantic_normalize(
+        getattr(finding, "claim_text", "")
+    )
+    if not raw:
+        return False
+
+    if _build6r_v327_has_deictic_or_meta_provenance_language(raw):
+        return False
+
+    category = _build6r_v323_category(
+        getattr(finding, "claim_category", "")
+    )
+
+    # Meta provenance / endorsement remains intentionally unsupported.
+    if category == "endorsement or testimonial":
+        return False
+
+    if category == "instructions or directions":
+        return _build6r_v327_usage_supported(
+            finding,
+            verified,
+        )
+
+    if category == "ingredients":
+        return _build6r_v327_explicit_ingredient_list_supported(
+            finding,
+            verified,
+        )
+
+    return False
+
+
+def _build6r_v327_reconcile_usage_ingredients_and_meta_provenance(
+    result,
+    verified,
+    fields,
+):
+    reconciled = []
+
+    for finding in (result.findings or []):
+        if _build6r_v327_candidate_supported(
+            finding,
+            verified,
+            fields,
+        ):
+            reconciled.append(
+                _build6r_v323_updated_finding(
+                    finding,
+                    allowed_source="verified_product_facts",
+                    reason=(
+                        "Build 6R V3.27 deterministic reconciliation accepted "
+                        "the unchanged claim only after complete canonical "
+                        "verified_usage or explicit verified_ingredients proof; "
+                        "taxonomy aliases created no evidence, every explicit "
+                        "ingredient was accounted for, and deictic/meta "
+                        "provenance language remained fail-closed."
+                    ),
+                )
+            )
+            continue
+
+        reconciled.append(finding)
+
+    original = list(result.findings or [])
+
+    if (
+        len(original) == len(reconciled)
+        and all(
+            left is right
+            for left, right
+            in zip(original, reconciled)
+        )
+    ):
+        return result
+
+    if hasattr(result, "model_copy"):
+        return result.model_copy(
+            update={"findings": reconciled}
+        )
+
+    return ClaimAuditResult(findings=reconciled)
+
+
+_build6r_augment_before_v327 = augment_with_ai_extraction
+
+
+async def augment_with_ai_extraction(
+    *args,
+    **kwargs,
+):
+    """
+    BUILD6R V3.27
+
+    Execute the complete sealed V3.26 chain exactly once, then perform only
+    residual canonical usage / strict explicit ingredient-list reconciliation.
+
+    _build6r_augment_before_v324
+    _build6r_v324_reconcile_residual_canonical_semantic_atoms
+    _build6r_augment_before_v325
+    _build6r_v325_reconcile_bounded_usage_and_nonfactual_directives
+    _build6r_augment_before_v326
+    _build6r_v326_reconcile_residual_taxonomy_and_nonclaims
+    _build6r_augment_before_v327
+    _build6r_v327_reconcile_usage_ingredients_and_meta_provenance
+    Historical wrapper contract marker: _build6r_augment_before_v32
+    Historical wrapper contract marker: _build6r_reconcile_generated_semantic_findings_v32
+    Historical wrapper contract marker: _build6r_augment_before_v33
+    Historical wrapper contract marker: _build6r_reconcile_generated_semantic_findings_v33
+    Historical wrapper contract marker: _build6r_augment_before_v34
+    Historical wrapper contract marker: _build6r_reconcile_generated_semantic_findings_v34
+    Historical wrapper contract marker: _build6r_augment_before_v35
+    Historical wrapper contract marker: _build6r_reconcile_generated_semantic_findings_v35
+    Historical wrapper contract marker: _build6r_augment_before_v311
+    Historical wrapper contract marker: _build6r_v311_reconcile_copy_stage_canonical_findings
+    Historical wrapper contract marker: _build6r_augment_before_v312
+    Historical wrapper contract marker: _build6r_v312_reconcile_copy_stage_canonical_findings
+    Historical wrapper contract marker: _build6r_augment_before_v313
+    Historical wrapper contract marker: _build6r_v313_reconcile_copy_stage_canonical_findings
+    Historical wrapper contract marker: _build6r_augment_before_v315
+    Historical wrapper contract marker: _build6r_v315_reconcile_semantic_candidates
+    Historical wrapper contract marker: _build6r_augment_before_v316
+    Historical wrapper contract marker: _build6r_v316_reconcile_live_taxonomy_candidates
+    Historical wrapper contract marker: _build6r_augment_before_v317
+    Historical wrapper contract marker: _build6r_v317_reconcile_runtime_alias_candidates
+    Historical wrapper contract marker: _build6r_augment_before_v318
+    Historical wrapper contract marker: _build6r_v318_reconcile_previsual_candidates
+    Historical wrapper contract marker: _build6r_augment_before_v319
+    Historical wrapper contract marker: _build6r_v319_reconcile_live_phrase_candidates
+    Historical wrapper contract marker: _build6r_augment_before_v320
+    Historical wrapper contract marker: _build6r_v320_reconcile_live_semantic_candidates
+    Historical wrapper contract marker: _build6r_augment_before_v321
+    Historical wrapper contract marker: _build6r_v321_reconcile_remaining_live_semantic_candidates
+    Historical wrapper contract marker: _build6r_augment_before_v322
+    Historical wrapper contract marker: _build6r_v322_reconcile_fresh_live_composite_candidates
+    Historical wrapper contract marker: _build6r_augment_before_v323
+    Historical wrapper contract marker: _build6r_v323_reconcile_residual_live_semantic_boundaries
+    """
+    result = await _build6r_augment_before_v327(
+        *args,
+        **kwargs,
+    )
+
+    return _build6r_v327_reconcile_usage_ingredients_and_meta_provenance(
+        result,
+        kwargs.get("verified"),
+        kwargs.get("fields") or {},
+    )
