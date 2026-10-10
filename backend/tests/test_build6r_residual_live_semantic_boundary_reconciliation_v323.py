@@ -260,21 +260,21 @@ def test_v323_prompt_versions_and_creative_brief_identity():
         PROMPT_VERSIONS[
             "master_campaign_concept"
         ].version
-        == "1.5.0"
+        == "1.6.0"
     )
 
     assert (
         PROMPT_VERSIONS[
             "campaign_copy"
         ].version
-        == "1.4.0"
+        == "1.5.0"
     )
 
     assert (
         PROMPT_VERSIONS[
             "carousel_plan"
         ].version
-        == "1.4.0"
+        == "1.5.0"
     )
 
     assert "creative_brief" not in PROMPT_VERSIONS

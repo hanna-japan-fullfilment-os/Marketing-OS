@@ -50,7 +50,7 @@ class PromptSpec:
 PROMPT_VERSIONS: dict[str, PromptSpec] = {
     "campaign_copy": PromptSpec(
         purpose="campaign_copy",
-        version='1.4.0',
+        version='1.5.0',
         file_path="services/orchestrator.py::run_copy_stage (CampaignCopy)",
         variables=[
             "brand_name", "brand_voice", "brand_language_rules", "brand_preferred_ctas",
@@ -62,25 +62,25 @@ PROMPT_VERSIONS: dict[str, PromptSpec] = {
             "language",
         ],
         change_notes=(
-            ((("Build 1 (Part E/F): brand/product-facts/strategy/research/platform/language grounding "
+            (((("Build 1 (Part E/F): brand/product-facts/strategy/research/platform/language grounding "
             "all reach this prompt for the first time; pt-BR and en each get independently "
-            "language-native instructions (Part F) instead of one shared prompt.") + ' Build 6R sparse-fact grounding hardening: unknown facts remain unknown; research, category, product notes, and upstream AI output are not product-fact evidence; visual briefs obey the same verified-facts boundary.' + ' Build 6R Stage 3D anti-inference hardening: shared verified-facts grounding now explicitly forbids temporal/routine inference, package-purpose inference, purchase-behavior inference, subjective quality/comfort inference, and unverified usage modifiers.' + ' Build 6R V3.23 residual semantic-boundary hardening: prohibit unsupported evaluative positioning, preserve same-field exosome/no-stem qualification, and keep planning metadata separate from product-fact evidence.'))
+            "language-native instructions (Part F) instead of one shared prompt.") + ' Build 6R sparse-fact grounding hardening: unknown facts remain unknown; research, category, product notes, and upstream AI output are not product-fact evidence; visual briefs obey the same verified-facts boundary.' + ' Build 6R Stage 3D anti-inference hardening: shared verified-facts grounding now explicitly forbids temporal/routine inference, package-purpose inference, purchase-behavior inference, subjective quality/comfort inference, and unverified usage modifiers.' + ' Build 6R V3.23 residual semantic-boundary hardening: prohibit unsupported evaluative positioning, preserve same-field exosome/no-stem qualification, and keep planning metadata separate from product-fact evidence.' + ' Build 6R V3.26 residual taxonomy/non-claim hardening: route only canonically grounded residual taxonomy drift through sealed evaluators; reject unsupported comparative/superlative rhetoric; and prohibit rhetorical comparison hooks unless verified comparison evidence explicitly supports every comparative relation.')))
         ),
     ),
     "carousel_plan": PromptSpec(
         purpose="carousel_plan",
-        version='1.4.0',
+        version='1.5.0',
         file_path="services/orchestrator.py::run_copy_stage (CarouselPlan)",
         variables=[
             "brand_name", "brand_voice", "verified_product_facts", "strategy_angle",
             "strategy_key_message", "platform_key", "platform_content_types", "language",
             "target_slide_count",
         ],
-        change_notes=((("Build 1 (Part E/F): same grounding expansion as campaign_copy, generated per language.") + ' Build 6R sparse-fact grounding hardening: unknown facts remain unknown; research, category, product notes, and upstream AI output are not product-fact evidence; visual briefs obey the same verified-facts boundary.' + ' Build 6R Stage 3D anti-inference hardening: shared verified-facts grounding now explicitly forbids temporal/routine inference, package-purpose inference, purchase-behavior inference, subjective quality/comfort inference, and unverified usage modifiers.' + ' Build 6R V3.23 residual semantic-boundary hardening: prohibit unsupported evaluative positioning, preserve same-field exosome/no-stem qualification, and keep planning metadata separate from product-fact evidence.')),
+        change_notes=(((("Build 1 (Part E/F): same grounding expansion as campaign_copy, generated per language.") + ' Build 6R sparse-fact grounding hardening: unknown facts remain unknown; research, category, product notes, and upstream AI output are not product-fact evidence; visual briefs obey the same verified-facts boundary.' + ' Build 6R Stage 3D anti-inference hardening: shared verified-facts grounding now explicitly forbids temporal/routine inference, package-purpose inference, purchase-behavior inference, subjective quality/comfort inference, and unverified usage modifiers.' + ' Build 6R V3.23 residual semantic-boundary hardening: prohibit unsupported evaluative positioning, preserve same-field exosome/no-stem qualification, and keep planning metadata separate from product-fact evidence.' + ' Build 6R V3.26 residual taxonomy/non-claim hardening: route only canonically grounded residual taxonomy drift through sealed evaluators; reject unsupported comparative/superlative rhetoric; and prohibit rhetorical comparison hooks unless verified comparison evidence explicitly supports every comparative relation.'))),
     ),
     "master_campaign_concept": PromptSpec(
         purpose="master_campaign_concept",
-        version='1.5.0',
+        version='1.6.0',
         file_path="services/orchestrator.py::run_copy_stage (MasterCampaignConcept)",
         variables=[
             "strategy_angle", "strategy_key_message", "strategy_audience", "strategy_objective",
@@ -92,8 +92,8 @@ PROMPT_VERSIONS: dict[str, PromptSpec] = {
             "campaign_archetype_catalog",
         ],
         change_notes=(
-            ((("Build 2 (Part E): the ONE campaign concept generated once per campaign and held constant "
-            "across every platform/language adaptation — deliberately platform- and language-agnostic.") + ' Build 6R sparse-fact grounding hardening: unknown facts remain unknown; research, category, product notes, and upstream AI output are not product-fact evidence; visual briefs obey the same verified-facts boundary.' + ' Build 6R Stage 3D anti-inference hardening: shared verified-facts grounding now explicitly forbids temporal/routine inference, package-purpose inference, purchase-behavior inference, subjective quality/comfort inference, and unverified usage modifiers.' + ' Build 6R V3.23 residual semantic-boundary hardening: prohibit unsupported evaluative positioning, preserve same-field exosome/no-stem qualification, and keep planning metadata separate from product-fact evidence.'))
+            (((("Build 2 (Part E): the ONE campaign concept generated once per campaign and held constant "
+            "across every platform/language adaptation — deliberately platform- and language-agnostic.") + ' Build 6R sparse-fact grounding hardening: unknown facts remain unknown; research, category, product notes, and upstream AI output are not product-fact evidence; visual briefs obey the same verified-facts boundary.' + ' Build 6R Stage 3D anti-inference hardening: shared verified-facts grounding now explicitly forbids temporal/routine inference, package-purpose inference, purchase-behavior inference, subjective quality/comfort inference, and unverified usage modifiers.' + ' Build 6R V3.23 residual semantic-boundary hardening: prohibit unsupported evaluative positioning, preserve same-field exosome/no-stem qualification, and keep planning metadata separate from product-fact evidence.' + ' Build 6R V3.26 residual taxonomy/non-claim hardening: route only canonically grounded residual taxonomy drift through sealed evaluators; reject unsupported comparative/superlative rhetoric; and prohibit rhetorical comparison hooks unless verified comparison evidence explicitly supports every comparative relation.')))
         ),
     ),
     "platform_adaptation": PromptSpec(

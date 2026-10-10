@@ -302,9 +302,9 @@ def test_sealed_v32_categories_do_not_get_reinterpreted_by_v33():
 
 
 def test_prompt_versions_bumped_for_v33():
-    assert PROMPT_VERSIONS["campaign_copy"].version == "1.4.0"
-    assert PROMPT_VERSIONS["carousel_plan"].version == "1.4.0"
-    assert PROMPT_VERSIONS["master_campaign_concept"].version == "1.5.0"
+    assert PROMPT_VERSIONS["campaign_copy"].version == "1.5.0"
+    assert PROMPT_VERSIONS["carousel_plan"].version == "1.5.0"
+    assert PROMPT_VERSIONS["master_campaign_concept"].version == "1.6.0"
 
 
 def test_cultural_market_context_hard_stop_is_shared():

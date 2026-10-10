@@ -87,9 +87,9 @@ def test_discovery_carousel_receives_full_verified_fact_block_per_product():
 
 def test_sparse_fact_prompt_versions_are_traceable():
     expected = {
-        "campaign_copy": "1.4.0",
-        "carousel_plan": "1.4.0",
-        "master_campaign_concept": "1.5.0",
+        "campaign_copy": "1.5.0",
+        "carousel_plan": "1.5.0",
+        "master_campaign_concept": "1.6.0",
     }
 
     for purpose, version in expected.items():

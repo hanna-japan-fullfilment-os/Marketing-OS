@@ -19611,3 +19611,1125 @@ async def augment_with_ai_extraction(
             ),
         )
     )
+
+# =====================================================================
+# BUILD6R_V326_RESIDUAL_CANONICAL_FACT_TAXONOMY_NONCLAIM_COPY_RECONCILIATION_V1
+# Append-only post-V3.25 repair.
+# =====================================================================
+
+def _build6r_v326_live_category_alias(finding):
+    category = _build6r_v323_category(
+        getattr(finding, "claim_category", "")
+    )
+    aliases = {
+        "product quantity or size": "product format or quantity",
+        "free from or without": "ingredients composition",
+        "ingredients or composition": "ingredients composition",
+    }
+    return aliases.get(category)
+
+
+def _build6r_v326_clone(
+    finding,
+    *,
+    claim_text=None,
+    claim_category=None,
+):
+    update = {}
+    if claim_text is not None:
+        update["claim_text"] = claim_text
+    if claim_category is not None:
+        update["claim_category"] = claim_category
+
+    if hasattr(finding, "model_copy"):
+        return finding.model_copy(update=update)
+
+    return ClaimFinding(
+        claim_text=(
+            claim_text
+            if claim_text is not None
+            else getattr(finding, "claim_text", "")
+        ),
+        claim_category=(
+            claim_category
+            if claim_category is not None
+            else getattr(finding, "claim_category", "")
+        ),
+        source_field=getattr(finding, "source_field", ""),
+        evidence_status=getattr(
+            finding,
+            "evidence_status",
+            "UNSUPPORTED",
+        ),
+        allowed_source=getattr(finding, "allowed_source", ""),
+        reason=getattr(finding, "reason", ""),
+    )
+
+
+def _build6r_v326_structural_nonclaim_label(finding):
+    if (
+        str(
+            getattr(finding, "evidence_status", "")
+            or ""
+        ).upper()
+        != "UNSUPPORTED"
+    ):
+        return False
+
+    category = _build6r_v323_category(
+        getattr(finding, "claim_category", "")
+    )
+    if category != "ingredients or composition":
+        return False
+
+    source_field = str(
+        getattr(finding, "source_field", "")
+        or ""
+    )
+    if not _build6r_v322_source_field_allowed(source_field):
+        return False
+
+    raw = _build6r_semantic_normalize(
+        getattr(finding, "claim_text", "")
+    )
+    if not raw:
+        return False
+
+    patterns = (
+        r"ingredientes listados pelo fabricante(?: selecao)?",
+        r"ingredients listed by (?:the )?manufacturer(?: selection)?",
+    )
+    return any(
+        re.fullmatch(pattern, raw) is not None
+        for pattern in patterns
+    )
+
+
+def _build6r_v326_product_category_context_supported(
+    finding,
+    verified,
+    fields,
+):
+    category = _build6r_v323_category(
+        getattr(finding, "claim_category", "")
+    )
+    if category != "product category context":
+        return False
+
+    raw = _build6r_semantic_normalize(
+        getattr(finding, "claim_text", "")
+    )
+    remainder = re.sub(
+        r"^(?:categoria|category)\s+",
+        "",
+        raw,
+        count=1,
+    ).strip()
+
+    if not remainder or remainder == raw:
+        return False
+
+    remapped = _build6r_v326_clone(
+        finding,
+        claim_text=remainder,
+        claim_category="product identity",
+    )
+
+    return _build6r_v322_candidate_supported(
+        remapped,
+        verified,
+        fields,
+    )
+
+
+def _build6r_v326_visual_directive_with_canonical_residue(
+    finding,
+    verified,
+):
+    if verified is None:
+        return False
+
+    if (
+        str(
+            getattr(finding, "evidence_status", "")
+            or ""
+        ).upper()
+        != "UNSUPPORTED"
+    ):
+        return False
+
+    category = _build6r_v323_category(
+        getattr(finding, "claim_category", "")
+    )
+    if category != "visual presentation or packaging":
+        return False
+
+    source_field = str(
+        getattr(finding, "source_field", "")
+        or ""
+    )
+    if source_field not in {
+        "master_concept.visual_identity",
+        "creative.creative_brief.visual_prompt",
+    }:
+        return False
+
+    raw = _build6r_semantic_normalize(
+        getattr(finding, "claim_text", "")
+    )
+    if not raw:
+        return False
+
+    if (
+        _build6r_v324_has_unsupported_positioning(raw)
+        or _build6r_v322_has_benefit_effect_language(raw)
+        or _build6r_v322_has_commercial_or_rank_language(raw)
+        or _build6r_v324_has_unsupported_origin_assertion(raw)
+        or _build6r_v322_has_stem_or_exosome_language(raw)
+    ):
+        return False
+
+    raw_numbers = {
+        value.replace(",", ".")
+        for value in re.findall(
+            r"\d+(?:[.,]\d+)?",
+            raw,
+        )
+    }
+    raw_atoms = _build6r_v324_quantity_atoms(raw)
+
+    # This V3.26 path is only for visual instructions that contain
+    # independently provable canonical factual residue. Pure layout remains
+    # owned by the sealed V3.25 rule.
+    if not raw_numbers or not raw_atoms:
+        return False
+
+    atom_numbers = {
+        number
+        for number, _family
+        in raw_atoms
+    }
+    if raw_numbers != atom_numbers:
+        return False
+
+    canonical_atoms = _build6r_v324_quantity_atoms(
+        _build6r_v322_canonical_text(verified)
+    )
+    if not raw_atoms.issubset(canonical_atoms):
+        return False
+
+    tokens = re.findall(
+        r"\d+(?:[.,]\d+)?|[a-z]+",
+        raw,
+    )
+
+    identity_text = " ".join(
+        [
+            str(
+                getattr(
+                    verified,
+                    "verified_name",
+                    "",
+                )
+                or ""
+            ),
+            str(
+                getattr(
+                    verified,
+                    "verified_variant",
+                    "",
+                )
+                or ""
+            ),
+        ]
+    )
+    identity_tokens = set(
+        re.findall(
+            r"[a-z]+",
+            _build6r_semantic_normalize(identity_text),
+        )
+    )
+
+    quantity_unit_tokens = {
+        "sheet", "sheets", "folha", "folhas",
+        "mask", "masks", "mascara", "mascaras",
+        "pouch", "pouches", "pack", "packs",
+        "pacote", "pacotes", "ml",
+        "milliliter", "milliliters",
+        "mililitro", "mililitros",
+    }
+
+    visual_tokens = {
+        "a", "o", "os", "as", "um", "uma", "the", "an",
+        "de", "do", "da", "dos", "das", "of", "in", "em",
+        "no", "na", "nos", "nas", "com", "with", "e", "and",
+        "para", "for", "as", "is", "como", "all",
+        "centro", "center", "centre", "composicao", "composition",
+        "layout", "hero", "foco", "focus", "visual",
+        "escala", "scale", "realista", "realistic",
+        "sombra", "sombras", "shadow", "shadows",
+        "crivel", "criveis", "credible",
+        "leve", "light", "reflexao", "reflection",
+        "produto", "product", "fisico", "physical",
+        "sensacao", "sensation", "reforcar", "reinforce",
+        "exact", "exato", "exata", "supplied",
+        "fornecido", "fornecida", "owner",
+        "proprietario", "proprietaria", "photo", "foto",
+        "preserve", "preservar", "true", "real", "reais",
+        "proportion", "proportions", "proporcao", "proporcoes",
+        "logo", "logos", "color", "colors", "cor", "cores",
+        "printed", "impresso", "impressa",
+        "typography", "tipografia",
+        "visible", "visivel", "visiveis",
+        "detail", "details", "detalhe", "detalhes",
+        "aparencia", "appearance", "fidelity", "fidelidade",
+    }
+
+    for token in tokens:
+        if re.fullmatch(r"\d+(?:[.,]\d+)?", token):
+            continue
+        if (
+            token in identity_tokens
+            or token in quantity_unit_tokens
+            or token in visual_tokens
+        ):
+            continue
+        return False
+
+    return True
+
+
+def _build6r_v326_candidate_supported(
+    finding,
+    verified,
+    fields,
+):
+    if verified is None:
+        return False
+
+    if (
+        str(
+            getattr(finding, "evidence_status", "")
+            or ""
+        ).upper()
+        != "UNSUPPORTED"
+    ):
+        return False
+
+    source_field = str(
+        getattr(finding, "source_field", "")
+        or ""
+    )
+    if not _build6r_v322_source_field_allowed(source_field):
+        return False
+
+    raw = _build6r_semantic_normalize(
+        getattr(finding, "claim_text", "")
+    )
+    if not raw:
+        return False
+
+    category = _build6r_v323_category(
+        getattr(finding, "claim_category", "")
+    )
+
+    if category == "comparative or superlative claim":
+        return False
+
+    if (
+        _build6r_v321_has_contextual_reference(raw)
+        or _build6r_v322_has_meta_verification_language(raw)
+        or _build6r_v324_has_unsupported_positioning(raw)
+        or _build6r_v322_has_benefit_effect_language(raw)
+        or _build6r_v322_has_commercial_or_rank_language(raw)
+        or _build6r_v324_has_unsupported_origin_assertion(raw)
+        or _build6r_v322_has_stem_or_exosome_language(raw)
+    ):
+        return False
+
+    if _build6r_v325_candidate_supported(
+        finding,
+        verified,
+        fields,
+    ):
+        return True
+
+    if category == "product category context":
+        return _build6r_v326_product_category_context_supported(
+            finding,
+            verified,
+            fields,
+        )
+
+    alias = _build6r_v326_live_category_alias(finding)
+    if not alias:
+        return False
+
+    remapped = _build6r_v326_clone(
+        finding,
+        claim_category=alias,
+    )
+
+    return _build6r_v325_candidate_supported(
+        remapped,
+        verified,
+        fields,
+    )
+
+
+def _build6r_v326_reconcile_residual_taxonomy_and_nonclaims(
+    result,
+    verified,
+    fields,
+):
+    reconciled = []
+
+    for finding in (result.findings or []):
+        if _build6r_v326_structural_nonclaim_label(finding):
+            continue
+
+        if _build6r_v326_visual_directive_with_canonical_residue(
+            finding,
+            verified,
+        ):
+            continue
+
+        if _build6r_v326_candidate_supported(
+            finding,
+            verified,
+            fields,
+        ):
+            reconciled.append(
+                _build6r_v323_updated_finding(
+                    finding,
+                    allowed_source="verified_product_facts",
+                    reason=(
+                        "Build 6R V3.26 deterministic reconciliation "
+                        "accepted the unchanged factual claim only after "
+                        "bounded live taxonomy routing and sealed canonical "
+                        "evidence evaluation; taxonomy labels themselves "
+                        "created no evidence and research remained ineligible."
+                    ),
+                )
+            )
+            continue
+
+        reconciled.append(finding)
+
+    original = list(result.findings or [])
+
+    if (
+        len(original) == len(reconciled)
+        and all(
+            left is right
+            for left, right
+            in zip(original, reconciled)
+        )
+    ):
+        return result
+
+    if hasattr(result, "model_copy"):
+        return result.model_copy(
+            update={"findings": reconciled}
+        )
+
+    return ClaimAuditResult(findings=reconciled)
+
+
+_build6r_augment_before_v326 = augment_with_ai_extraction
+
+
+async def augment_with_ai_extraction(
+    *args,
+    **kwargs,
+):
+    """
+    BUILD6R V3.26
+
+    Execute the complete sealed V3.25 chain exactly once, then perform only
+    residual canonical taxonomy / structural-nonclaim / bounded visual
+    reconciliation.
+
+    _build6r_augment_before_v32
+    _build6r_reconcile_generated_semantic_findings_v32
+    _build6r_augment_before_v33
+    _build6r_reconcile_generated_semantic_findings_v33
+    _build6r_augment_before_v34
+    _build6r_reconcile_generated_semantic_findings_v34
+    _build6r_augment_before_v35
+    _build6r_reconcile_generated_semantic_findings_v35
+    _build6r_augment_before_v311
+    _build6r_v311_reconcile_copy_stage_canonical_findings
+    _build6r_augment_before_v312
+    _build6r_v312_reconcile_copy_stage_canonical_findings
+    _build6r_augment_before_v313
+    _build6r_v313_reconcile_copy_stage_canonical_findings
+    _build6r_augment_before_v315
+    _build6r_v315_reconcile_semantic_candidates
+    _build6r_augment_before_v316
+    _build6r_v316_reconcile_live_taxonomy_candidates
+    _build6r_augment_before_v317
+    _build6r_v317_reconcile_runtime_alias_candidates
+    _build6r_augment_before_v318
+    _build6r_v318_reconcile_previsual_candidates
+    _build6r_augment_before_v319
+    _build6r_v319_reconcile_live_phrase_candidates
+    _build6r_augment_before_v320
+    _build6r_v320_reconcile_live_semantic_candidates
+    _build6r_augment_before_v321
+    _build6r_v321_reconcile_remaining_live_semantic_candidates
+    _build6r_augment_before_v322
+    _build6r_v322_reconcile_fresh_live_composite_candidates
+    _build6r_augment_before_v323
+    _build6r_v323_reconcile_residual_live_semantic_boundaries
+    _build6r_augment_before_v324
+    _build6r_v324_reconcile_residual_canonical_semantic_atoms
+    _build6r_augment_before_v325
+    _build6r_v325_reconcile_bounded_usage_and_nonfactual_directives
+    _build6r_augment_before_v326
+    _build6r_v326_reconcile_residual_taxonomy_and_nonclaims
+    """
+    result = await _build6r_augment_before_v326(
+        *args,
+        **kwargs,
+    )
+
+    return _build6r_v326_reconcile_residual_taxonomy_and_nonclaims(
+        result,
+        kwargs.get("verified"),
+        kwargs.get("fields") or {},
+    )
+
+# =====================================================================
+# BUILD6R_V326_TARGETED_DEDICATED_QA_REPAIR_V1
+#
+# Continuation after the first governed V3.26 dedicated suite exposed
+# bounded routing gaps. This remains append-only after V3.25 and does not
+# alter sealed historical implementations.
+# =====================================================================
+
+def _build6r_v326_structure_families_supported(
+    raw,
+    verified,
+):
+    if verified is None:
+        return False
+
+    raw_tokens = set(
+        re.findall(
+            r"[a-z]+",
+            _build6r_semantic_normalize(raw),
+        )
+    )
+    canonical_tokens = set(
+        re.findall(
+            r"[a-z]+",
+            _build6r_semantic_normalize(
+                _build6r_v322_canonical_text(
+                    verified
+                )
+            ),
+        )
+    )
+
+    families = (
+        {
+            "pouch", "pouches",
+            "pack", "packs",
+            "package", "packages",
+            "pacote", "pacotes",
+            "embalagem", "embalagens",
+        },
+        {
+            "sheet", "sheets",
+            "mask", "masks",
+            "mascara", "mascaras",
+            "folha", "folhas",
+            "unidade", "unidades",
+        },
+        {
+            "essence", "essencia",
+        },
+        {
+            "facial", "faciais",
+        },
+    )
+
+    for family in families:
+        if (
+            raw_tokens.intersection(family)
+            and not canonical_tokens.intersection(family)
+        ):
+            return False
+
+    return True
+
+
+def _build6r_v326_quantity_taxonomy_supported(
+    finding,
+    verified,
+):
+    if verified is None:
+        return False
+
+    category = _build6r_v323_category(
+        getattr(finding, "claim_category", "")
+    )
+    if category != "product quantity or size":
+        return False
+
+    raw = _build6r_semantic_normalize(
+        getattr(finding, "claim_text", "")
+    )
+    if not raw:
+        return False
+
+    raw_numbers = {
+        value.replace(",", ".")
+        for value in re.findall(
+            r"\d+(?:[.,]\d+)?",
+            raw,
+        )
+    }
+    if not raw_numbers:
+        return False
+
+    raw_atoms = _build6r_v324_quantity_atoms(
+        raw
+    )
+    if not raw_atoms:
+        return False
+
+    atom_numbers = {
+        number
+        for number, _family in raw_atoms
+    }
+    if raw_numbers != atom_numbers:
+        return False
+
+    canonical = _build6r_v322_canonical_text(
+        verified
+    )
+    canonical_atoms = _build6r_v324_quantity_atoms(
+        canonical
+    )
+    if not raw_atoms.issubset(canonical_atoms):
+        return False
+
+    if not _build6r_v326_structure_families_supported(
+        raw,
+        verified,
+    ):
+        return False
+
+    identity_text = " ".join(
+        [
+            str(
+                getattr(
+                    verified,
+                    "verified_name",
+                    "",
+                )
+                or ""
+            ),
+            str(
+                getattr(
+                    verified,
+                    "verified_variant",
+                    "",
+                )
+                or ""
+            ),
+        ]
+    )
+    identity_tokens = set(
+        re.findall(
+            r"[a-z]+",
+            _build6r_semantic_normalize(
+                identity_text
+            ),
+        )
+    )
+
+    neutral_tokens = {
+        # Grammar.
+        "a", "o", "os", "as", "um", "uma",
+        "the", "an",
+        "de", "do", "da", "dos", "das", "of",
+        "com", "with", "e", "and",
+        "em", "in", "no", "na", "nos", "nas",
+        "por", "per",
+        "dentro", "inside", "within",
+        "total",
+
+        # Quantity / package / format vocabulary.
+        "sheet", "sheets",
+        "mask", "masks",
+        "mascara", "mascaras",
+        "folha", "folhas",
+        "unidade", "unidades",
+        "pouch", "pouches",
+        "pack", "packs",
+        "package", "packages",
+        "pacote", "pacotes",
+        "embalagem", "embalagens",
+        "essence", "essencia",
+        "facial", "faciais",
+        "ml", "l",
+        "mg", "g", "kg",
+        "milliliter", "milliliters",
+        "millilitre", "millilitres",
+        "mililitro", "mililitros",
+        "liter", "liters",
+        "litre", "litres",
+        "litro", "litros",
+        "milligram", "milligrams",
+        "miligrama", "miligramas",
+        "gram", "grams",
+        "grama", "gramas",
+        "kilogram", "kilograms",
+        "quilograma", "quilogramas",
+        "piece", "pieces",
+        "peca", "pecas",
+        "mode", "modes",
+        "modo", "modos",
+        "level", "levels",
+        "nivel", "niveis",
+        "capsule", "capsules",
+        "capsula", "capsulas",
+        "tablet", "tablets",
+        "comprimido", "comprimidos",
+        "quantity", "quantidade",
+        "variante", "variant",
+        "versao", "version",
+
+        # Neutral relations.
+        "tem", "possui", "contem", "contendo",
+        "inclui", "vem",
+        "has", "contains", "containing",
+        "includes", "comes",
+    }
+
+    for token in re.findall(
+        r"\d+(?:[.,]\d+)?|[a-z]+",
+        raw,
+    ):
+        if re.fullmatch(
+            r"\d+(?:[.,]\d+)?",
+            token,
+        ):
+            continue
+        if (
+            token in neutral_tokens
+            or token in identity_tokens
+        ):
+            continue
+        return False
+
+    return True
+
+
+def _build6r_v326_single_free_from_supported(
+    finding,
+    verified,
+):
+    if verified is None:
+        return False
+
+    category = _build6r_v323_category(
+        getattr(finding, "claim_category", "")
+    )
+    if category != "free from or without":
+        return False
+
+    raw = _build6r_semantic_normalize(
+        getattr(finding, "claim_text", "")
+    )
+    canonical = _build6r_semantic_normalize(
+        _build6r_v322_canonical_text(
+            verified
+        )
+    )
+
+    groups = (
+        (
+            (
+                "colorant free",
+                "sem corante",
+                "sem corantes",
+            ),
+            (
+                "colorant free",
+                "sem corante",
+                "sem corantes",
+            ),
+        ),
+        (
+            (
+                "fragrance free",
+                "sem fragrancia",
+            ),
+            (
+                "fragrance free",
+                "sem fragrancia",
+            ),
+        ),
+        (
+            (
+                "mineral oil free",
+                "sem oleo mineral",
+            ),
+            (
+                "mineral oil free",
+                "sem oleo mineral",
+            ),
+        ),
+        (
+            (
+                "alcohol free",
+                "sem alcool",
+            ),
+            (
+                "alcohol free",
+                "sem alcool",
+            ),
+        ),
+    )
+
+    matched_groups = []
+
+    for raw_aliases, canonical_aliases in groups:
+        matched_raw = [
+            alias
+            for alias in raw_aliases
+            if alias in raw
+        ]
+        if not matched_raw:
+            continue
+
+        if not any(
+            alias in canonical
+            for alias in canonical_aliases
+        ):
+            return False
+
+        matched_groups.append(
+            tuple(matched_raw)
+        )
+
+    if not matched_groups:
+        return False
+
+    residue = raw
+    for aliases in matched_groups:
+        for alias in sorted(
+            aliases,
+            key=len,
+            reverse=True,
+        ):
+            residue = residue.replace(
+                alias,
+                " ",
+            )
+
+    allowed_residue = {
+        "a", "o", "os", "as", "um", "uma",
+        "the", "an",
+        "de", "do", "da", "dos", "das", "of",
+        "e", "and",
+        "formula", "formulacao",
+        "formulae", "formulation",
+        "adicionado", "adicionada",
+        "adicionados", "adicionadas",
+        "added",
+        "livre", "free",
+        "segundo", "according",
+        "fabricante", "manufacturer",
+        "descreve", "described",
+        "declara", "states",
+        "como", "as",
+    }
+
+    residue_tokens = re.findall(
+        r"\d+(?:[.,]\d+)?|[a-z]+",
+        residue,
+    )
+
+    return all(
+        token in allowed_residue
+        for token in residue_tokens
+    )
+
+
+def _build6r_v326_visual_directive_with_canonical_residue(
+    finding,
+    verified,
+):
+    if verified is None:
+        return False
+
+    if (
+        str(
+            getattr(finding, "evidence_status", "")
+            or ""
+        ).upper()
+        != "UNSUPPORTED"
+    ):
+        return False
+
+    category = _build6r_v323_category(
+        getattr(finding, "claim_category", "")
+    )
+    if category != "visual presentation or packaging":
+        return False
+
+    source_field = str(
+        getattr(finding, "source_field", "")
+        or ""
+    )
+    if source_field not in {
+        "master_concept.visual_identity",
+        "creative.creative_brief.visual_prompt",
+    }:
+        return False
+
+    raw = _build6r_semantic_normalize(
+        getattr(finding, "claim_text", "")
+    )
+    if not raw:
+        return False
+
+    if (
+        _build6r_v324_has_unsupported_positioning(raw)
+        or _build6r_v322_has_benefit_effect_language(raw)
+        or _build6r_v322_has_commercial_or_rank_language(raw)
+        or _build6r_v324_has_unsupported_origin_assertion(raw)
+        or _build6r_v322_has_stem_or_exosome_language(raw)
+    ):
+        return False
+
+    raw_numbers = {
+        value.replace(",", ".")
+        for value in re.findall(
+            r"\d+(?:[.,]\d+)?",
+            raw,
+        )
+    }
+    raw_atoms = _build6r_v324_quantity_atoms(
+        raw
+    )
+
+    if not raw_numbers or not raw_atoms:
+        return False
+
+    atom_numbers = {
+        number
+        for number, _family in raw_atoms
+    }
+    if raw_numbers != atom_numbers:
+        return False
+
+    canonical_atoms = _build6r_v324_quantity_atoms(
+        _build6r_v322_canonical_text(
+            verified
+        )
+    )
+    if not raw_atoms.issubset(canonical_atoms):
+        return False
+
+    if not _build6r_v326_structure_families_supported(
+        raw,
+        verified,
+    ):
+        return False
+
+    identity_text = " ".join(
+        [
+            str(
+                getattr(
+                    verified,
+                    "verified_name",
+                    "",
+                )
+                or ""
+            ),
+            str(
+                getattr(
+                    verified,
+                    "verified_variant",
+                    "",
+                )
+                or ""
+            ),
+        ]
+    )
+    identity_tokens = set(
+        re.findall(
+            r"[a-z]+",
+            _build6r_semantic_normalize(
+                identity_text
+            ),
+        )
+    )
+
+    quantity_unit_tokens = {
+        "sheet", "sheets", "folha", "folhas",
+        "mask", "masks", "mascara", "mascaras",
+        "pouch", "pouches", "pack", "packs",
+        "pacote", "pacotes",
+        "ml", "milliliter", "milliliters",
+        "mililitro", "mililitros",
+    }
+
+    visual_tokens = {
+        "a", "o", "os", "as", "um", "uma",
+        "the", "an",
+        "de", "do", "da", "dos", "das", "of",
+        "in", "em", "no", "na", "nos", "nas",
+        "com", "with", "e", "and",
+        "para", "for", "is", "como", "all",
+        "centro", "center", "centre",
+        "composicao", "composition",
+        "layout", "hero", "foco", "focus", "visual",
+        "escala", "scale", "realista", "realistic",
+        "sombra", "sombras", "shadow", "shadows",
+        "crivel", "criveis",
+        "crediveis", "credible",
+        "leve", "light",
+        "reflexao", "reflection",
+        "produto", "product",
+        "fisico", "physical",
+        "sensacao", "sensation",
+        "reforcar", "reinforce",
+        "exact", "exato", "exata",
+        "supplied", "fornecido", "fornecida",
+        "owner", "proprietario", "proprietaria",
+        "photo", "foto",
+        "preserve", "preservar",
+        "true", "real", "reais",
+        "proportion", "proportions",
+        "proporcao", "proporcoes",
+        "logo", "logos",
+        "color", "colors", "cor", "cores",
+        "printed", "impresso", "impressa",
+        "typography", "tipografia",
+        "visible", "visivel", "visiveis",
+        "detail", "details", "detalhe", "detalhes",
+        "aparencia", "appearance",
+        "fidelity", "fidelidade",
+    }
+
+    for token in re.findall(
+        r"\d+(?:[.,]\d+)?|[a-z]+",
+        raw,
+    ):
+        if re.fullmatch(
+            r"\d+(?:[.,]\d+)?",
+            token,
+        ):
+            continue
+        if (
+            token in identity_tokens
+            or token in quantity_unit_tokens
+            or token in visual_tokens
+        ):
+            continue
+        return False
+
+    return True
+
+
+def _build6r_v326_candidate_supported(
+    finding,
+    verified,
+    fields,
+):
+    if verified is None:
+        return False
+
+    if (
+        str(
+            getattr(finding, "evidence_status", "")
+            or ""
+        ).upper()
+        != "UNSUPPORTED"
+    ):
+        return False
+
+    source_field = str(
+        getattr(finding, "source_field", "")
+        or ""
+    )
+    if not _build6r_v322_source_field_allowed(
+        source_field
+    ):
+        return False
+
+    raw = _build6r_semantic_normalize(
+        getattr(finding, "claim_text", "")
+    )
+    if not raw:
+        return False
+
+    category = _build6r_v323_category(
+        getattr(finding, "claim_category", "")
+    )
+
+    # Explicit V3.26 fail-closed boundary.
+    if category == "comparative or superlative claim":
+        return False
+
+    if (
+        _build6r_v321_has_contextual_reference(raw)
+        or _build6r_v322_has_meta_verification_language(raw)
+        or _build6r_v324_has_unsupported_positioning(raw)
+        or _build6r_v322_has_benefit_effect_language(raw)
+        or _build6r_v322_has_commercial_or_rank_language(raw)
+        or _build6r_v324_has_unsupported_origin_assertion(raw)
+        or _build6r_v322_has_stem_or_exosome_language(raw)
+    ):
+        return False
+
+    # Preserve the complete sealed V3.25 support chain first.
+    if _build6r_v325_candidate_supported(
+        finding,
+        verified,
+        fields,
+    ):
+        return True
+
+    if category == "product quantity or size":
+        return _build6r_v326_quantity_taxonomy_supported(
+            finding,
+            verified,
+        )
+
+    if category == "free from or without":
+        return _build6r_v326_single_free_from_supported(
+            finding,
+            verified,
+        )
+
+    if category == "product category context":
+        return _build6r_v326_product_category_context_supported(
+            finding,
+            verified,
+            fields,
+        )
+
+    alias = _build6r_v326_live_category_alias(
+        finding
+    )
+    if not alias:
+        return False
+
+    remapped = _build6r_v326_clone(
+        finding,
+        claim_category=alias,
+    )
+
+    return _build6r_v325_candidate_supported(
+        remapped,
+        verified,
+        fields,
+    )

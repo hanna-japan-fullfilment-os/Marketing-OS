@@ -169,11 +169,11 @@ def test_stage3d_shared_instruction_reaches_strategy_and_copy_generation():
 def test_stage3d_traceable_prompt_versions():
     expected = {
         "campaign_copy":
-            "1.4.0",
-        "carousel_plan":
-            "1.4.0",
-        "master_campaign_concept":
             "1.5.0",
+        "carousel_plan":
+            "1.5.0",
+        "master_campaign_concept":
+            "1.6.0",
     }
 
     for purpose, version in expected.items():
