@@ -23640,3 +23640,934 @@ async def augment_with_ai_extraction(
         kwargs.get("verified"),
         kwargs.get("fields") or {},
     )
+
+# =====================================================================
+# BUILD6R_V329_LIVE_CLAIM_TAXONOMY_AUDITOR_PROVENANCE_HARDENING
+#
+# Safety contract:
+# - append-only after V3.28;
+# - no fuzzy similarity;
+# - category aliases never create evidence;
+# - canonical VerifiedProductFacts remain the only product evidence;
+# - unresolved synthetic auditor paraphrases are discarded, never evidence;
+# - unique verbatim auditor spans recover their original source field;
+# - mixed/unknown factual residue remains UNSUPPORTED;
+# - benefit/result/clinical/comparison/price/availability protections remain;
+# - exosome claims retain same-field no-stem-cell safety;
+# - neutral imagery metadata may pass only after every embedded product atom
+#   is validated against canonical facts;
+# - no provider/network/model call is introduced.
+# =====================================================================
+
+_build6r_augment_before_v329 = augment_with_ai_extraction
+
+
+_BUILD6R_V329_CATEGORY_MAP = {
+    "product format contents":
+        "product format or quantity",
+    "product format description":
+        "product feature or material",
+    "product ingredients contents":
+        "ingredients or composition",
+    "product ingredients absence":
+        "ingredients free from claim",
+    "usage directions":
+        "directions for use",
+    "product category":
+        "product category or positioning",
+}
+
+
+def _build6r_v329_clone(
+    finding,
+    *,
+    claim_text=None,
+    claim_category=None,
+    source_field=None,
+):
+    update = {
+        "claim_text":
+            (
+                finding.claim_text
+                if claim_text is None
+                else claim_text
+            ),
+        "claim_category":
+            (
+                finding.claim_category
+                if claim_category is None
+                else claim_category
+            ),
+        "source_field":
+            (
+                finding.source_field
+                if source_field is None
+                else source_field
+            ),
+    }
+
+    if hasattr(
+        finding,
+        "model_copy",
+    ):
+        return finding.model_copy(
+            update=update
+        )
+
+    return ClaimFinding(
+        claim_text=update["claim_text"],
+        claim_category=update["claim_category"],
+        source_field=update["source_field"],
+        evidence_status=getattr(
+            finding,
+            "evidence_status",
+            "UNSUPPORTED",
+        ),
+        allowed_source=getattr(
+            finding,
+            "allowed_source",
+            "",
+        ),
+        reason=getattr(
+            finding,
+            "reason",
+            "",
+        ),
+    )
+
+
+def _build6r_v329_package_provenance_hard_stop(
+    claim,
+):
+    return _build6r_v328_has_any(
+        claim,
+        (
+            "a propria embalagem ja diz",
+            "a embalagem ja diz",
+            "embalagem diz",
+            "reproduzido da embalagem",
+            "reproduzida da embalagem",
+            "impresso na embalagem",
+            "impressa na embalagem",
+            "impresso no rotulo",
+            "impressa no rotulo",
+            "printed on the package",
+            "printed on packaging",
+            "reproduced from the package",
+            "copied from the package",
+        ),
+    )
+
+
+def _build6r_v329_strip_verified_manufacturer_attribution(
+    claim,
+    verified,
+):
+    evidence = _build6r_v328_evidence_text(
+        verified,
+        "verified_description",
+        "verified_ingredients",
+        "verified_features",
+        "verified_usage",
+        "verified_claims",
+    )
+
+    if (
+        "manufacturer" not in evidence
+        and "fabricante" not in evidence
+    ):
+        return claim
+
+    stripped = claim
+
+    for phrase in (
+        "de acordo com o fabricante",
+        "conforme o fabricante",
+        "segundo o fabricante",
+        "descricao do fabricante",
+        "descrito pelo fabricante",
+        "descrita pelo fabricante",
+        "as stated by the manufacturer",
+        "according to the manufacturer",
+        "manufacturer described",
+        "manufacturer describes",
+    ):
+        stripped = stripped.replace(
+            phrase,
+            " ",
+        )
+
+    return " ".join(
+        stripped.split()
+    )
+
+
+def _build6r_v329_exosome_supported(
+    claim,
+    verified,
+):
+    if not _build6r_v328_claim_mentions_exosome(
+        claim
+    ):
+        return False
+
+    if _build6r_v328_positive_hard_stop(
+        claim,
+        verified,
+    ):
+        return False
+
+    if _build6r_v329_package_provenance_hard_stop(
+        claim
+    ):
+        return False
+
+    evidence = _build6r_v328_ingredient_evidence(
+        verified
+    )
+
+    if not _build6r_v328_has_any(
+        evidence,
+        (
+            "human adipose derived mesenchymal cell exosomes",
+            "human adipose derived mesenchymal exosomes",
+        ),
+    ):
+        return False
+
+    safety_present = (
+        _build6r_v328_has_same_field_exosome_safety(
+            claim
+        )
+        or _build6r_v328_has_any(
+            claim,
+            (
+                "nao ha celulas tronco contidas nesse ingrediente",
+                "nao ha celulas tronco contidas",
+                "there are no stem cells contained",
+            ),
+        )
+    )
+
+    if (
+        _build6r_v328_exosome_safety_required(
+            verified
+        )
+        and not safety_present
+    ):
+        return False
+
+    positive_stem_claim = (
+        (
+            "contem celulas tronco" in claim
+            and "nao contem celulas tronco" not in claim
+        )
+        or (
+            "contains stem cells" in claim
+            and "does not contain stem cells" not in claim
+            and "no stem cells" not in claim
+        )
+        or "with stem cells" in claim
+    )
+
+    if positive_stem_claim:
+        return False
+
+    working = claim
+
+    for phrase in (
+        "exossomos de celulas mesenquimais derivadas de tecido adiposo humano",
+        "exossomos derivados de celula mesenquimal de gordura humana",
+        "exossomos derivados de celulas mesenquimais de gordura humana",
+        "exossomos de celulas mesenquimais derivadas de gordura humana",
+        "human adipose derived mesenchymal cell exosomes",
+        "human adipose derived mesenchymal exosomes",
+    ):
+        working = working.replace(
+            phrase,
+            " ",
+        )
+
+    for phrase in (
+        "stem cells are not contained",
+        "does not contain stem cells",
+        "no stem cells",
+        "nao ha celulas tronco contidas nesse ingrediente",
+        "esses exossomos nao contem celulas tronco",
+        "nao contem celulas tronco",
+        "sem conter celulas tronco",
+        "sem celulas tronco",
+        "ausencia de celulas tronco",
+        "qualificacao de ausencia de celulas tronco",
+    ):
+        working = working.replace(
+            phrase,
+            " ",
+        )
+
+    import re
+
+    safe_words = {
+        "a",
+        "as",
+        "como",
+        "com",
+        "conforme",
+        "contem",
+        "da",
+        "das",
+        "de",
+        "do",
+        "dos",
+        "e",
+        "em",
+        "fabricante",
+        "inclui",
+        "ingrediente",
+        "listados",
+        "listado",
+        "o",
+        "os",
+        "pelo",
+        "proprio",
+        "que",
+        "tambem",
+        "afirma",
+        "informa",
+        "para",
+        "condicionamento",
+        "pele",
+        "skin",
+        "conditioning",
+        "manufacturer",
+        "listed",
+        "contains",
+        "include",
+        "includes",
+        "ingredient",
+        "states",
+        "the",
+        "as",
+        "of",
+        "and",
+        "is",
+        "are",
+    }
+
+    residue = [
+        token
+        for token in re.findall(
+            r"[a-z0-9]+",
+            working,
+        )
+        if (
+            len(token) > 2
+            and token not in safe_words
+        )
+    ]
+
+    return not residue
+
+
+def _build6r_v329_usage_supported(
+    claim,
+    verified,
+):
+    if _build6r_v328_usage_supported(
+        claim,
+        verified,
+    ):
+        return True
+
+    translated = claim
+
+    replacements = (
+        ("remover", "retirar"),
+        ("dobrar", "dobrada"),
+        ("dobrar a mascara", "mascara dobrada"),
+        ("leves batidinhas", "dobrada"),
+        ("batidinhas", "dobrada"),
+    )
+
+    for old, new in replacements:
+        translated = translated.replace(
+            old,
+            new,
+        )
+
+    return _build6r_v328_usage_supported(
+        translated,
+        verified,
+    )
+
+
+def _build6r_v329_imagery_depiction_supported(
+    claim,
+    verified,
+):
+    if _build6r_v328_positive_hard_stop(
+        claim,
+        verified,
+    ):
+        return False
+
+    if _build6r_v329_package_provenance_hard_stop(
+        claim
+    ):
+        return False
+
+    quantity_atoms = _build6r_v328_quantity_atoms(
+        claim
+    )
+
+    if (
+        quantity_atoms
+        and not _build6r_v328_quantity_supported(
+            claim,
+            verified,
+        )
+    ):
+        return False
+
+    import re
+
+    evidence = _build6r_v328_evidence_text(
+        verified,
+        "verified_description",
+        "verified_size",
+        "verified_variant",
+        "verified_features",
+        "verified_claims",
+    )
+
+    canonical_tokens = {
+        token
+        for token in re.findall(
+            r"[a-z0-9]+",
+            evidence,
+        )
+        if len(token) > 2
+    }
+
+    claim_tokens = [
+        token
+        for token in re.findall(
+            r"[a-z0-9]+",
+            claim,
+        )
+        if len(token) > 2
+    ]
+
+    neutral_visual_tokens = {
+        "foto",
+        "editorial",
+        "embalagem",
+        "frente",
+        "close",
+        "sobre",
+        "fundo",
+        "limpo",
+        "claro",
+        "esta",
+        "com",
+        "logo",
+        "nome",
+        "nitidos",
+        "nitido",
+        "gotas",
+        "sugerindo",
+        "presentes",
+        "presente",
+        "pacote",
+        "pouch",
+        "package",
+        "pack",
+        "front",
+        "upright",
+        "clean",
+        "light",
+        "background",
+        "closeup",
+        "name",
+        "clear",
+        "drops",
+        "suggesting",
+        "total",
+        "essencia",
+        "essence",
+    }
+
+    residue = [
+        token
+        for token in claim_tokens
+        if (
+            token not in canonical_tokens
+            and token not in neutral_visual_tokens
+        )
+    ]
+
+    if residue:
+        return False
+
+    product_signal = (
+        bool(
+            set(claim_tokens)
+            & canonical_tokens
+        )
+        or bool(quantity_atoms)
+    )
+
+    return product_signal
+
+
+def _build6r_v329_candidate_supported(
+    finding,
+    verified,
+    fields=None,
+):
+    if verified is None:
+        return False
+
+    claim = _build6r_v328_claim(
+        finding
+    )
+
+    category = _build6r_v328_category(
+        finding
+    )
+
+    if not claim:
+        return False
+
+    if (
+        _build6r_v328_source(
+            finding
+        )
+        == "ai extracted candidate ambiguous"
+    ):
+        return False
+
+    if _build6r_v329_package_provenance_hard_stop(
+        claim
+    ):
+        return False
+
+    if category == "imagery depiction":
+        return _build6r_v329_imagery_depiction_supported(
+            claim,
+            verified,
+        )
+
+    mapped_category = (
+        _BUILD6R_V329_CATEGORY_MAP.get(
+            category
+        )
+    )
+
+    if mapped_category is None:
+        return False
+
+    validation_claim = (
+        _build6r_v329_strip_verified_manufacturer_attribution(
+            claim,
+            verified,
+        )
+    )
+
+    if category == "product format description":
+        validation_claim = validation_claim.replace(
+            "mascara facial tipo sheet",
+            "sheet mask",
+        )
+
+    if category == "product ingredients contents":
+        if _build6r_v328_claim_mentions_exosome(
+            validation_claim
+        ):
+            return _build6r_v329_exosome_supported(
+                validation_claim,
+                verified,
+            )
+
+        ingredient_signal = (
+            any(
+                _build6r_v328_phrase_present(
+                    validation_claim,
+                    alias,
+                )
+                for _, aliases
+                in _BUILD6R_V328_INGREDIENT_ALIASES
+                for alias in aliases
+            )
+            or "ceramidas" in validation_claim
+            or "ceramide ap" in validation_claim
+            or "ceramide np" in validation_claim
+        )
+
+        if not ingredient_signal:
+            return False
+
+    if category == "product ingredients absence":
+        if not _build6r_v328_feature_signal(
+            validation_claim
+        ):
+            return False
+
+    if category == "usage directions":
+        if not _build6r_v328_usage_signal(
+            validation_claim
+        ):
+            morphology_signal = _build6r_v328_has_any(
+                validation_claim,
+                (
+                    "remover",
+                    "dobrar",
+                    "batidinhas",
+                ),
+            )
+
+            if not morphology_signal:
+                return False
+
+        if not _build6r_v329_usage_supported(
+            validation_claim,
+            verified,
+        ):
+            return False
+
+        if _build6r_v328_positive_hard_stop(
+            validation_claim,
+            verified,
+        ):
+            return False
+
+        if _build6r_v328_quantity_atoms(
+            validation_claim
+        ):
+            if not _build6r_v328_quantity_supported(
+                validation_claim,
+                verified,
+            ):
+                return False
+
+        if _build6r_v328_identity_signal(
+            validation_claim,
+            verified,
+        ):
+            if not _build6r_v328_identity_supported(
+                validation_claim,
+                verified,
+            ):
+                return False
+
+        return True
+
+    remapped = _build6r_v329_clone(
+        finding,
+        claim_text=validation_claim,
+        claim_category=mapped_category,
+    )
+
+    return _build6r_v328_candidate_supported(
+        remapped,
+        verified,
+        fields or {},
+    )
+
+
+def _build6r_v329_reconcile_live_taxonomy(
+    result,
+    verified,
+    fields=None,
+):
+    reconciled = []
+
+    for finding in list(
+        getattr(
+            result,
+            "findings",
+            [],
+        )
+        or []
+    ):
+        if _build6r_v328_is_supported(
+            finding
+        ):
+            reconciled.append(
+                finding
+            )
+            continue
+
+        if not _build6r_v329_candidate_supported(
+            finding,
+            verified,
+            fields or {},
+        ):
+            reconciled.append(
+                finding
+            )
+            continue
+
+        category = _build6r_v328_category(
+            finding
+        )
+
+        non_product_metadata = (
+            category
+            == "imagery depiction"
+        )
+
+        reconciled.append(
+            _build6r_v328_updated_finding(
+                finding,
+                allowed_source=(
+                    ""
+                    if non_product_metadata
+                    else "verified_product_facts"
+                ),
+                reason=(
+                    "Build 6R V3.29 deterministic live-category "
+                    "reconciliation accepted this finding only after "
+                    "all embedded product atoms were validated against "
+                    "canonical VerifiedProductFacts; taxonomy labels and "
+                    "neutral presentation metadata created no evidence, "
+                    "and unknown or protected residue remained fail-closed."
+                ),
+            )
+        )
+
+    return _build6r_v328_result_with_findings(
+        result,
+        reconciled,
+    )
+
+
+_BUILD6R_V329_FAITHFULNESS_CATEGORIES = (
+    set(
+        _BUILD6R_V329_CATEGORY_MAP
+    )
+    | {
+        "imagery depiction",
+    }
+)
+
+
+def _build6r_v329_enforce_ai_candidate_faithfulness(
+    result,
+    fields,
+    *,
+    enabled=False,
+):
+    # Historical sealed layers intentionally use synthetic
+    # ai_extracted_candidate fixtures. V3.29 must not reinterpret them.
+    if not enabled or not fields:
+        return result
+
+    original_findings = list(
+        getattr(
+            result,
+            "findings",
+            [],
+        )
+        or []
+    )
+
+    if not original_findings:
+        return result
+
+    findings = []
+    changed = False
+
+    for finding in original_findings:
+        source = str(
+            getattr(
+                finding,
+                "source_field",
+                "",
+            )
+            or ""
+        )
+
+        category = _build6r_v328_category(
+            finding
+        )
+
+        if (
+            source != "ai_extracted_candidate"
+            or category
+            not in _BUILD6R_V329_FAITHFULNESS_CATEGORIES
+        ):
+            findings.append(
+                finding
+            )
+            continue
+
+        needle = str(
+            getattr(
+                finding,
+                "claim_text",
+                "",
+            )
+            or ""
+        ).strip()
+
+        if not needle:
+            findings.append(
+                finding
+            )
+            continue
+
+        matches = [
+            source_field
+            for source_field, source_text
+            in fields.items()
+            if needle.casefold()
+            in str(
+                source_text
+                or ""
+            ).casefold()
+        ]
+
+        if len(matches) == 1:
+            findings.append(
+                _build6r_v329_clone(
+                    finding,
+                    source_field=
+                        matches[0],
+                )
+            )
+            changed = True
+            continue
+
+        if not matches:
+            # A model-generated paraphrase absent from every supplied
+            # source field is not itself campaign copy. Drop only this
+            # new residual-category synthetic finding; older categories
+            # remain owned by their sealed historical layers.
+            changed = True
+            continue
+
+        # Multiple verbatim locations cannot establish unique provenance.
+        # Preserve the candidate as synthetic and fail-closed.
+        findings.append(
+            _build6r_v329_clone(
+                finding,
+                source_field=
+                    "ai_extracted_candidate_ambiguous",
+            )
+        )
+        changed = True
+
+    if not changed:
+        return result
+
+    return _build6r_v328_result_with_findings(
+        result,
+        findings,
+    )
+
+
+async def augment_with_ai_extraction(
+    *args,
+    **kwargs,
+):
+    """
+    BUILD6R V3.29
+
+    Execute the complete sealed V3.28 chain exactly once, enforce verbatim
+    provenance only for newly observed residual-category candidates, then apply bounded
+    residual live-category reconciliation.
+
+    _build6r_augment_before_v324
+    _build6r_v324_reconcile_residual_canonical_semantic_atoms
+    _build6r_augment_before_v325
+    _build6r_v325_reconcile_bounded_usage_and_nonfactual_directives
+    _build6r_augment_before_v326
+    _build6r_v326_reconcile_residual_taxonomy_and_nonclaims
+    _build6r_augment_before_v327
+    _build6r_v327_reconcile_usage_ingredients_and_meta_provenance
+    _build6r_augment_before_v328
+    _build6r_v328_reconcile_live_taxonomy
+    _build6r_augment_before_v329
+    _build6r_v329_enforce_ai_candidate_faithfulness
+    _build6r_v329_reconcile_live_taxonomy
+
+    Historical wrapper contract marker: _build6r_augment_before_v32
+    Historical wrapper contract marker: _build6r_reconcile_generated_semantic_findings_v32
+    Historical wrapper contract marker: _build6r_augment_before_v33
+    Historical wrapper contract marker: _build6r_reconcile_generated_semantic_findings_v33
+    Historical wrapper contract marker: _build6r_augment_before_v34
+    Historical wrapper contract marker: _build6r_reconcile_generated_semantic_findings_v34
+    Historical wrapper contract marker: _build6r_augment_before_v35
+    Historical wrapper contract marker: _build6r_reconcile_generated_semantic_findings_v35
+    Historical wrapper contract marker: _build6r_augment_before_v311
+    Historical wrapper contract marker: _build6r_v311_reconcile_copy_stage_canonical_findings
+    Historical wrapper contract marker: _build6r_augment_before_v312
+    Historical wrapper contract marker: _build6r_v312_reconcile_copy_stage_canonical_findings
+    Historical wrapper contract marker: _build6r_augment_before_v313
+    Historical wrapper contract marker: _build6r_v313_reconcile_copy_stage_canonical_findings
+    Historical wrapper contract marker: _build6r_augment_before_v315
+    Historical wrapper contract marker: _build6r_v315_reconcile_semantic_candidates
+    Historical wrapper contract marker: _build6r_augment_before_v316
+    Historical wrapper contract marker: _build6r_v316_reconcile_live_taxonomy_candidates
+    Historical wrapper contract marker: _build6r_augment_before_v317
+    Historical wrapper contract marker: _build6r_v317_reconcile_runtime_alias_candidates
+    Historical wrapper contract marker: _build6r_augment_before_v318
+    Historical wrapper contract marker: _build6r_v318_reconcile_previsual_candidates
+    Historical wrapper contract marker: _build6r_augment_before_v319
+    Historical wrapper contract marker: _build6r_v319_reconcile_live_phrase_candidates
+    Historical wrapper contract marker: _build6r_augment_before_v320
+    Historical wrapper contract marker: _build6r_v320_reconcile_live_semantic_candidates
+    Historical wrapper contract marker: _build6r_augment_before_v321
+    Historical wrapper contract marker: _build6r_v321_reconcile_remaining_live_semantic_candidates
+    Historical wrapper contract marker: _build6r_augment_before_v322
+    Historical wrapper contract marker: _build6r_v322_reconcile_fresh_live_composite_candidates
+    Historical wrapper contract marker: _build6r_augment_before_v323
+    Historical wrapper contract marker: _build6r_v323_reconcile_residual_live_semantic_boundaries
+    """
+
+    result = await _build6r_augment_before_v329(
+        *args,
+        **kwargs,
+    )
+
+    fields = (
+        kwargs.get(
+            "fields"
+        )
+        or {}
+    )
+
+    provider = (
+        args[0]
+        if args
+        else kwargs.get(
+            "ai_provider"
+        )
+    )
+
+    faithfulness_enabled = (
+        bool(fields)
+        and provider is not None
+        and callable(
+            getattr(
+                provider,
+                "generate_structured",
+                None,
+            )
+        )
+    )
+
+    result = (
+        _build6r_v329_enforce_ai_candidate_faithfulness(
+            result,
+            fields,
+            enabled=faithfulness_enabled,
+        )
+    )
+
+    return _build6r_v329_reconcile_live_taxonomy(
+        result,
+        kwargs.get("verified"),
+        fields,
+    )
