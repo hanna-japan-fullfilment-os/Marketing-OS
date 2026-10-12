@@ -27396,3 +27396,779 @@ async def augment_with_ai_extraction(
             or {}
         ),
     )
+
+# =====================================================================
+# BUILD6R_V334_ATTEMPT8_LIVE_TAXONOMY_ALIAS_CANONICALIZATION
+#
+# Append-only post-V3.33 reconciliation for the exact category/wording
+# drift proven by consumed live Attempt 8.
+#
+# Safety invariants:
+# - only three exact normalized category aliases are recognized;
+# - category labels route only and never establish evidence;
+# - V3.33 unique-verbatim provenance and research rejection run first;
+# - ingredient support delegates to sealed V3.31 atom verification;
+# - usage support delegates to sealed V3.31 atom verification after only
+#   exact Attempt-8 lexical canonicalization;
+# - product format support requires canonical 7-sheet pouch, 150 mL essence,
+#   and facial-sheet-mask evidence;
+# - unknown/near-miss categories fail closed;
+# - no fuzzy matching, wildcard taxonomy ownership, embeddings, similarity,
+#   or LLM adjudication.
+# =====================================================================
+
+_BUILD6R_V334_CATEGORY_ALIASES = {
+    "product format quantity": "format or quantity",
+    "ingredients contents": "ingredients or composition",
+    "usage instructions": "usage or dosage instructions",
+}
+
+_BUILD6R_V334_PRODUCT_FORMAT_EXACT_FORMS = frozenset(
+    {
+        (
+            "e um pack com 7 mascaras em folha em um pouch unico "
+            "que contem 150 ml de essencia"
+        ),
+        (
+            "sobre o formato sao 7 folhas dentro de um unico pouch "
+            "com 150 ml de essencia compartilhados entre elas"
+        ),
+    }
+)
+
+_BUILD6R_V334_USAGE_EXACT_REPLACEMENTS = (
+    (
+        (
+            "pressionar para tirar o ar preso entre a mascara e a pele"
+        ),
+        "pressionar para tirar o ar preso",
+    ),
+    (
+        (
+            "erguer os recortes da regiao das bochechas ao longo "
+            "da linha do rosto"
+        ),
+        (
+            "erguer os recortes das bochechas ao longo da linha do rosto"
+        ),
+    ),
+    (
+        (
+            "pressionar a mascara inteira no rosto usando as palmas das maos"
+        ),
+        "pressionar a mascara inteira com as palmas das maos",
+    ),
+    (
+        "pressionar a mascara inteira no rosto com as palmas",
+        "pressionar a mascara inteira com as palmas",
+    ),
+    (
+        (
+            "dobrar a mascara para usar como pano de apoio "
+            "para leves batidinhas"
+        ),
+        "dobrar a mascara para passar levemente no rosto",
+    ),
+    (
+        (
+            "usar a mascara dobrada para passar ou dar leves batidinhas"
+        ),
+        "usar a mascara dobrada para leve batidinha ou wipe",
+    ),
+)
+
+_BUILD6R_V334_USAGE_NONFACTUAL_WRAPPERS = (
+    "modo de uso de acordo com o fabricante",
+    "uso conforme orientacao do fabricante",
+    "depois de remover",
+    "em seguida",
+)
+
+
+def _build6r_v334_normalize(value):
+    return _build6r_v333_normalize(
+        value
+    )
+
+
+def _build6r_v334_normalized_category(
+    finding,
+):
+    return _build6r_v334_normalize(
+        getattr(
+            finding,
+            "claim_category",
+            "",
+        )
+    )
+
+
+def _build6r_v334_canonical_category(
+    finding,
+):
+    return _BUILD6R_V334_CATEGORY_ALIASES.get(
+        _build6r_v334_normalized_category(
+            finding
+        )
+    )
+
+
+def _build6r_v334_replace_exact_phrase(
+    work,
+    old,
+    new,
+):
+    work = _build6r_v334_normalize(
+        work
+    )
+
+    old = _build6r_v334_normalize(
+        old
+    )
+
+    new = _build6r_v334_normalize(
+        new
+    )
+
+    if not work or not old:
+        return work, False
+
+    padded = " " + work + " "
+    needle = " " + old + " "
+
+    if needle not in padded:
+        return work, False
+
+    replacement = (
+        " " + new + " "
+        if new
+        else " "
+    )
+
+    updated = padded.replace(
+        needle,
+        replacement,
+        1,
+    )
+
+    return (
+        " ".join(
+            updated.split()
+        ),
+        True,
+    )
+
+
+def _build6r_v334_prepare_ingredient_for_v331(
+    claim_text,
+):
+    work = _build6r_v334_normalize(
+        claim_text
+    )
+
+    if work.startswith("contem "):
+        work = work[len("contem "):]
+
+    work, _ = _build6r_v334_replace_exact_phrase(
+        work,
+        "glutathiona",
+        "glutationa",
+    )
+
+    return work
+
+
+def _build6r_v334_prepare_usage_for_v331(
+    claim_text,
+):
+    work = _build6r_v334_normalize(
+        claim_text
+    )
+
+    for old, new in (
+        _BUILD6R_V334_USAGE_EXACT_REPLACEMENTS
+    ):
+        work, _ = _build6r_v334_replace_exact_phrase(
+            work,
+            old,
+            new,
+        )
+
+    for wrapper in (
+        _BUILD6R_V334_USAGE_NONFACTUAL_WRAPPERS
+    ):
+        work, _ = _build6r_v334_replace_exact_phrase(
+            work,
+            wrapper,
+            "",
+        )
+
+    # Attempt-8 numbering is presentation structure, not factual evidence.
+    # Only the exact one-digit enumerators demonstrated by Attempt 8 are
+    # removed. Any unrecognized duration/frequency residue still fails in
+    # the sealed V3.31 matcher.
+    for ordinal in (
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+    ):
+        work, _ = _build6r_v334_replace_exact_phrase(
+            work,
+            ordinal,
+            "",
+        )
+
+    return work
+
+
+def _build6r_v334_product_format_supported(
+    claim_text,
+    verified,
+):
+    work = _build6r_v334_normalize(
+        claim_text
+    )
+
+    if not work or verified is None:
+        return False, "", "empty_or_missing_verified"
+
+    if any(
+        marker in work
+        for marker in _BUILD6R_V333_BLOCKED_MEANING_MARKERS
+    ):
+        return False, "", "blocked_meaning"
+
+    if work not in (
+        _BUILD6R_V334_PRODUCT_FORMAT_EXACT_FORMS
+    ):
+        return (
+            False,
+            "",
+            "unrecognized_attempt8_product_format_wording",
+        )
+
+    pouch_ok, pouch_field = (
+        _build6r_v333_evidence_contains(
+            verified,
+            "7",
+            "pouch",
+        )
+    )
+
+    if not pouch_ok:
+        return (
+            False,
+            "",
+            "unsupported_7_sheet_pouch",
+        )
+
+    quantity_ok, quantity_field = (
+        _build6r_v333_evidence_contains(
+            verified,
+            "150 ml",
+        )
+    )
+
+    if not quantity_ok:
+        return (
+            False,
+            "",
+            "unsupported_150_ml_essence",
+        )
+
+    format_ok, format_field = (
+        _build6r_v333_evidence_contains(
+            verified,
+            "facial sheet mask",
+        )
+    )
+
+    if not format_ok:
+        return (
+            False,
+            "",
+            "unsupported_facial_sheet_mask_format",
+        )
+
+    evidence_field = ",".join(
+        sorted(
+            set(
+                value
+                for value in (
+                    pouch_field,
+                    quantity_field,
+                    format_field,
+                )
+                if value
+            )
+        )
+    )
+
+    return (
+        True,
+        evidence_field,
+        "exact_attempt8_product_format_plus_canonical_atoms",
+    )
+
+
+def _build6r_v334_ingredient_supported(
+    claim_text,
+    verified,
+):
+    prepared = (
+        _build6r_v334_prepare_ingredient_for_v331(
+            claim_text
+        )
+    )
+
+    if not prepared:
+        return False, "", "empty_ingredient_after_bounded_normalization"
+
+    supported = (
+        _build6r_v331_ingredient_supported(
+            prepared,
+            verified,
+        )
+    )
+
+    if not supported:
+        return (
+            False,
+            "",
+            "sealed_v331_ingredient_atoms_not_fully_supported",
+        )
+
+    return (
+        True,
+        "verified_ingredients,verified_claims",
+        "sealed_v331_ingredient_atom_matcher",
+    )
+
+
+def _build6r_v334_usage_supported(
+    claim_text,
+    verified,
+):
+    prepared = (
+        _build6r_v334_prepare_usage_for_v331(
+            claim_text
+        )
+    )
+
+    if not prepared:
+        return False, "", "empty_usage_after_bounded_normalization"
+
+    supported = (
+        _build6r_v331_usage_supported(
+            prepared,
+            verified,
+        )
+    )
+
+    if not supported:
+        return (
+            False,
+            "",
+            "sealed_v331_usage_atoms_not_fully_supported",
+        )
+
+    return (
+        True,
+        "verified_usage",
+        "sealed_v331_usage_atom_matcher",
+    )
+
+
+def _build6r_v334_candidate_decision(
+    finding,
+    verified,
+    fields,
+):
+    if verified is None:
+        return (
+            False,
+            "",
+            "UNOWNED_FAIL_CLOSED",
+            "",
+            "missing_verified_product_facts",
+        )
+
+    if (
+        str(
+            getattr(
+                finding,
+                "evidence_status",
+                "",
+            )
+            or ""
+        ).upper()
+        != "UNSUPPORTED"
+    ):
+        return (
+            False,
+            "",
+            "ALREADY_SUPPORTED",
+            "",
+            "existing_owner_already_supported",
+        )
+
+    normalized_category = (
+        _build6r_v334_normalized_category(
+            finding
+        )
+    )
+
+    canonical_category = (
+        _BUILD6R_V334_CATEGORY_ALIASES.get(
+            normalized_category
+        )
+    )
+
+    if canonical_category is None:
+        return (
+            False,
+            "",
+            "UNOWNED_FAIL_CLOSED",
+            "",
+            "unrecognized_category_fail_closed",
+        )
+
+    provenance_ok, provenance_field, provenance_reason = (
+        _build6r_v333_verbatim_provenance(
+            finding,
+            fields,
+        )
+    )
+
+    if not provenance_ok:
+        return (
+            False,
+            canonical_category,
+            "PROVENANCE_FAIL_CLOSED",
+            "",
+            provenance_reason,
+        )
+
+    claim_text = str(
+        getattr(
+            finding,
+            "claim_text",
+            "",
+        )
+        or ""
+    )
+
+    if canonical_category == "format or quantity":
+        supported, evidence_field, reason = (
+            _build6r_v334_product_format_supported(
+                claim_text,
+                verified,
+            )
+        )
+
+        return (
+            supported,
+            canonical_category,
+            "V3.33_CANONICAL_PRODUCT_FACT_EVIDENCE",
+            evidence_field,
+            reason,
+        )
+
+    if canonical_category == "ingredients or composition":
+        supported, evidence_field, reason = (
+            _build6r_v334_ingredient_supported(
+                claim_text,
+                verified,
+            )
+        )
+
+        return (
+            supported,
+            canonical_category,
+            "V3.31_FIRST",
+            evidence_field,
+            reason,
+        )
+
+    if canonical_category == "usage or dosage instructions":
+        supported, evidence_field, reason = (
+            _build6r_v334_usage_supported(
+                claim_text,
+                verified,
+            )
+        )
+
+        return (
+            supported,
+            canonical_category,
+            "V3.31_USAGE",
+            evidence_field,
+            reason,
+        )
+
+    return (
+        False,
+        canonical_category,
+        "UNOWNED_FAIL_CLOSED",
+        "",
+        "canonical_alias_without_bounded_owner",
+    )
+
+
+def _build6r_v334_mark_supported(
+    finding,
+    *,
+    canonical_category,
+    owner,
+    evidence_field,
+    reason,
+):
+    update = {
+        "evidence_status": "SUPPORTED",
+        "allowed_source": "verified_product_facts",
+        "reason": (
+            "BUILD6R V3.34 exact Attempt-8 taxonomy alias reconciliation "
+            "routed category to "
+            + canonical_category
+            + " and preserved bounded canonical evidence ownership; owner="
+            + owner
+            + "; evidence_field="
+            + str(evidence_field or "")
+            + "; matcher="
+            + reason
+        ),
+    }
+
+    if hasattr(
+        finding,
+        "model_copy",
+    ):
+        return finding.model_copy(
+            update=update
+        )
+
+    return ClaimFinding(
+        claim_text=finding.claim_text,
+        claim_category=finding.claim_category,
+        source_field=finding.source_field,
+        evidence_status="SUPPORTED",
+        allowed_source="verified_product_facts",
+        reason=update["reason"],
+    )
+
+
+def _build6r_v334_reconcile_result(
+    result,
+    verified,
+    fields,
+):
+    reconciled = []
+
+    for finding in (
+        getattr(
+            result,
+            "findings",
+            None,
+        )
+        or []
+    ):
+        (
+            supported,
+            canonical_category,
+            owner,
+            evidence_field,
+            reason,
+        ) = _build6r_v334_candidate_decision(
+            finding,
+            verified,
+            fields,
+        )
+
+        if supported:
+            reconciled.append(
+                _build6r_v334_mark_supported(
+                    finding,
+                    canonical_category=canonical_category,
+                    owner=owner,
+                    evidence_field=evidence_field,
+                    reason=reason,
+                )
+            )
+        else:
+            reconciled.append(
+                finding
+            )
+
+    if hasattr(
+        result,
+        "model_copy",
+    ):
+        return result.model_copy(
+            update={
+                "findings": reconciled,
+            }
+        )
+
+    return ClaimAuditResult(
+        findings=reconciled
+    )
+
+
+def build6r_v334_claim_diagnostics(
+    result,
+):
+    diagnostics = []
+
+    for finding in (
+        getattr(
+            result,
+            "findings",
+            None,
+        )
+        or []
+    ):
+        status = str(
+            getattr(
+                finding,
+                "evidence_status",
+                "",
+            )
+            or ""
+        ).upper()
+
+        if status != "UNSUPPORTED":
+            continue
+
+        normalized_category = (
+            _build6r_v334_normalized_category(
+                finding
+            )
+        )
+
+        canonical_category = (
+            _BUILD6R_V334_CATEGORY_ALIASES.get(
+                normalized_category
+            )
+        )
+
+        if canonical_category is None:
+            continue
+
+        owner = {
+            "format or quantity":
+                "V3.33_CANONICAL_PRODUCT_FACT_EVIDENCE",
+            "ingredients or composition":
+                "V3.31_FIRST",
+            "usage or dosage instructions":
+                "V3.31_USAGE",
+        }[canonical_category]
+
+        diagnostics.append(
+            {
+                "original_category": str(
+                    getattr(
+                        finding,
+                        "claim_category",
+                        "",
+                    )
+                    or ""
+                ),
+                "normalized_category":
+                    normalized_category,
+                "v334_canonical_category":
+                    canonical_category,
+                "v334_owner":
+                    owner,
+                "source_field": str(
+                    getattr(
+                        finding,
+                        "source_field",
+                        "",
+                    )
+                    or ""
+                ),
+                "evidence_status":
+                    status,
+                "reason": str(
+                    getattr(
+                        finding,
+                        "reason",
+                        "",
+                    )
+                    or ""
+                ),
+            }
+        )
+
+    return diagnostics
+
+
+# Preserve the V3.33-extended public diagnostic symbol used by orchestrator.
+_build6r_v332_claim_diagnostics_before_v334 = (
+    build6r_v332_claim_diagnostics
+)
+
+
+def build6r_v332_claim_diagnostics(
+    result,
+):
+    prior = list(
+        _build6r_v332_claim_diagnostics_before_v334(
+            result
+        )
+        or []
+    )
+
+    alias_categories = set(
+        _BUILD6R_V334_CATEGORY_ALIASES
+    )
+
+    diagnostics = [
+        item
+        for item in prior
+        if item.get(
+            "normalized_category"
+        )
+        not in alias_categories
+    ]
+
+    diagnostics.extend(
+        build6r_v334_claim_diagnostics(
+            result
+        )
+    )
+
+    return diagnostics
+
+
+_build6r_augment_before_v334 = (
+    augment_with_ai_extraction
+)
+
+
+async def augment_with_ai_extraction(
+    *args,
+    **kwargs,
+):
+    result = await (
+        _build6r_augment_before_v334(
+            *args,
+            **kwargs,
+        )
+    )
+
+    return _build6r_v334_reconcile_result(
+        result,
+        kwargs.get(
+            "verified"
+        ),
+        (
+            kwargs.get(
+                "fields"
+            )
+            or {}
+        ),
+    )
