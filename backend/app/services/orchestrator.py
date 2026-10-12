@@ -3114,6 +3114,7 @@ async def _enforce_previsual_semantic_claim_grounding_gate(
         CLAIM_AUDIT_VERSION,
         audit_text_fields,
         augment_with_ai_extraction,
+        build6r_v332_claim_diagnostics,
         format_claims_hard_fails,
     )
 
@@ -3218,6 +3219,8 @@ async def _enforce_previsual_semantic_claim_grounding_gate(
         "previsual_semantic_claim_grounding_failed",
         {
             "phase": phase,
+            "language": language,
+            "platform": platform,
             "field_count": len(
                 fields
             ),
@@ -3225,6 +3228,10 @@ async def _enforce_previsual_semantic_claim_grounding_gate(
                 hard_fails
             ),
             "hard_fails": hard_fails,
+            "claim_diagnostics":
+                build6r_v332_claim_diagnostics(
+                    semantic_result
+                ),
         },
     )
 
