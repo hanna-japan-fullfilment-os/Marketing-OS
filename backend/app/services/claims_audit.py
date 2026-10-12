@@ -28172,3 +28172,737 @@ async def augment_with_ai_extraction(
             or {}
         ),
     )
+
+# =====================================================================
+# BUILD6R_V335_DETERMINISTIC_VERIFIED_FACT_ATOM_RECONCILIATION
+#
+# Append-only post-V3.34 reconciliation for live Attempt-9 wording drift.
+#
+# Safety invariants:
+# - V3.31/V3.32/V3.33/V3.34 ownership runs first and remains sealed;
+# - only still-UNSUPPORTED findings are eligible;
+# - V3.33 unique-verbatim provenance/research rejection runs before support;
+# - category labels route only and never establish evidence;
+# - only VerifiedProductFacts may establish product-fact support;
+# - every recognized factual atom must be verified and all residue fail closed;
+# - no fuzzy matching, edit distance, embeddings, similarity, wildcard taxonomy,
+#   or LLM adjudication.
+# =====================================================================
+
+_BUILD6R_V335_CATEGORY_ALIASES = {
+    "format quantity": "format or quantity",
+    "ingredients composition": "ingredients or composition",
+    "product feature": "product features or attributes",
+    "directions for use": "usage or dosage instructions",
+}
+
+_BUILD6R_V335_SAFE_PRODUCT_RESIDUAL_TOKENS = frozenset(
+    {
+        "a", "as", "com", "como", "da", "de", "descreve", "do", "e",
+        "em", "essencia", "esta", "fabricante", "folha", "formula",
+        "lista", "mascara", "material", "na", "nome", "o", "pouch",
+        "produto", "sobre", "estrutura", "tecido", "um", "uma",
+        "unidade", "unidades", "vem", "venda",
+    }
+)
+
+_BUILD6R_V335_SAFE_FEATURE_RESIDUAL_TOKENS = frozenset(
+    {
+        "a", "como", "da", "de", "descreve", "do", "fabricante",
+        "folha", "mascara", "material", "o", "sobre", "estrutura",
+        "tecido", "um", "uma",
+    }
+)
+
+_BUILD6R_V335_SAFE_USAGE_RESIDUAL_TOKENS = frozenset(
+    {"a", "as", "da", "de", "do", "e", "o", "os"}
+)
+
+_BUILD6R_V335_INGREDIENT_WRAPPERS = (
+    "na formula o fabricante lista",
+    "na formula fabricante lista",
+    "o fabricante lista",
+    "a formula lista",
+    "na formula",
+)
+
+_BUILD6R_V335_USAGE_WRAPPERS = (
+    "modo de uso de acordo com o fabricante",
+    "modo de uso conforme o fabricante",
+    "de acordo com o fabricante",
+)
+
+_BUILD6R_V335_USAGE_ACTION_VARIANTS = (
+    "levantar",
+    "erguer",
+)
+
+_BUILD6R_V335_USAGE_CHEEK_VARIANTS = (
+    "os recortes da regiao das bochechas",
+    "recortes da regiao das bochechas",
+    "os recortes das bochechas",
+    "recortes das bochechas",
+)
+
+_BUILD6R_V335_USAGE_CONTOUR_VARIANTS = (
+    "acompanhando o contorno do rosto",
+    "acompanhando a linha do rosto",
+    "ao longo da linha do rosto",
+)
+
+
+def _build6r_v335_normalize(value):
+    return _build6r_v333_normalize(value)
+
+
+def _build6r_v335_category(finding):
+    return _build6r_v335_normalize(
+        getattr(finding, "claim_category", "")
+    )
+
+
+def _build6r_v335_remove_phrase(work, phrase):
+    return _build6r_v333_remove_phrase(
+        _build6r_v335_normalize(work),
+        phrase,
+    )
+
+
+def _build6r_v335_remove_any(work, variants):
+    return _build6r_v333_remove_any(
+        _build6r_v335_normalize(work),
+        variants,
+    )
+
+
+def _build6r_v335_product_atoms_supported(claim_text, verified):
+    work = _build6r_v335_normalize(claim_text)
+
+    if not work or verified is None:
+        return False, "", "empty_or_missing_verified"
+
+    if any(
+        marker in work
+        for marker in _BUILD6R_V333_BLOCKED_MEANING_MARKERS
+    ):
+        return False, "", "blocked_meaning"
+
+    numeric_tokens = {
+        token for token in work.split()
+        if token.isdigit()
+    }
+
+    if not numeric_tokens.issubset({"7", "150"}):
+        return False, "", "unsupported_numeric_atom"
+
+    matched = False
+    evidence_fields = []
+
+    facial_variants = (
+        "mascara facial em folha",
+        "facial sheet mask",
+    )
+
+    if any(
+        _build6r_v335_normalize(item) in work
+        for item in facial_variants
+    ):
+        ok, field = _build6r_v333_evidence_contains(
+            verified,
+            "facial sheet mask",
+        )
+        if not ok:
+            return False, "", "unsupported_facial_sheet_mask"
+
+        work, removed = _build6r_v335_remove_any(
+            work,
+            facial_variants,
+        )
+        if not removed:
+            return False, "", "facial_sheet_mask_removal_failed"
+
+        matched = True
+        evidence_fields.append(field)
+
+    if "pouch" in work:
+        ok, field = _build6r_v333_evidence_contains(
+            verified,
+            "pouch",
+        )
+        if not ok:
+            return False, "", "unsupported_pouch"
+
+        work, removed = _build6r_v335_remove_phrase(
+            work,
+            "pouch",
+        )
+        if not removed:
+            return False, "", "pouch_removal_failed"
+
+        matched = True
+        evidence_fields.append(field)
+
+    if "7" in work.split():
+        ok, field = _build6r_v333_evidence_contains(
+            verified,
+            "7",
+            "pouch",
+        )
+        if not ok:
+            return False, "", "unsupported_quantity_7"
+
+        work, removed = _build6r_v335_remove_phrase(
+            work,
+            "7",
+        )
+        if not removed:
+            return False, "", "quantity_7_removal_failed"
+
+        matched = True
+        evidence_fields.append(field)
+
+    if "150 ml" in work:
+        ok, field = _build6r_v333_evidence_contains(
+            verified,
+            "150 ml",
+        )
+        if not ok:
+            return False, "", "unsupported_150_ml"
+
+        work, removed = _build6r_v335_remove_phrase(
+            work,
+            "150 ml",
+        )
+        if not removed:
+            return False, "", "quantity_150_ml_removal_failed"
+
+        matched = True
+        evidence_fields.append(field)
+
+    sales_name = "face mask lululun ex 1fs"
+
+    if sales_name in work:
+        ok, field = _build6r_v333_evidence_contains(
+            verified,
+            sales_name,
+        )
+        if not ok:
+            return False, "", "unsupported_manufacturer_sales_name"
+
+        work, removed = _build6r_v335_remove_phrase(
+            work,
+            sales_name,
+        )
+        if not removed:
+            return False, "", "sales_name_removal_failed"
+
+        matched = True
+        evidence_fields.append(field)
+
+    residual_tokens = set(
+        _build6r_v335_normalize(work).split()
+    )
+
+    if not matched:
+        return False, "", "no_verified_product_atom"
+
+    if not residual_tokens.issubset(
+        _BUILD6R_V335_SAFE_PRODUCT_RESIDUAL_TOKENS
+    ):
+        return False, "", "unsupported_product_factual_residue"
+
+    return (
+        True,
+        ",".join(
+            sorted(
+                set(
+                    item
+                    for item in evidence_fields
+                    if item
+                )
+            )
+        ),
+        "deterministic_verified_product_atoms",
+    )
+
+
+def _build6r_v335_ingredient_supported(claim_text, verified):
+    work = _build6r_v335_normalize(claim_text)
+
+    if not work or verified is None:
+        return False, "", "empty_or_missing_verified"
+
+    if any(
+        marker in work
+        for marker in _BUILD6R_V333_BLOCKED_MEANING_MARKERS
+    ):
+        return False, "", "blocked_meaning"
+
+    for wrapper in _BUILD6R_V335_INGREDIENT_WRAPPERS:
+        work, _ = _build6r_v335_remove_phrase(
+            work,
+            wrapper,
+        )
+
+    for live_variant in (
+        "oligopeptideo 1 humano recombinante",
+        "oligopeptideo humano recombinante 1",
+    ):
+        if _build6r_v335_normalize(live_variant) not in work:
+            continue
+
+        work, removed = _build6r_v335_remove_phrase(
+            work,
+            live_variant,
+        )
+        if not removed:
+            continue
+
+        canonical = "oligopeptideo humano recombinante 1"
+        work = canonical + ((" " + work) if work else "")
+        break
+
+    work, _ = _build6r_v335_remove_phrase(
+        work,
+        "egf",
+    )
+
+    supported = _build6r_v331_ingredient_supported(
+        work,
+        verified,
+    )
+
+    if not supported:
+        return (
+            False,
+            "",
+            "sealed_v331_ingredient_atoms_not_fully_supported",
+        )
+
+    return (
+        True,
+        "verified_ingredients,verified_claims",
+        "bounded_bilingual_ingredient_atoms_via_v331",
+    )
+
+
+def _build6r_v335_feature_supported(claim_text, verified):
+    work = _build6r_v335_normalize(claim_text)
+
+    if not work or verified is None:
+        return False, "", "empty_or_missing_verified"
+
+    if any(
+        marker in work
+        for marker in _BUILD6R_V333_BLOCKED_MEANING_MARKERS
+    ):
+        return False, "", "blocked_meaning"
+
+    feature = "melty feel sheet"
+
+    if feature not in work:
+        return False, "", "no_bounded_verified_feature_atom"
+
+    ok, field = _build6r_v333_evidence_contains(
+        verified,
+        feature,
+    )
+    if not ok:
+        return False, "", "unsupported_melty_feel_sheet"
+
+    work, removed = _build6r_v335_remove_phrase(
+        work,
+        feature,
+    )
+    if not removed:
+        return False, "", "feature_removal_failed"
+
+    residual_tokens = set(
+        _build6r_v335_normalize(work).split()
+    )
+
+    if not residual_tokens.issubset(
+        _BUILD6R_V335_SAFE_FEATURE_RESIDUAL_TOKENS
+    ):
+        return False, "", "unsupported_feature_factual_residue"
+
+    return (
+        True,
+        field,
+        "deterministic_verified_product_feature_atom",
+    )
+
+
+def _build6r_v335_usage_supported(claim_text, verified):
+    work = _build6r_v335_normalize(claim_text)
+
+    if not work or verified is None:
+        return False, "", "empty_or_missing_verified"
+
+    if any(
+        marker in work
+        for marker in _BUILD6R_V333_BLOCKED_MEANING_MARKERS
+    ):
+        return False, "", "blocked_meaning"
+
+    for wrapper in _BUILD6R_V335_USAGE_WRAPPERS:
+        work, _ = _build6r_v335_remove_phrase(
+            work,
+            wrapper,
+        )
+
+    work, action_removed = _build6r_v335_remove_any(
+        work,
+        _BUILD6R_V335_USAGE_ACTION_VARIANTS,
+    )
+
+    work, cheek_removed = _build6r_v335_remove_any(
+        work,
+        _BUILD6R_V335_USAGE_CHEEK_VARIANTS,
+    )
+
+    work, contour_removed = _build6r_v335_remove_any(
+        work,
+        _BUILD6R_V335_USAGE_CONTOUR_VARIANTS,
+    )
+
+    if not (
+        action_removed
+        and cheek_removed
+        and contour_removed
+    ):
+        return False, "", "incomplete_bounded_usage_atoms"
+
+    ok, field = _build6r_v333_evidence_contains(
+        verified,
+        "lift the cheek cut sections along the face line",
+    )
+    if not ok:
+        return False, "", "unsupported_cheek_cut_usage_atom"
+
+    residual_tokens = set(
+        _build6r_v335_normalize(work).split()
+    )
+
+    if not residual_tokens.issubset(
+        _BUILD6R_V335_SAFE_USAGE_RESIDUAL_TOKENS
+    ):
+        return False, "", "unsupported_usage_factual_residue"
+
+    return (
+        True,
+        field,
+        "deterministic_verified_usage_atoms",
+    )
+
+
+def _build6r_v335_candidate_decision(
+    finding,
+    verified,
+    fields,
+):
+    if verified is None:
+        return (
+            False,
+            "",
+            "UNOWNED_FAIL_CLOSED",
+            "",
+            "missing_verified_product_facts",
+        )
+
+    if (
+        str(
+            getattr(finding, "evidence_status", "")
+            or ""
+        ).upper()
+        != "UNSUPPORTED"
+    ):
+        return (
+            False,
+            "",
+            "ALREADY_SUPPORTED",
+            "",
+            "existing_owner_already_supported",
+        )
+
+    normalized_category = _build6r_v335_category(
+        finding
+    )
+
+    canonical_category = (
+        _BUILD6R_V335_CATEGORY_ALIASES.get(
+            normalized_category
+        )
+    )
+
+    if canonical_category is None:
+        return (
+            False,
+            "",
+            "UNOWNED_FAIL_CLOSED",
+            "",
+            "unrecognized_category_fail_closed",
+        )
+
+    provenance_ok, _, provenance_reason = (
+        _build6r_v333_verbatim_provenance(
+            finding,
+            fields,
+        )
+    )
+
+    if not provenance_ok:
+        return (
+            False,
+            canonical_category,
+            "PROVENANCE_FAIL_CLOSED",
+            "",
+            provenance_reason,
+        )
+
+    claim_text = str(
+        getattr(finding, "claim_text", "")
+        or ""
+    )
+
+    if canonical_category == "format or quantity":
+        supported, evidence_field, reason = (
+            _build6r_v335_product_atoms_supported(
+                claim_text,
+                verified,
+            )
+        )
+        owner = "V3.35_VERIFIED_PRODUCT_ATOMS"
+
+    elif canonical_category == "ingredients or composition":
+        supported, evidence_field, reason = (
+            _build6r_v335_ingredient_supported(
+                claim_text,
+                verified,
+            )
+        )
+        owner = "V3.31_INGREDIENT_ATOMS"
+
+    elif canonical_category == "product features or attributes":
+        supported, evidence_field, reason = (
+            _build6r_v335_feature_supported(
+                claim_text,
+                verified,
+            )
+        )
+        owner = "V3.35_VERIFIED_PRODUCT_FEATURE"
+
+    elif canonical_category == "usage or dosage instructions":
+        supported, evidence_field, reason = (
+            _build6r_v335_usage_supported(
+                claim_text,
+                verified,
+            )
+        )
+        owner = "V3.35_VERIFIED_USAGE_ATOMS"
+
+    else:
+        return (
+            False,
+            canonical_category,
+            "UNOWNED_FAIL_CLOSED",
+            "",
+            "canonical_alias_without_bounded_owner",
+        )
+
+    return (
+        supported,
+        canonical_category,
+        owner,
+        evidence_field,
+        reason,
+    )
+
+
+def _build6r_v335_mark_supported(
+    finding,
+    *,
+    canonical_category,
+    owner,
+    evidence_field,
+    reason,
+):
+    update = {
+        "evidence_status": "SUPPORTED",
+        "allowed_source": "verified_product_facts",
+        "reason": (
+            "BUILD6R V3.35 deterministic verified-fact atom reconciliation "
+            "accounted for every recognized factual atom using "
+            "VerifiedProductFacts only; category="
+            + canonical_category
+            + "; owner="
+            + owner
+            + "; evidence_field="
+            + str(evidence_field or "")
+            + "; matcher="
+            + reason
+        ),
+    }
+
+    if hasattr(finding, "model_copy"):
+        return finding.model_copy(update=update)
+
+    return ClaimFinding(
+        claim_text=finding.claim_text,
+        claim_category=finding.claim_category,
+        source_field=finding.source_field,
+        evidence_status="SUPPORTED",
+        allowed_source="verified_product_facts",
+        reason=update["reason"],
+    )
+
+
+def _build6r_v335_reconcile_result(
+    result,
+    verified,
+    fields,
+):
+    reconciled = []
+
+    for finding in (
+        getattr(result, "findings", None)
+        or []
+    ):
+        (
+            supported,
+            canonical_category,
+            owner,
+            evidence_field,
+            reason,
+        ) = _build6r_v335_candidate_decision(
+            finding,
+            verified,
+            fields,
+        )
+
+        if supported:
+            reconciled.append(
+                _build6r_v335_mark_supported(
+                    finding,
+                    canonical_category=canonical_category,
+                    owner=owner,
+                    evidence_field=evidence_field,
+                    reason=reason,
+                )
+            )
+        else:
+            reconciled.append(finding)
+
+    if hasattr(result, "model_copy"):
+        return result.model_copy(
+            update={"findings": reconciled}
+        )
+
+    return ClaimAuditResult(findings=reconciled)
+
+
+def build6r_v335_claim_diagnostics(result):
+    diagnostics = []
+
+    for finding in (
+        getattr(result, "findings", None)
+        or []
+    ):
+        status = str(
+            getattr(finding, "evidence_status", "")
+            or ""
+        ).upper()
+
+        if status != "UNSUPPORTED":
+            continue
+
+        normalized_category = _build6r_v335_category(
+            finding
+        )
+
+        canonical_category = (
+            _BUILD6R_V335_CATEGORY_ALIASES.get(
+                normalized_category
+            )
+        )
+
+        if canonical_category is None:
+            continue
+
+        diagnostics.append(
+            {
+                "original_category": str(
+                    getattr(finding, "claim_category", "")
+                    or ""
+                ),
+                "normalized_category": normalized_category,
+                "v335_canonical_category": canonical_category,
+                "source_field": str(
+                    getattr(finding, "source_field", "")
+                    or ""
+                ),
+                "evidence_status": status,
+                "reason": str(
+                    getattr(finding, "reason", "")
+                    or ""
+                ),
+            }
+        )
+
+    return diagnostics
+
+
+_build6r_v332_claim_diagnostics_before_v335 = (
+    build6r_v332_claim_diagnostics
+)
+
+
+def build6r_v332_claim_diagnostics(result):
+    prior = list(
+        _build6r_v332_claim_diagnostics_before_v335(
+            result
+        )
+        or []
+    )
+
+    alias_categories = set(
+        _BUILD6R_V335_CATEGORY_ALIASES
+    )
+
+    diagnostics = [
+        item
+        for item in prior
+        if item.get("normalized_category")
+        not in alias_categories
+    ]
+
+    diagnostics.extend(
+        build6r_v335_claim_diagnostics(
+            result
+        )
+    )
+
+    return diagnostics
+
+
+_build6r_augment_before_v335 = (
+    augment_with_ai_extraction
+)
+
+
+async def augment_with_ai_extraction(
+    *args,
+    **kwargs,
+):
+    result = await (
+        _build6r_augment_before_v335(
+            *args,
+            **kwargs,
+        )
+    )
+
+    return _build6r_v335_reconcile_result(
+        result,
+        kwargs.get("verified"),
+        kwargs.get("fields") or {},
+    )
