@@ -2884,6 +2884,156 @@ def _neutralize_creative_brief_before_after_only(
     return repaired
 
 
+# =====================================================================
+# BUILD6R_V330_MASTER_CONCEPT_BEFORE_AFTER_TRANSFORMATION_RESULTS_RECOVERY
+#
+# Bounded deterministic recovery for master_concept.visual_identity only.
+# It is eligible only when that field's complete unsupported-finding set is
+# exclusively the existing deterministic `transformation_results` category.
+#
+# This is not a general sanitizer. Mixed or unrelated categories remain
+# unchanged and therefore fail closed at the existing canonical grounding
+# gates. No provider/model/network/research/image/regeneration call exists.
+# =====================================================================
+
+_BUILD6R_MASTER_CONCEPT_BEFORE_AFTER_ONLY_CATEGORIES = frozenset(
+    {
+        "transformation_results",
+    }
+)
+
+
+_BUILD6R_NEUTRAL_MASTER_CONCEPT_VISUAL_IDENTITY = (
+    "Product-first visual identity with clean brand-compatible composition, "
+    "balanced negative space, neutral lighting, restrained graphic accents "
+    "and consistent product framing."
+)
+
+
+def _neutralize_master_concept_visual_identity_before_after_only(
+    db: Session,
+    *,
+    campaign: Campaign,
+    brand: Brand,
+    product,
+    master_concept: MasterCampaignConcept,
+) -> MasterCampaignConcept:
+    # Recover only transformation-results drift in master visual identity.
+    #
+    # Eligibility is intentionally strict:
+    # - only master_concept.visual_identity is eligible for local recovery;
+    # - at least one unsupported finding must exist in that field;
+    # - every unsupported finding must be transformation_results;
+    # - mixed or different categories return the original object unchanged;
+    # - no other MasterCampaignConcept field is rewritten;
+    # - no provider/model/network/research/image/regeneration call exists;
+    # - a repaired object must immediately pass the full canonical gate.
+
+    if product is None:
+        return master_concept
+
+    from .claims_audit import (
+        audit_text_fields,
+    )
+
+    verified = (
+        resolve_verified_product_facts(
+            db,
+            product,
+        )
+    )
+
+    result = audit_text_fields(
+        fields={
+            "master_concept.visual_identity":
+                master_concept.visual_identity,
+        },
+        verified=verified,
+        brand=brand,
+    )
+
+    unsupported = (
+        _unsupported_claim_findings(
+            result
+        )
+    )
+
+    if not unsupported:
+        return master_concept
+
+    categories = {
+        str(
+            getattr(
+                finding,
+                "claim_category",
+                "",
+            )
+        )
+        for finding
+        in unsupported
+    }
+
+    if (
+        not categories
+        or not categories.issubset(
+            _BUILD6R_MASTER_CONCEPT_BEFORE_AFTER_ONLY_CATEGORIES
+        )
+    ):
+        return master_concept
+
+    repaired = (
+        master_concept.model_copy(
+            update={
+                "visual_identity":
+                    _BUILD6R_NEUTRAL_MASTER_CONCEPT_VISUAL_IDENTITY,
+            }
+        )
+    )
+
+    _audit(
+        db,
+        campaign.id,
+        "master_concept_before_after_visual_identity_locally_neutralized",
+        {
+            "repair":
+                "master_concept_visual_identity_transformation_results_only",
+
+            "neutralized_fields":
+                [
+                    "visual_identity",
+                ],
+
+            "claim_categories":
+                sorted(
+                    categories
+                ),
+
+            "replacement_mode":
+                "deterministic_claim_neutral_local_fallback",
+
+            "provider_calls":
+                0,
+
+            "model_calls":
+                0,
+
+            "network_calls":
+                0,
+
+            "research_calls":
+                0,
+
+            "image_calls":
+                0,
+
+            "full_grounding_gate_required_after_repair":
+                True,
+        },
+    )
+
+    return repaired
+
+
 def _enforce_generated_claim_grounding_gate(
     db: Session,
     *,
@@ -3796,6 +3946,9 @@ async def run_copy_stage(
                 "story_beats. "
                 f"{campaign_archetypes_note} "
                 "Describe the master campaign idea rather than platform-specific execution or wording. "
+                "For visual_identity, research/trend context is inspiration only and never factual substantiation. "
+                "Do not use before/after, transformation, result-comparison, or outcome-proof framing unless it is "
+                "explicitly supported by verified product facts or owner-confirmed brand facts. "
                 f"{_claims_boundary_instruction()}") + _sparse_fact_grounding_instruction()
         ),
         user=(
@@ -3824,6 +3977,35 @@ async def run_copy_stage(
         db, campaign_id=campaign.id, operation="master_campaign_concept", providers=[ai_provider],
         platform=primary_platform, language=primary_language, scope="campaign_global",
     )
+
+    # BUILD6R V3.30: bounded deterministic recovery for unsupported
+    # transformation-results drift in master_concept.visual_identity only.
+    # Mixed or unrelated unsupported categories remain fail-closed.
+    master_concept_before_v330_recovery = master_concept
+
+    master_concept = (
+        _neutralize_master_concept_visual_identity_before_after_only(
+            db,
+            campaign=campaign,
+            brand=brand,
+            product=product,
+            master_concept=master_concept,
+        )
+    )
+
+    # Only a locally repaired object gets this immediate complete canonical
+    # grounding gate. Clean concepts retain the pre-V3.30 execution shape,
+    # while the existing later semantic previsual gate remains final.
+    if master_concept is not master_concept_before_v330_recovery:
+        _enforce_generated_claim_grounding_gate(
+            db,
+            campaign=campaign,
+            brand=brand,
+            product=product,
+            phase="master_concept_v330_recovery",
+            root_name="master_concept",
+            value=master_concept,
+        )
 
     # Round 19: which of the two carousel structures this campaign uses follows
     # what's already picked on the campaign — see get_campaign's structure_mode
