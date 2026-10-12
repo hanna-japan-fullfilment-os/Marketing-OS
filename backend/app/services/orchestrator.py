@@ -6639,3 +6639,5 @@ def _build6r_v310_deterministic_canonical_strategy_fallback(
 
     payload.update(updates)
     return type(template)(**payload)
+
+# BUILD6R V3.33: preserve sealed V3.32 diagnostic symbol; claims_audit late-binding supplements unowned categories.
