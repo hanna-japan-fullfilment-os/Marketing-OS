@@ -28906,3 +28906,1511 @@ async def augment_with_ai_extraction(
         kwargs.get("verified"),
         kwargs.get("fields") or {},
     )
+
+# =====================================================================
+# BUILD6R_V336_CANONICAL_EVIDENCE_FAMILY_NONCLAIM_RECONCILIATION
+#
+# Append-only post-V3.35 reconciliation for Attempt-10 taxonomy drift.
+#
+# Safety invariants:
+# - V3.31-V3.35 run first and remain sealed;
+# - only still-UNSUPPORTED findings are eligible;
+# - V3.33 provenance/research rejection remains authoritative;
+# - categories route only and never create evidence;
+# - factual support comes only from canonical VerifiedProductFacts;
+# - presentation/meta framing never supplies product evidence;
+# - collective provenance requires all same-context factual siblings to be
+#   independently supported before it can pass;
+# - unknown factual residue fails closed;
+# - no fuzzy/edit-distance/vector/embedding/LLM truth adjudication.
+# =====================================================================
+
+_BUILD6R_V336_CATEGORY_ROUTES = {
+    "ingredient functional role": "ingredient_family",
+    "ingredient presence": "ingredient_presence",
+    "scientific technical claim": "technical_qualification",
+    "free from absence claim": "free_from",
+    "product feature description": "product_feature",
+    "marketing positioning claim": "nonfactual_editorial",
+    "provenance substantiation statement": "collective_provenance",
+}
+
+_BUILD6R_V336_EXOSOME_ALIASES = (
+    "human adipose derived mesenchymal cell exosomes",
+    "exossomos derivados de celulas mesenquimais de tecido adiposo humano",
+)
+
+_BUILD6R_V336_SKIN_CONDITIONING_ALIASES = (
+    "skin conditioning ingredient",
+    "ingrediente de condicionamento da pele",
+    "ingrediente condicionador da pele",
+)
+
+_BUILD6R_V336_NO_STEM_CELL_ALIASES = (
+    "o fabricante informa que nao ha celulas tronco contidas nesse ingrediente",
+    "fabricante informa que nao ha celulas tronco contidas nesse ingrediente",
+    "com a observacao de que o fabricante indica nao conter celulas tronco",
+    "fabricante indica que esses exossomos nao contem celulas tronco",
+    "fabricante indica nao conter celulas tronco",
+    "esses exossomos nao contem celulas tronco",
+    "nao ha celulas tronco contidas nesse ingrediente",
+    "nao contem celulas tronco",
+)
+
+_BUILD6R_V336_INGREDIENT_GROUPS = (
+    (
+        "exosomes",
+        _BUILD6R_V336_EXOSOME_ALIASES,
+        ("human adipose derived mesenchymal cell exosomes",),
+    ),
+    (
+        "glutathione",
+        ("glutathione", "glutationa", "glutathiona"),
+        ("glutathione",),
+    ),
+    (
+        "arbutin",
+        ("arbutin", "arbutina"),
+        ("arbutin",),
+    ),
+    (
+        "ascorbyl_palmitate",
+        ("ascorbyl palmitate", "palmitato de ascorbila"),
+        ("ascorbyl palmitate",),
+    ),
+    (
+        "human_recombinant_oligopeptide_1",
+        (
+            "human recombinant oligopeptide 1",
+            "oligopeptideo 1 humano recombinante",
+            "oligopeptideo humano recombinante 1",
+        ),
+        ("human recombinant oligopeptide 1",),
+    ),
+    (
+        "ceramide_ap",
+        ("ceramide ap", "ceramida ap"),
+        ("ceramide ap",),
+    ),
+    (
+        "ceramide_np",
+        ("ceramide np", "ceramida np"),
+        ("ceramide np",),
+    ),
+    (
+        "atelocollagen",
+        ("atelocollagen", "atelocolageno"),
+        ("atelocollagen",),
+    ),
+    (
+        "hydroxypropyltrimonium_hyaluronate",
+        (
+            "hydroxypropyltrimonium hyaluronate",
+            "hialuronato de hidroxipropiltrimonio",
+        ),
+        ("hydroxypropyltrimonium hyaluronate",),
+    ),
+)
+
+_BUILD6R_V336_FREE_FROM_GROUPS = (
+    (
+        "colorant_free",
+        ("colorant free", "sem corante", "sem corantes"),
+        ("colorant free",),
+    ),
+    (
+        "fragrance_free",
+        ("fragrance free", "sem fragrancia"),
+        ("fragrance free",),
+    ),
+    (
+        "mineral_oil_free",
+        ("mineral oil free", "sem oleo mineral"),
+        ("mineral oil free",),
+    ),
+    (
+        "alcohol_free",
+        ("alcohol free", "sem alcool"),
+        ("alcohol free",),
+    ),
+)
+
+_BUILD6R_V336_FACTUAL_BLOCK_MARKERS = (
+    "anti aging",
+    "antiaging",
+    "beneficio",
+    "beneficios",
+    "benefit",
+    "benefits",
+    "branqueia",
+    "brighten",
+    "brightening",
+    "clareia",
+    "clinical",
+    "clinicamente",
+    "clinico",
+    "cura",
+    "cure",
+    "efficacy",
+    "eficacia",
+    "efeito",
+    "efeitos",
+    "effect",
+    "effects",
+    "elimina",
+    "garante",
+    "guarantee",
+    "hidrata profundamente",
+    "melhora",
+    "melhorar",
+    "reduz",
+    "reduzir",
+    "regenera",
+    "regeneracao",
+    "regenerar",
+    "rejuvenesce",
+    "rejuvenescimento",
+    "trata",
+    "tratamento",
+    "treats",
+    "visible result",
+    "resultado visivel",
+    "resultados visiveis",
+    "whitening",
+)
+
+_BUILD6R_V336_EXOSOME_ROLE_WRAPPERS = (
+    "ingredientes em destaque todos listados pelo fabricante",
+    "ingredientes citados pelo fabricante",
+    "todos listados pelo fabricante",
+    "apresentar",
+    "listado pelo fabricante",
+    "junto com a informacao de que",
+)
+
+_BUILD6R_V336_INGREDIENT_LIST_WRAPPERS = (
+    "organizar em lista clara os demais ingredientes verificados",
+    "listar claramente os ingredientes destacados que sao verificados",
+    "ingredientes citados pelo fabricante",
+    "ingredientes em destaque todos listados pelo fabricante",
+    "os demais ingredientes verificados",
+    "ingredientes destacados que sao verificados",
+    "ingredientes destacados",
+    "ingredientes verificados",
+    "organizar em lista clara",
+    "listar claramente",
+)
+
+_BUILD6R_V336_FREE_FROM_WRAPPERS = (
+    (
+        "caracteristicas da formula em um quadro separado listar que "
+        "segundo o fabricante a formulacao e"
+    ),
+    "o que a formula nao tem segundo o fabricante",
+    "o que nao entra na formula segundo o fabricante",
+    "apresentar os pontos verificados sobre a formula",
+    "segundo o fabricante",
+    "caracteristicas da formula",
+    "em um quadro separado",
+    "listar que",
+    "a formulacao e",
+)
+
+_BUILD6R_V336_FEATURE_WRAPPERS = (
+    (
+        "descricao da folha mencionar em destaque textual que "
+        "o fabricante descreve a sheet como"
+    ),
+    "descricao da folha",
+    "mencionar em destaque textual que",
+    "o fabricante descreve a sheet como",
+    "fabricante descreve a sheet como",
+    "o fabricante descreve o tecido como",
+)
+
+_BUILD6R_V336_NOSTEM_WRAPPERS = (
+    (
+        "sempre que se tratar de exossomos a informacao vem junto "
+        "com a qualificacao de que"
+    ),
+    "sempre que se tratar de exossomos",
+    "a informacao vem junto com a qualificacao de que",
+    "o fabricante informa que",
+    "fabricante informa que",
+    "nesse ingrediente",
+    "esse ingrediente",
+    "esses exossomos",
+    "exossomos",
+    "exossomo",
+)
+
+_BUILD6R_V336_SAFE_EXOSOME_ROLE_RESIDUE = frozenset(
+    {
+        "a", "as", "com", "como", "da", "das", "de", "do", "dos",
+        "e", "em", "fabricante", "ingrediente", "ingredientes", "o",
+        "os", "pelo", "por", "citado", "citados", "destaque",
+        "destacados", "todos",
+    }
+)
+
+_BUILD6R_V336_SAFE_INGREDIENT_LIST_RESIDUE = frozenset(
+    {
+        "a", "as", "com", "como", "da", "das", "de", "do", "dos",
+        "e", "em", "fabricante", "ingrediente", "ingredientes", "o",
+        "os", "um", "uma", "demais", "citado", "citados", "destacado",
+        "destacados", "verificado", "verificados", "lista", "clara",
+    }
+)
+
+_BUILD6R_V336_SAFE_FREE_FROM_RESIDUE = frozenset(
+    {
+        "a", "as", "com", "da", "das", "de", "do", "dos", "e", "em",
+        "fabricante", "formula", "formulacao", "o", "os", "ponto",
+        "pontos", "verificado", "verificados",
+    }
+)
+
+_BUILD6R_V336_SAFE_FEATURE_RESIDUE = frozenset(
+    {
+        "a", "as", "como", "da", "das", "de", "do", "dos", "e", "em",
+        "fabricante", "folha", "o", "os", "sheet", "tecido", "textual",
+        "destaque", "descricao", "mencionar",
+    }
+)
+
+_BUILD6R_V336_SAFE_NOSTEM_RESIDUE = frozenset(
+    {
+        "a", "as", "com", "da", "das", "de", "do", "dos", "e", "em",
+        "fabricante", "o", "os", "que", "indica", "informa", "ingrediente",
+        "qualificacao", "informacao", "junto", "vem",
+    }
+)
+
+_BUILD6R_V336_SAFE_ALT_TEXT_RESIDUE = frozenset(
+    {
+        "a", "apenas", "aparece", "aparecem", "as", "com", "da", "das",
+        "de", "discreto", "discreta", "do", "dos", "e", "em",
+        "identificando", "identificar", "imagem", "imagens", "na", "nas",
+        "nome", "nomes", "o", "os", "produto", "produtos", "quantidade",
+        "sem", "somente", "texto", "textos", "visual", "visuais",
+        "destaque",
+    }
+)
+
+
+def _build6r_v336_normalize(value):
+    return _build6r_v333_normalize(value)
+
+
+def _build6r_v336_route(finding):
+    return _BUILD6R_V336_CATEGORY_ROUTES.get(
+        _build6r_v336_normalize(
+            getattr(finding, "claim_category", "")
+        ),
+        "",
+    )
+
+
+def _build6r_v336_remove_any(work, aliases):
+    return _build6r_v333_remove_any(
+        _build6r_v336_normalize(work),
+        aliases,
+    )
+
+
+def _build6r_v336_strip_phrases(work, phrases):
+    work = _build6r_v336_normalize(work)
+
+    for phrase in sorted(
+        phrases,
+        key=lambda item: (
+            len(_build6r_v336_normalize(item).split()),
+            len(_build6r_v336_normalize(item)),
+        ),
+        reverse=True,
+    ):
+        while True:
+            updated, removed = _build6r_v333_remove_phrase(
+                work,
+                phrase,
+            )
+
+            if not removed:
+                break
+
+            work = updated
+
+    return work
+
+
+def _build6r_v336_field_contains(
+    verified,
+    field_names,
+    *requirements,
+):
+    if verified is None:
+        return False, ""
+
+    normalized_requirements = [
+        _build6r_v336_normalize(requirement)
+        for requirement in requirements
+        if str(requirement or "").strip()
+    ]
+
+    for field_name in field_names:
+        raw_value = getattr(
+            verified,
+            field_name,
+            None,
+        )
+
+        if raw_value is None:
+            continue
+
+        values = (
+            raw_value
+            if isinstance(raw_value, (list, tuple, set))
+            else [raw_value]
+        )
+
+        for value in values:
+            normalized_value = _build6r_v336_normalize(
+                value
+            )
+
+            if all(
+                requirement in normalized_value
+                for requirement in normalized_requirements
+            ):
+                return True, field_name
+
+    return False, ""
+
+
+def _build6r_v336_verified_ingredient_contains(
+    verified,
+    *requirements,
+):
+    return _build6r_v336_field_contains(
+        verified,
+        ("verified_ingredients",),
+        *requirements,
+    )
+
+
+def _build6r_v336_verified_free_from_contains(
+    verified,
+    *requirements,
+):
+    return _build6r_v336_field_contains(
+        verified,
+        ("verified_claims", "verified_features"),
+        *requirements,
+    )
+
+
+def _build6r_v336_verified_feature_contains(
+    verified,
+    *requirements,
+):
+    return _build6r_v336_field_contains(
+        verified,
+        ("verified_features", "verified_claims"),
+        *requirements,
+    )
+
+
+def _build6r_v336_has_blocked_meaning(value):
+    normalized = _build6r_v336_normalize(value)
+    padded = " " + normalized + " "
+
+    return any(
+        (
+            " "
+            + _build6r_v336_normalize(marker)
+            + " "
+        )
+        in padded
+        for marker in _BUILD6R_V336_FACTUAL_BLOCK_MARKERS
+    )
+
+
+def _build6r_v336_consume_no_stem_cells(
+    work,
+    verified,
+):
+    supported, _ = (
+        _build6r_v336_verified_ingredient_contains(
+            verified,
+            "human adipose derived mesenchymal cell exosomes",
+            "stem cells are not contained",
+        )
+    )
+
+    if not supported:
+        return work, False
+
+    return _build6r_v336_remove_any(
+        work,
+        _BUILD6R_V336_NO_STEM_CELL_ALIASES,
+    )
+
+
+def _build6r_v336_exosome_role_supported(
+    claim_text,
+    verified,
+):
+    raw = _build6r_v336_normalize(
+        claim_text
+    )
+
+    if not raw or _build6r_v336_has_blocked_meaning(
+        raw
+    ):
+        return False, "", "blocked_or_empty"
+
+    role_supported, role_field = (
+        _build6r_v336_verified_ingredient_contains(
+            verified,
+            "human adipose derived mesenchymal cell exosomes",
+            "skin conditioning ingredient",
+        )
+    )
+
+    if not role_supported:
+        return False, "", "canonical_exosome_role_missing"
+
+    work, exosome_found = (
+        _build6r_v336_remove_any(
+            raw,
+            _BUILD6R_V336_EXOSOME_ALIASES,
+        )
+    )
+
+    work, role_found = (
+        _build6r_v336_remove_any(
+            work,
+            _BUILD6R_V336_SKIN_CONDITIONING_ALIASES,
+        )
+    )
+
+    if not (
+        exosome_found
+        and role_found
+    ):
+        return False, "", "required_exosome_role_atoms_missing"
+
+    if any(
+        _build6r_v336_normalize(alias) in work
+        for alias in _BUILD6R_V336_NO_STEM_CELL_ALIASES
+    ):
+        work, no_stem_found = (
+            _build6r_v336_consume_no_stem_cells(
+                work,
+                verified,
+            )
+        )
+
+        if not no_stem_found:
+            return False, "", "no_stem_cell_qualification_not_verified"
+
+    work = _build6r_v336_strip_phrases(
+        work,
+        _BUILD6R_V336_EXOSOME_ROLE_WRAPPERS,
+    )
+
+    residue = set(
+        _build6r_v336_normalize(work).split()
+    )
+
+    if not residue.issubset(
+        _BUILD6R_V336_SAFE_EXOSOME_ROLE_RESIDUE
+    ):
+        return False, "", "unsupported_exosome_role_residue"
+
+    return (
+        True,
+        role_field,
+        "verified_exosome_role_atoms",
+    )
+
+
+def _build6r_v336_no_stem_cells_supported(
+    claim_text,
+    verified,
+):
+    raw = _build6r_v336_normalize(
+        claim_text
+    )
+
+    if not raw or _build6r_v336_has_blocked_meaning(
+        raw
+    ):
+        return False, "", "blocked_or_empty"
+
+    tokens = set(raw.split())
+
+    if (
+        tokens
+        & {
+            "produto",
+            "mascara",
+            "formula",
+            "formulacao",
+        }
+        and not (
+            "exossomo" in tokens
+            or "exossomos" in tokens
+            or "ingrediente" in tokens
+        )
+    ):
+        return (
+            False,
+            "",
+            "no_stem_cell_scope_overgeneralized",
+        )
+
+    supported, evidence_field = (
+        _build6r_v336_verified_ingredient_contains(
+            verified,
+            "human adipose derived mesenchymal cell exosomes",
+            "stem cells are not contained",
+        )
+    )
+
+    if not supported:
+        return False, "", "canonical_no_stem_qualification_missing"
+
+    work, negation_found = (
+        _build6r_v336_remove_any(
+            raw,
+            _BUILD6R_V336_NO_STEM_CELL_ALIASES,
+        )
+    )
+
+    if not negation_found:
+        return False, "", "bounded_no_stem_phrase_missing"
+
+    work = _build6r_v336_strip_phrases(
+        work,
+        _BUILD6R_V336_NOSTEM_WRAPPERS,
+    )
+
+    residue = set(
+        _build6r_v336_normalize(work).split()
+    )
+
+    if not residue.issubset(
+        _BUILD6R_V336_SAFE_NOSTEM_RESIDUE
+    ):
+        return False, "", "unsupported_no_stem_residue"
+
+    return (
+        True,
+        evidence_field,
+        "verified_exosome_no_stem_qualification",
+    )
+
+
+def _build6r_v336_ingredient_presence_supported(
+    claim_text,
+    verified,
+):
+    work = _build6r_v336_normalize(
+        claim_text
+    )
+
+    if not work or _build6r_v336_has_blocked_meaning(
+        work
+    ):
+        return False, "", "blocked_or_empty"
+
+    work = _build6r_v336_strip_phrases(
+        work,
+        _BUILD6R_V336_INGREDIENT_LIST_WRAPPERS,
+    )
+
+    matched = []
+    evidence_fields = []
+
+    for (
+        key,
+        aliases,
+        requirements,
+    ) in _BUILD6R_V336_INGREDIENT_GROUPS:
+        updated, found = (
+            _build6r_v336_remove_any(
+                work,
+                aliases,
+            )
+        )
+
+        if not found:
+            continue
+
+        supported, evidence_field = (
+            _build6r_v336_verified_ingredient_contains(
+                verified,
+                *requirements,
+            )
+        )
+
+        if not supported:
+            return (
+                False,
+                "",
+                "candidate_ingredient_not_in_verified_ingredients",
+            )
+
+        work = updated
+        matched.append(key)
+        evidence_fields.append(
+            evidence_field
+        )
+
+    if "ascorbyl_palmitate" in matched:
+        work = _build6r_v336_strip_phrases(
+            work,
+            (
+                "derivado de vitamina c",
+                "vitamin c derivative",
+            ),
+        )
+
+    if (
+        "human_recombinant_oligopeptide_1"
+        in matched
+    ):
+        work = _build6r_v336_strip_phrases(
+            work,
+            ("egf",),
+        )
+
+    if "exosomes" in matched:
+        work, _ = (
+            _build6r_v336_consume_no_stem_cells(
+                work,
+                verified,
+            )
+        )
+
+        work = _build6r_v336_strip_phrases(
+            work,
+            (
+                "com a observacao de que",
+                "o fabricante indica que",
+                "fabricante indica que",
+                "esses exossomos",
+            ),
+        )
+
+    if not matched:
+        return False, "", "no_verified_ingredient_atom"
+
+    residue = set(
+        _build6r_v336_normalize(work).split()
+    )
+
+    if not residue.issubset(
+        _BUILD6R_V336_SAFE_INGREDIENT_LIST_RESIDUE
+    ):
+        return False, "", "unsupported_ingredient_list_residue"
+
+    return (
+        True,
+        ",".join(
+            sorted(
+                set(
+                    field
+                    for field in evidence_fields
+                    if field
+                )
+            )
+        ),
+        "all_ingredient_atoms_verified",
+    )
+
+
+def _build6r_v336_free_from_supported(
+    claim_text,
+    verified,
+):
+    work = _build6r_v336_normalize(
+        claim_text
+    )
+
+    if not work or _build6r_v336_has_blocked_meaning(
+        work
+    ):
+        return False, "", "blocked_or_empty"
+
+    work = _build6r_v336_strip_phrases(
+        work,
+        _BUILD6R_V336_FREE_FROM_WRAPPERS,
+    )
+
+    matched = []
+    evidence_fields = []
+
+    for (
+        key,
+        aliases,
+        requirements,
+    ) in _BUILD6R_V336_FREE_FROM_GROUPS:
+        updated, found = (
+            _build6r_v336_remove_any(
+                work,
+                aliases,
+            )
+        )
+
+        if not found:
+            continue
+
+        supported, evidence_field = (
+            _build6r_v336_verified_free_from_contains(
+                verified,
+                *requirements,
+            )
+        )
+
+        if not supported:
+            return (
+                False,
+                "",
+                "candidate_free_from_atom_not_verified",
+            )
+
+        work = updated
+        matched.append(key)
+        evidence_fields.append(
+            evidence_field
+        )
+
+    if not matched:
+        return False, "", "no_verified_free_from_atom"
+
+    residue = set(
+        _build6r_v336_normalize(work).split()
+    )
+
+    if not residue.issubset(
+        _BUILD6R_V336_SAFE_FREE_FROM_RESIDUE
+    ):
+        return False, "", "unsupported_free_from_residue"
+
+    return (
+        True,
+        ",".join(
+            sorted(
+                set(
+                    field
+                    for field in evidence_fields
+                    if field
+                )
+            )
+        ),
+        "all_free_from_atoms_verified",
+    )
+
+
+def _build6r_v336_product_feature_supported(
+    claim_text,
+    verified,
+):
+    raw = _build6r_v336_normalize(
+        claim_text
+    )
+
+    if not raw or _build6r_v336_has_blocked_meaning(
+        raw
+    ):
+        return False, "", "blocked_or_empty"
+
+    supported, evidence_field = (
+        _build6r_v336_verified_feature_contains(
+            verified,
+            "melty feel sheet",
+        )
+    )
+
+    if not supported:
+        return False, "", "canonical_feature_missing"
+
+    work, feature_found = (
+        _build6r_v333_remove_phrase(
+            raw,
+            "melty feel sheet",
+        )
+    )
+
+    if not feature_found:
+        return False, "", "bounded_feature_atom_missing"
+
+    work = _build6r_v336_strip_phrases(
+        work,
+        _BUILD6R_V336_FEATURE_WRAPPERS,
+    )
+
+    residue = set(
+        _build6r_v336_normalize(work).split()
+    )
+
+    if not residue.issubset(
+        _BUILD6R_V336_SAFE_FEATURE_RESIDUE
+    ):
+        return False, "", "unsupported_feature_residue"
+
+    return (
+        True,
+        evidence_field,
+        "verified_melty_feel_sheet_atom",
+    )
+
+
+def _build6r_v336_nonfactual_editorial_supported(
+    finding,
+):
+    if _build6r_v35_nonfactual_visual_instruction(
+        finding
+    ):
+        return True, "existing_v35_nonfactual_visual"
+
+    source_field = _build6r_v336_normalize(
+        getattr(finding, "source_field", "")
+    )
+
+    if "alt text" not in source_field:
+        return False, "non_alt_text_source"
+
+    raw = _build6r_v336_normalize(
+        getattr(finding, "claim_text", "")
+    )
+
+    if not raw:
+        return False, "empty_alt_text"
+
+    work, negated_result_promise = (
+        _build6r_v336_remove_any(
+            raw,
+            (
+                "nenhuma promessa de resultado",
+                "nenhuma promessa de resultados",
+                "sem promessa de resultado",
+                "nao ha promessa de resultado",
+            ),
+        )
+    )
+
+    if not negated_result_promise:
+        return False, "result_promise_negation_missing"
+
+    if not (
+        "imagem" in work.split()
+        or "visual" in work.split()
+    ):
+        return False, "visual_context_missing"
+
+    if any(
+        token.isdigit()
+        for token in work.split()
+    ):
+        return False, "numeric_factual_residue"
+
+    residue = set(
+        _build6r_v336_normalize(work).split()
+    )
+
+    if not residue.issubset(
+        _BUILD6R_V336_SAFE_ALT_TEXT_RESIDUE
+    ):
+        return False, "unsupported_alt_text_factual_residue"
+
+    return True, "bounded_nonfactual_alt_text"
+
+
+def _build6r_v336_manufacturer_provenance_verified(
+    verified,
+):
+    provenance = _build6r_v336_normalize(
+        getattr(
+            verified,
+            "provenance",
+            "",
+        )
+    )
+
+    if not provenance:
+        return False
+
+    return any(
+        marker in provenance
+        for marker in (
+            "manufacturer",
+            "fabricante",
+            "official",
+        )
+    )
+
+
+def _build6r_v336_collective_provenance_supported(
+    finding,
+    result,
+    verified,
+    fields,
+):
+    provenance_ok, recovered_source, _ = (
+        _build6r_v333_verbatim_provenance(
+            finding,
+            fields,
+        )
+    )
+
+    if not provenance_ok:
+        return (
+            False,
+            "",
+            "collective_provenance_source_not_unique",
+        )
+
+    if not _build6r_v336_manufacturer_provenance_verified(
+        verified
+    ):
+        return (
+            False,
+            "",
+            "canonical_manufacturer_provenance_missing",
+        )
+
+    raw = _build6r_v336_normalize(
+        getattr(finding, "claim_text", "")
+    )
+
+    if not (
+        "tudo acima" in raw
+        or "all above" in raw
+    ):
+        return (
+            False,
+            "",
+            "collective_reference_missing",
+        )
+
+    if not (
+        "fabricante" in raw
+        or "manufacturer" in raw
+    ):
+        return (
+            False,
+            "",
+            "manufacturer_attribution_missing",
+        )
+
+    numeric_tokens = {
+        token
+        for token in raw.split()
+        if token.isdigit()
+    }
+
+    if not numeric_tokens.issubset(
+        {"7"}
+    ):
+        return (
+            False,
+            "",
+            "unsupported_collective_provenance_quantity",
+        )
+
+    if "7" in numeric_tokens:
+        quantity_ok, quantity_field = (
+            _build6r_v333_evidence_contains(
+                verified,
+                "7",
+                "pouch",
+            )
+        )
+
+        if not quantity_ok:
+            return (
+                False,
+                "",
+                "verified_7_sheet_variant_missing",
+            )
+    else:
+        quantity_field = ""
+
+    source_text = str(
+        (fields or {}).get(
+            recovered_source,
+            "",
+        )
+        or ""
+    )
+
+    factual_sibling_count = 0
+
+    for sibling in (
+        getattr(result, "findings", None)
+        or []
+    ):
+        if sibling is finding:
+            continue
+
+        sibling_category = _build6r_v336_normalize(
+            getattr(
+                sibling,
+                "claim_category",
+                "",
+            )
+        )
+
+        if (
+            sibling_category
+            == "provenance substantiation statement"
+        ):
+            continue
+
+        sibling_claim = str(
+            getattr(
+                sibling,
+                "claim_text",
+                "",
+            )
+            or ""
+        )
+
+        sibling_ok, sibling_source, _ = (
+            _build6r_v333_verbatim_provenance(
+                sibling,
+                fields,
+            )
+        )
+
+        same_context = (
+            sibling_ok
+            and sibling_source == recovered_source
+        )
+
+        if (
+            not same_context
+            and sibling_claim
+            and sibling_claim in source_text
+        ):
+            same_context = True
+
+        if not same_context:
+            continue
+
+        sibling_status = str(
+            getattr(
+                sibling,
+                "evidence_status",
+                "",
+            )
+            or ""
+        ).upper()
+
+        if (
+            sibling_category
+            == "marketing positioning claim"
+        ):
+            if sibling_status != "SUPPORTED":
+                return (
+                    False,
+                    "",
+                    "same_context_nonfactual_sibling_unresolved",
+                )
+
+            continue
+
+        factual_sibling_count += 1
+
+        if sibling_status != "SUPPORTED":
+            return (
+                False,
+                "",
+                "same_context_factual_sibling_unresolved",
+            )
+
+    if factual_sibling_count == 0:
+        return (
+            False,
+            "",
+            "collective_provenance_has_no_grounded_siblings",
+        )
+
+    return (
+        True,
+        quantity_field or "provenance",
+        "all_same_context_factual_siblings_grounded",
+    )
+
+
+def _build6r_v336_mark_supported(
+    finding,
+    *,
+    allowed_source,
+    route,
+    evidence_field,
+    reason,
+):
+    update = {
+        "evidence_status": "SUPPORTED",
+        "allowed_source": allowed_source,
+        "reason": (
+            "BUILD6R V3.36 canonical evidence-family/nonclaim "
+            "reconciliation accepted this still-unsupported finding "
+            "only after deterministic provenance and complete residue "
+            "accounting; route="
+            + route
+            + "; evidence_field="
+            + str(evidence_field or "")
+            + "; matcher="
+            + reason
+        ),
+    }
+
+    if hasattr(
+        finding,
+        "model_copy",
+    ):
+        return finding.model_copy(
+            update=update
+        )
+
+    return ClaimFinding(
+        claim_text=finding.claim_text,
+        claim_category=finding.claim_category,
+        source_field=finding.source_field,
+        evidence_status="SUPPORTED",
+        allowed_source=allowed_source,
+        reason=update["reason"],
+    )
+
+
+def _build6r_v336_first_pass_decision(
+    finding,
+    verified,
+    fields,
+):
+    if verified is None:
+        return (
+            False,
+            "",
+            "",
+            "",
+            "missing_verified_product_facts",
+        )
+
+    if (
+        str(
+            getattr(
+                finding,
+                "evidence_status",
+                "",
+            )
+            or ""
+        ).upper()
+        != "UNSUPPORTED"
+    ):
+        return (
+            False,
+            "",
+            "",
+            "",
+            "already_supported",
+        )
+
+    route = _build6r_v336_route(
+        finding
+    )
+
+    if not route:
+        return (
+            False,
+            "",
+            "",
+            "",
+            "unrecognized_category_fail_closed",
+        )
+
+    provenance_ok, _, provenance_reason = (
+        _build6r_v333_verbatim_provenance(
+            finding,
+            fields,
+        )
+    )
+
+    if not provenance_ok:
+        return (
+            False,
+            route,
+            "",
+            "",
+            provenance_reason,
+        )
+
+    claim_text = str(
+        getattr(
+            finding,
+            "claim_text",
+            "",
+        )
+        or ""
+    )
+
+    if route == "ingredient_family":
+        supported, evidence_field, reason = (
+            _build6r_v336_exosome_role_supported(
+                claim_text,
+                verified,
+            )
+        )
+
+        return (
+            supported,
+            route,
+            "verified_product_facts",
+            evidence_field,
+            reason,
+        )
+
+    if route == "ingredient_presence":
+        supported, evidence_field, reason = (
+            _build6r_v336_ingredient_presence_supported(
+                claim_text,
+                verified,
+            )
+        )
+
+        return (
+            supported,
+            route,
+            "verified_product_facts",
+            evidence_field,
+            reason,
+        )
+
+    if route == "technical_qualification":
+        supported, evidence_field, reason = (
+            _build6r_v336_no_stem_cells_supported(
+                claim_text,
+                verified,
+            )
+        )
+
+        return (
+            supported,
+            route,
+            "verified_product_facts",
+            evidence_field,
+            reason,
+        )
+
+    if route == "free_from":
+        supported, evidence_field, reason = (
+            _build6r_v336_free_from_supported(
+                claim_text,
+                verified,
+            )
+        )
+
+        return (
+            supported,
+            route,
+            "verified_product_facts",
+            evidence_field,
+            reason,
+        )
+
+    if route == "product_feature":
+        supported, evidence_field, reason = (
+            _build6r_v336_product_feature_supported(
+                claim_text,
+                verified,
+            )
+        )
+
+        return (
+            supported,
+            route,
+            "verified_product_facts",
+            evidence_field,
+            reason,
+        )
+
+    if route == "nonfactual_editorial":
+        supported, reason = (
+            _build6r_v336_nonfactual_editorial_supported(
+                finding
+            )
+        )
+
+        return (
+            supported,
+            route,
+            "nonfactual_editorial",
+            "",
+            reason,
+        )
+
+    if route == "collective_provenance":
+        return (
+            False,
+            route,
+            "",
+            "",
+            "deferred_to_second_pass",
+        )
+
+    return (
+        False,
+        route,
+        "",
+        "",
+        "route_without_owner",
+    )
+
+
+def _build6r_v336_reconcile_result(
+    result,
+    verified,
+    fields,
+):
+    first_pass = []
+
+    for finding in (
+        getattr(
+            result,
+            "findings",
+            None,
+        )
+        or []
+    ):
+        (
+            supported,
+            route,
+            allowed_source,
+            evidence_field,
+            reason,
+        ) = _build6r_v336_first_pass_decision(
+            finding,
+            verified,
+            fields,
+        )
+
+        if supported:
+            first_pass.append(
+                _build6r_v336_mark_supported(
+                    finding,
+                    allowed_source=allowed_source,
+                    route=route,
+                    evidence_field=evidence_field,
+                    reason=reason,
+                )
+            )
+        else:
+            first_pass.append(
+                finding
+            )
+
+    if hasattr(
+        result,
+        "model_copy",
+    ):
+        first_result = result.model_copy(
+            update={
+                "findings": first_pass,
+            }
+        )
+    else:
+        first_result = ClaimAuditResult(
+            findings=first_pass
+        )
+
+    second_pass = []
+
+    for finding in first_pass:
+        if (
+            str(
+                getattr(
+                    finding,
+                    "evidence_status",
+                    "",
+                )
+                or ""
+            ).upper()
+            != "UNSUPPORTED"
+            or _build6r_v336_route(
+                finding
+            )
+            != "collective_provenance"
+        ):
+            second_pass.append(
+                finding
+            )
+
+            continue
+
+        supported, evidence_field, reason = (
+            _build6r_v336_collective_provenance_supported(
+                finding,
+                first_result,
+                verified,
+                fields,
+            )
+        )
+
+        if not supported:
+            second_pass.append(
+                finding
+            )
+
+            continue
+
+        second_pass.append(
+            _build6r_v336_mark_supported(
+                finding,
+                allowed_source="verified_product_facts",
+                route="collective_provenance",
+                evidence_field=evidence_field,
+                reason=reason,
+            )
+        )
+
+    if hasattr(
+        result,
+        "model_copy",
+    ):
+        return result.model_copy(
+            update={
+                "findings": second_pass,
+            }
+        )
+
+    return ClaimAuditResult(
+        findings=second_pass
+    )
+
+
+_build6r_augment_before_v336 = (
+    augment_with_ai_extraction
+)
+
+
+async def augment_with_ai_extraction(
+    *args,
+    **kwargs,
+):
+    result = await (
+        _build6r_augment_before_v336(
+            *args,
+            **kwargs,
+        )
+    )
+
+    return _build6r_v336_reconcile_result(
+        result,
+        kwargs.get("verified"),
+        kwargs.get("fields") or {},
+    )
