@@ -96,6 +96,10 @@ from .feedback_selector import format_feedback_for_prompt, select_feedback_examp
 from .product_facts import format_verified_facts_for_prompt, resolve_verified_product_facts
 from .prompt_registry import record_prompt_usage
 from .usage_tracking import record_stage_usage
+from .locked_product_pipeline import (
+    build_locked_product_composite,
+    inspect_locked_product_master_candidate,
+)
 from .fingerprint import NOVELTY_FRESH, NOVELTY_SIMILAR_BUT_ACCEPTABLE, classify_novelty, text_hash
 from .research.openai_research import build_research_query, derive_geography_and_audience, run_research
 
@@ -687,6 +691,7 @@ async def generate_ai_background(
     visual_brief: str = "",
     quality: str = "high",
     creative_direction: CreativeDirection | None = None,
+    allow_reference_images: bool = True,
 ) -> Image.Image | None:
     """Best-effort AI-generated scene background — the brief's documented
     `SlideCreativeInput.generated_background` hook, finally wired up. Shared by
@@ -715,7 +720,15 @@ async def generate_ai_background(
     returns `None`.
     """
     try:
-        reference_paths = _resolve_visual_reference_paths(db, brand.id, limit=3)
+        reference_paths = (
+            _resolve_visual_reference_paths(
+                db,
+                brand.id,
+                limit=3,
+            )
+            if allow_reference_images
+            else []
+        )
         style_notes = _brand_style_prompt_notes(brand)
         direction_note = ""
         if creative_direction is not None:
@@ -4757,6 +4770,15 @@ async def run_visuals_stage(
         if not source_path.exists():
             continue  # a moved/deleted source file shouldn't fail the whole run
 
+        locked_product_candidate = (
+            inspect_locked_product_master_candidate(
+                source_path,
+                expected_sha256=str(asset.sha256 or ""),
+            )
+        )
+        locked_product_composite = None
+        locked_product_metadata = None
+
         output_path = build_slide_output_path(
             output_root=config.output_root, brand_slug=brand.slug, category_slug=category_slug,
             campaign_display_id=campaign.display_id, year=now.year, month=now.month,
@@ -4898,6 +4920,9 @@ async def run_visuals_stage(
                     width=fmt.width, height=fmt.height, visual_brief=getattr(slide, "visual_brief", ""),
                     quality=quality_tier,
                     creative_direction=primary_creative_direction,
+                    allow_reference_images=(
+                        locked_product_candidate is None
+                    ),
                 )
                 if generated_background is not None:
                     primary_generated_backgrounds[i] = generated_background
@@ -4911,6 +4936,19 @@ async def run_visuals_stage(
                     )
 
             if (
+                generated_background is not None
+                and locked_product_candidate is not None
+            ):
+                locked_result = build_locked_product_composite(
+                    background=generated_background,
+                    master_path=source_path,
+                    expected_sha256=str(asset.sha256 or ""),
+                    canvas_size=(fmt.width, fmt.height),
+                )
+                locked_product_composite = locked_result.image
+                locked_product_metadata = locked_result.metadata
+
+            if (
                 config.require_ai_background_success
                 and config.use_ai_background
                 and generated_background is None
@@ -4921,7 +4959,11 @@ async def run_visuals_stage(
                     "fallback is not accepted."
                 )
 
-            if config.detect_product_zone and ai_provider is not None:
+            if (
+                config.detect_product_zone
+                and ai_provider is not None
+                and locked_product_composite is None
+            ):
                 zone_detection = await detect_product_zone(
                     ai_provider=ai_provider, image_path=source_path, model=config.vision_model,
                 )
@@ -4947,7 +4989,11 @@ async def run_visuals_stage(
             accent_color=brand_style.accent_color, text_color=brand_style.text_color,
             font_family=brand_style.primary_font,
             generated_background=generated_background, product_zone_detection=zone_detection,
-            recreated_image=recreated_image,
+            recreated_image=(
+                locked_product_composite
+                if locked_product_composite is not None
+                else recreated_image
+            ),
             # Round 17 feature_showcase fields — also suppressed when the AI baked
             # its own text into a recreated image, same reasoning as eyebrow/etc
             # above (never draw two competing text layers).
@@ -5000,9 +5046,17 @@ async def run_visuals_stage(
         _persist_render_context(
             slide_output_path=result.output_path,
             creative_direction=primary_creative_direction.model_dump(),
-            visual_base=(recreated_image if recreated_image is not None else generated_background),
+            visual_base=(
+                locked_product_composite
+                if locked_product_composite is not None
+                else recreated_image
+                if recreated_image is not None
+                else generated_background
+            ),
             visual_base_kind=(
-                "recreated_image"
+                "locked_product_composite"
+                if locked_product_composite is not None
+                else "recreated_image"
                 if recreated_image is not None
                 else "generated_background"
                 if generated_background is not None
@@ -5035,6 +5089,10 @@ async def run_visuals_stage(
                 "attempts": fidelity_outcome.attempts,
                 "notes": fidelity_outcome.fidelity_notes,
             }
+        if locked_product_metadata is not None:
+            qa_dict["locked_product_pipeline"] = (
+                locked_product_metadata
+            )
         qa_report_path.write_text(json.dumps(qa_dict, indent=2))
 
         db.add(
@@ -5816,6 +5874,15 @@ product=None, verified_facts_note: str = "") -> int:
                     if not source_path.exists():
                         continue
 
+                    locked_product_candidate = (
+                        inspect_locked_product_master_candidate(
+                            source_path,
+                            expected_sha256=str(asset.sha256 or ""),
+                        )
+                    )
+                    locked_product_composite = None
+                    locked_product_metadata = None
+
                     fallback_direction = _deterministic_creative_direction(
                         master_concept=master_concept, adaptation=adaptation, platform=platform,
                         language=language, content_type=content_type, slide_role=getattr(slide, "purpose", ""),
@@ -5864,6 +5931,9 @@ product=None, verified_facts_note: str = "") -> int:
                                 db, image_provider=image_provider, brand=brand, model=quality_image_model,
                                 width=fmt.width, height=fmt.height, visual_brief=getattr(slide, "visual_brief", ""),
                                 quality=quality_tier, creative_direction=creative_direction,
+                                allow_reference_images=(
+                                    locked_product_candidate is None
+                                ),
                             )
                             if generated_background is not None:
                                 background_cache.setdefault(idx, []).append((signature, generated_background))
@@ -5876,7 +5946,24 @@ product=None, verified_facts_note: str = "") -> int:
                                     providers=[image_provider], platform=platform, content_type=content_type,
                                 )
 
-                    recreated_image = None
+                    if (
+                        generated_background is not None
+                        and locked_product_candidate is not None
+                    ):
+                        locked_result = build_locked_product_composite(
+                            background=generated_background,
+                            master_path=source_path,
+                            expected_sha256=str(asset.sha256 or ""),
+                            canvas_size=(fmt.width, fmt.height),
+                        )
+                        locked_product_composite = locked_result.image
+                        locked_product_metadata = locked_result.metadata
+
+                    recreated_image = (
+                        locked_product_composite
+                        if locked_product_composite is not None
+                        else None
+                    )
                     if config.recreate_with_ai and image_provider is not None and ai_provider is not None:
                         # Cannot be shared across languages — see this function's
                         # own docstring on why full recreation's cost can't be
@@ -5972,9 +6059,17 @@ product=None, verified_facts_note: str = "") -> int:
                     _persist_render_context(
                         slide_output_path=result.output_path,
                         creative_direction=creative_direction.model_dump(),
-                        visual_base=(recreated_image if recreated_image is not None else generated_background),
+                        visual_base=(
+                            locked_product_composite
+                            if locked_product_composite is not None
+                            else recreated_image
+                            if recreated_image is not None
+                            else generated_background
+                        ),
                         visual_base_kind=(
-                            "recreated_image"
+                            "locked_product_composite"
+                            if locked_product_composite is not None
+                            else "recreated_image"
                             if recreated_image is not None
                             else "generated_background"
                             if generated_background is not None
@@ -5990,7 +6085,14 @@ product=None, verified_facts_note: str = "") -> int:
                         platform_key=render_format_key, language=language, slide_number=idx,
                     )
                     qa_path.parent.mkdir(parents=True, exist_ok=True)
-                    qa_path.write_text(json.dumps(result.qa.to_dict(), indent=2))
+                    qa_payload = result.qa.to_dict()
+                    if locked_product_metadata is not None:
+                        qa_payload["locked_product_pipeline"] = (
+                            locked_product_metadata
+                        )
+                    qa_path.write_text(
+                        json.dumps(qa_payload, indent=2)
+                    )
                     qa_paths.append(str(qa_path))
 
                 db.add(PlatformCampaignVariant(
