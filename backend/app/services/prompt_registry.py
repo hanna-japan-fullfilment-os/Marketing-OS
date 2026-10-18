@@ -152,7 +152,7 @@ PROMPT_VERSIONS: dict[str, PromptSpec] = {
     ),
     "scene_generation": PromptSpec(
         purpose="scene_generation",
-        version="1.1.0",
+        version="1.2.0",
         file_path=(
             "services/orchestrator.py::generate_ai_background / recreate_creative_image / "
             "recreate_creative_image_with_fidelity_gate (the scene/image-generation RECIPE)"

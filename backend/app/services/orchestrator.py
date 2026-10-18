@@ -692,6 +692,7 @@ async def generate_ai_background(
     quality: str = "high",
     creative_direction: CreativeDirection | None = None,
     allow_reference_images: bool = True,
+    reference_art_direction_only: bool = False,
 ) -> Image.Image | None:
     """Best-effort AI-generated scene background — the brief's documented
     `SlideCreativeInput.generated_background` hook, finally wired up. Shared by
@@ -720,16 +721,34 @@ async def generate_ai_background(
     returns `None`.
     """
     try:
-        reference_paths = (
-            _resolve_visual_reference_paths(
+        if reference_art_direction_only:
+            reference_paths = _resolve_visual_reference_paths(
                 db,
                 brand.id,
                 limit=3,
             )
-            if allow_reference_images
-            else []
-        )
+        else:
+            reference_paths = (
+                _resolve_visual_reference_paths(
+                    db,
+                    brand.id,
+                    limit=3,
+                )
+                if allow_reference_images
+                else []
+            )
         style_notes = _brand_style_prompt_notes(brand)
+        if reference_art_direction_only and reference_paths:
+            style_notes = (
+                style_notes
+                + " QUALITY_AND_COMPOSITION_REFERENCE_NOT_PRODUCT_FACT_EVIDENCE: "
+                + "Use reference images only for composition, lighting, spatial hierarchy, "
+                + "material treatment, atmosphere, palette, and production finish. "
+                + "Reference images are never evidence for product identity, packaging facts, "
+                + "ingredients, benefits, performance, rankings, availability, visible text, "
+                + "logos, or any other factual product or brand assertion. Do not copy factual-looking "
+                + "text or product claims from a reference image."
+            ).strip()
         direction_note = ""
         if creative_direction is not None:
             direction_note = (
@@ -4922,6 +4941,9 @@ async def run_visuals_stage(
                     creative_direction=primary_creative_direction,
                     allow_reference_images=(
                         locked_product_candidate is None
+                    ),
+                    reference_art_direction_only=(
+                        locked_product_candidate is not None
                     ),
                 )
                 if generated_background is not None:

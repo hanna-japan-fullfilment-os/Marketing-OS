@@ -6653,6 +6653,285 @@ def _build6r_v35_nonfactual_visual_instruction(
     return False
 
 
+# =====================================================================
+# BUILD6R V3.43 — SEMANTIC BOUNDARY EXTENSION
+# Pure art direction is not product-fact evidence. Genuine factual
+# claims remain fail-closed and continue through canonical grounding.
+# =====================================================================
+
+_build6r_v35_nonfactual_visual_instruction_base = (
+    _build6r_v35_nonfactual_visual_instruction
+)
+
+
+def _build6r_v343_has_factual_product_signal(
+    finding,
+):
+    import re as _re
+    import unicodedata as _unicodedata
+
+    raw = str(
+        getattr(
+            finding,
+            "claim_text",
+            "",
+        )
+        or ""
+    ).strip()
+
+    category = str(
+        getattr(
+            finding,
+            "claim_category",
+            "",
+        )
+        or ""
+    ).casefold()
+
+    if not raw:
+        return False
+
+    strong_categories = (
+        "product_identity",
+        "product identity",
+        "ingredient",
+        "composition",
+        "percentage",
+        "format_or_quantity",
+        "format or quantity",
+        "quantity",
+        "usage",
+        "benefit",
+        "effect",
+        "ranking",
+        "bestseller",
+        "availability",
+        "price",
+        "origin",
+        "certification",
+    )
+
+    if any(
+        marker in category
+        for marker in strong_categories
+    ):
+        return True
+
+    normalized = _unicodedata.normalize(
+        "NFKD",
+        raw,
+    )
+    normalized = "".join(
+        ch
+        for ch in normalized
+        if not _unicodedata.combining(ch)
+    ).casefold()
+    normalized = _re.sub(
+        r"\s+",
+        " ",
+        normalized,
+    ).strip()
+
+    patterns = (
+        r"\d+(?:[.,]\d+)?\s*(?:%|ml|mg|kg|mcg|spf|sheets?|folhas?|unidades?)\b",
+        r"#\s*\d+\b",
+        r"\b(?:numero|number)\s*(?:1|one|um)\b",
+        r"\b(?:mais vendido|best[\s-]?seller|number one|numero um)\b",
+        r"\b(?:ingrediente|ingredient|formula|formulacao)\b",
+        r"\b(?:(?:product|formula|ingredient)\s+composition|composition\s+of\s+(?:the\s+)?(?:product|formula|ingredients?)|composicao\s+(?:do produto|da formula|de ingredientes?))\b",
+        r"\b(?:vitamina|vitamin|niacinamida|niacinamide|retinol|ceramida|ceramide)\b",
+        r"\b(?:acido hialuronico|hyaluronic acid|colageno|collagen|exossom|exosome)\w*\b",
+        r"\b(?:glutathione|arbutin|ascorbyl|atelocollagen|oligopeptide)\b",
+        r"\b(?:contem|contains|sem alcool|alcohol[\s-]?free|fragrance[\s-]?free)\b",
+        r"\b(?:mineral oil[\s-]?free|colorant[\s-]?free|sem fragrancia|sem corante)\b",
+        r"\b(?:hidrata|hydrat|clareia|brighten|reduz|reduce|remove|elimina|eliminate)\w*\b",
+        r"\b(?:acne|ruga|wrinkle|poro|pore|mancha|spot|firmness|firmeza)\w*\b",
+        r"\b(?:clinicamente|clinically|dermatologicamente|dermatologically)\b",
+        r"\b(?:usar|aplicar|apply|use)\b.*\b(?:manha|noite|morning|night|evening)\b",
+        r"\b(?:tonico|toner|modo de uso|usage instructions?)\b",
+        r"\b(?:fabricante|manufacturer|nome completo do produto|product name)\b",
+        r"\b(?:feito no japao|made in japan|produto japones|japanese product)\b",
+    )
+
+    return any(
+        _re.search(
+            pattern,
+            normalized,
+        )
+        for pattern in patterns
+    )
+
+
+def _build6r_v343_nonfactual_art_direction(
+    finding,
+):
+    import re as _re
+    import unicodedata as _unicodedata
+
+    if (
+        str(
+            getattr(
+                finding,
+                "evidence_status",
+                "",
+            )
+            or ""
+        ).upper()
+        != "UNSUPPORTED"
+    ):
+        return False
+
+    if _build6r_v343_has_factual_product_signal(
+        finding
+    ):
+        return False
+
+    raw = str(
+        getattr(
+            finding,
+            "claim_text",
+            "",
+        )
+        or ""
+    ).strip()
+
+    if not raw:
+        return False
+
+    normalized = _unicodedata.normalize(
+        "NFKD",
+        raw,
+    )
+    normalized = "".join(
+        ch
+        for ch in normalized
+        if not _unicodedata.combining(ch)
+    ).casefold()
+    normalized = _re.sub(
+        r"\s+",
+        " ",
+        normalized,
+    ).strip()
+
+    source_field = str(
+        getattr(
+            finding,
+            "source_field",
+            "",
+        )
+        or ""
+    ).casefold()
+
+    evidence_scope_patterns = (
+        r"\bnada alem do verificado\b",
+        r"\bsem extrapolacao\b",
+        r"\b(?:apenas|somente) (?:o que|aquilo que) (?:foi |esta )?verificado\b",
+        r"\b(?:somente|apenas) fatos verificados\b",
+        r"\binformacao (?:ja )?confirmada\b",
+        r"\bo que esta confirmado\b",
+    )
+
+    if any(
+        _re.search(
+            pattern,
+            normalized,
+        )
+        for pattern in evidence_scope_patterns
+    ):
+        return True
+
+    visual_field_markers = (
+        "visual_prompt",
+        "design_concept",
+        "template_suggestion",
+        "tone_notes",
+        "visual_identity",
+        "hero_treatment",
+        "proof_or_demo_strategy",
+        "visual_story_system",
+        "story_arc",
+        "background_concept",
+        "visual_style",
+        "composition",
+        "product_position",
+        "product_scale",
+        "lighting",
+        "mood",
+        "depth",
+        "texture",
+        "scene_generation_prompt",
+        "archetype_reasoning",
+    )
+
+    if (
+        source_field != "ai_extracted_candidate"
+        and not any(
+            marker in source_field
+            for marker in visual_field_markers
+        )
+    ):
+        return False
+
+    visual_text_markers = (
+        "hero",
+        "close",
+        "close-up",
+        "close up",
+        "packshot",
+        "composicao",
+        "composition",
+        "espaco negativo",
+        "negative space",
+        "fundo",
+        "background",
+        "luz",
+        "lighting",
+        "camera",
+        "enquadramento",
+        "framing",
+        "textura",
+        "texture",
+        "paleta",
+        "palette",
+        "tipografia",
+        "typography",
+        "editorial",
+        "visual",
+        "cena",
+        "scene",
+        "profundidade",
+        "depth",
+        "atmosfera",
+        "atmosphere",
+        "narrativa",
+        "story",
+        "central",
+        "centro",
+        "isolado",
+        "isolated",
+        "hierarquia",
+        "hierarchy",
+    )
+
+    return any(
+        marker in normalized
+        for marker in visual_text_markers
+    )
+
+
+def _build6r_v35_nonfactual_visual_instruction(
+    finding,
+):
+    if _build6r_v35_nonfactual_visual_instruction_base(
+        finding
+    ):
+        return True
+
+    return _build6r_v343_nonfactual_art_direction(
+        finding
+    )
+
+
 def _build6r_v35_content_supported(
     claim_text,
     verified,
