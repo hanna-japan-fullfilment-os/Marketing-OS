@@ -139,7 +139,9 @@ def _run_migrations() -> None:
                 {c["name"] for c in inspector.get_columns("ai_usage")}
                 if "ai_usage" in existing_tables else set()
             )
-            if "scope" in ai_usage_columns:
+            if "budget_guard_adjustment_usd" in ai_usage_columns:
+                stamp_at = "dd7f8d847cd9"
+            elif "scope" in ai_usage_columns:
                 stamp_at = "b6c7d8e9f0a1"
             elif "platform" in ai_usage_columns:
                 stamp_at = "f7a8b9c0d1e2"

@@ -60,6 +60,7 @@ class AIUsage(Base, UUIDPKMixin):
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
     image_count: Mapped[int] = mapped_column(Integer, default=0)
     estimated_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    budget_guard_adjustment_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

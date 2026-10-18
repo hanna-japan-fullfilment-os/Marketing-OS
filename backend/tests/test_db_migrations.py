@@ -166,6 +166,7 @@ def test_init_db_on_an_existing_never_tracked_database_migrates_without_data_los
     # Build 6 repair added `ai_usage.scope` (the migration right after
     # f7a8b9c0d1e2) — same reasoning as the three columns just above.
     conn.execute("ALTER TABLE ai_usage DROP COLUMN scope")
+    conn.execute("ALTER TABLE ai_usage DROP COLUMN budget_guard_adjustment_usd")
     conn.commit()
     conn.close()
 
@@ -215,6 +216,16 @@ def test_init_db_on_an_existing_never_tracked_database_migrates_without_data_los
     # variant) — the migration right after f7a8b9c0d1e2 — proving the chain
     # replays this later plain ADD COLUMN migration too.
     assert "scope" in ai_usage_columns_after
+    assert "budget_guard_adjustment_usd" in ai_usage_columns_after
+    budget_adjustment_column = next(
+        column
+        for column in inspector.get_columns(
+            "ai_usage"
+        )
+        if column["name"]
+        == "budget_guard_adjustment_usd"
+    )
+    assert budget_adjustment_column["nullable"] is True
 
     conn = sqlite3.connect(db_path)
     row = conn.execute(
@@ -222,3 +233,155 @@ def test_init_db_on_an_existing_never_tracked_database_migrates_without_data_los
     ).fetchone()
     conn.close()
     assert row == ("a1", "b1", "logo", "My logo", None)  # the pre-migration row survived, category_id defaults null
+
+
+
+def test_current_model_ai_usage_schema_is_recognized_as_dd7_head(
+    tmp_path,
+    monkeypatch,
+):
+    """Current-model/create_all DBs must be stamped at dd7, not b6."""
+    from sqlalchemy import create_engine, inspect, text
+
+    from app import db as db_module
+    from app import models  # noqa: F401
+
+    db_path = tmp_path / "current_model_dd7.db"
+    _fresh_db_env(monkeypatch, db_path)
+
+    test_engine = create_engine(
+        f"sqlite:///{db_path}"
+    )
+
+    monkeypatch.setattr(
+        db_module,
+        "engine",
+        test_engine,
+    )
+
+    db_module.Base.metadata.create_all(
+        bind=test_engine
+    )
+
+    before_columns = {
+        column["name"]
+        for column in inspect(
+            test_engine
+        ).get_columns("ai_usage")
+    }
+
+    assert (
+        "budget_guard_adjustment_usd"
+        in before_columns
+    )
+
+    db_module._run_migrations()
+
+    after_columns = {
+        column["name"]
+        for column in inspect(
+            test_engine
+        ).get_columns("ai_usage")
+    }
+
+    assert (
+        "budget_guard_adjustment_usd"
+        in after_columns
+    )
+
+    with test_engine.connect() as connection:
+        revision = connection.execute(
+            text(
+                "SELECT version_num "
+                "FROM alembic_version"
+            )
+        ).scalar_one()
+
+    assert revision == "dd7f8d847cd9"
+
+
+def test_scope_only_ai_usage_schema_still_runs_dd7_migration(
+    tmp_path,
+    monkeypatch,
+):
+    """A genuine b6 schema must still receive the dd7 column."""
+    from sqlalchemy import create_engine, inspect, text
+
+    from app import db as db_module
+    from app import models  # noqa: F401
+
+    db_path = tmp_path / "scope_only_b6.db"
+    _fresh_db_env(monkeypatch, db_path)
+
+    test_engine = create_engine(
+        f"sqlite:///{db_path}"
+    )
+
+    monkeypatch.setattr(
+        db_module,
+        "engine",
+        test_engine,
+    )
+
+    db_module.Base.metadata.create_all(
+        bind=test_engine
+    )
+
+    with test_engine.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE ai_usage "
+                "DROP COLUMN budget_guard_adjustment_usd"
+            )
+        )
+
+    before_columns = {
+        column["name"]
+        for column in inspect(
+            test_engine
+        ).get_columns("ai_usage")
+    }
+
+    assert "scope" in before_columns
+
+    assert (
+        "budget_guard_adjustment_usd"
+        not in before_columns
+    )
+
+    db_module._run_migrations()
+
+    inspector = inspect(test_engine)
+
+    after_columns = {
+        column["name"]
+        for column in inspector.get_columns(
+            "ai_usage"
+        )
+    }
+
+    assert (
+        "budget_guard_adjustment_usd"
+        in after_columns
+    )
+
+    adjustment_column = next(
+        column
+        for column in inspector.get_columns(
+            "ai_usage"
+        )
+        if column["name"]
+        == "budget_guard_adjustment_usd"
+    )
+
+    assert adjustment_column["nullable"] is True
+
+    with test_engine.connect() as connection:
+        revision = connection.execute(
+            text(
+                "SELECT version_num "
+                "FROM alembic_version"
+            )
+        ).scalar_one()
+
+    assert revision == "dd7f8d847cd9"

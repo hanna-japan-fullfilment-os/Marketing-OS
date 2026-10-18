@@ -1057,7 +1057,13 @@ class OpenAIProvider:
         events, self._usage_events = self._usage_events, []
         return events
 
-    def _record_text_usage(self, response, model: str) -> None:
+    def _record_text_usage(
+        self,
+        response,
+        model: str,
+        *,
+        budget_guard_adjustment_usd: float = 0.0,
+    ) -> None:
         usage = getattr(response, "usage", None)
         input_tokens = int(getattr(usage, "input_tokens", 0) or 0) if usage is not None else 0
         output_tokens = int(getattr(usage, "output_tokens", 0) or 0) if usage is not None else 0
@@ -1065,6 +1071,7 @@ class OpenAIProvider:
             "provider": "openai", "model": model, "input_tokens": input_tokens,
             "output_tokens": output_tokens, "image_count": 0,
             "estimated_cost_usd": _text_usage_cost(model, input_tokens, output_tokens),
+            "budget_guard_adjustment_usd": float(budget_guard_adjustment_usd),
         })
 
     def _record_image_usage(
@@ -1504,7 +1511,15 @@ class OpenAIProvider:
         parsed = response.output_parsed
         if parsed is None:
             raise ValueError("Research call did not return a structured ResearchResult.")
-        self._record_text_usage(response, model)
+        self._record_text_usage(
+            response,
+            model,
+            budget_guard_adjustment_usd=(
+                _HARD_BUDGET_WEB_SEARCH_RESERVE_USD
+                if self._hard_budget_ledger.enabled
+                else 0.0
+            ),
+        )
         return parsed
 
     # ---- ResearchProvider (opportunity discovery) --------------------------------
@@ -1539,7 +1554,15 @@ class OpenAIProvider:
         parsed = response.output_parsed
         if parsed is None:
             raise ValueError("Opportunity discovery call did not return a structured result.")
-        self._record_text_usage(response, model)
+        self._record_text_usage(
+            response,
+            model,
+            budget_guard_adjustment_usd=(
+                _HARD_BUDGET_WEB_SEARCH_RESERVE_USD
+                if self._hard_budget_ledger.enabled
+                else 0.0
+            ),
+        )
         return parsed
 
     # ---- ImageProvider ----------------------------------------------------------

@@ -85,6 +85,7 @@ def record_ai_usage(
         output_tokens=event.get("output_tokens", 0),
         image_count=event.get("image_count", 0),
         estimated_cost_usd=event.get("estimated_cost_usd", 0.0),
+        budget_guard_adjustment_usd=event.get("budget_guard_adjustment_usd", 0.0),
         duration_ms=event.get("duration_ms", 0),
         platform=platform,
         language=language,
@@ -160,6 +161,10 @@ def build_campaign_cost_report(
 
         # Stage 3B1 explicit completeness contract.
         "known_total_usd": 0.0,
+        "budget_guard_adjustment_usd": 0.0,
+        "budget_guard_adjustment_usd_is_complete": False,
+        "budget_accounted_total_usd": 0.0,
+        "budget_accounted_total_usd_is_complete": False,
         "known_image_generation_usd": 0.0,
         "known_text_generation_usd": 0.0,
         "cost_status": "no_usage",
@@ -508,6 +513,37 @@ def build_campaign_cost_report(
         else "incomplete_unpriced_usage"
     )
 
+    budget_adjustment_rows = [
+        row
+        for row in rows
+        if row.budget_guard_adjustment_usd is not None
+    ]
+
+    budget_guard_adjustment_usd_is_complete = (
+        len(budget_adjustment_rows) == len(rows)
+    )
+
+    budget_guard_adjustment_usd = round(
+        sum(
+            float(
+                row.budget_guard_adjustment_usd or 0.0
+            )
+            for row in budget_adjustment_rows
+        ),
+        6,
+    )
+
+    budget_accounted_total_usd = round(
+        known_total
+        + budget_guard_adjustment_usd,
+        6,
+    )
+
+    budget_accounted_total_usd_is_complete = bool(
+        total_complete
+        and budget_guard_adjustment_usd_is_complete
+    )
+
     return {
         # Original compatibility contract. These values are now explicitly
         # documented as known local subtotals.
@@ -543,6 +579,10 @@ def build_campaign_cost_report(
 
         # Stage 3B1 explicit completeness contract.
         "known_total_usd": known_total,
+        "budget_guard_adjustment_usd": budget_guard_adjustment_usd,
+        "budget_guard_adjustment_usd_is_complete": budget_guard_adjustment_usd_is_complete,
+        "budget_accounted_total_usd": budget_accounted_total_usd,
+        "budget_accounted_total_usd_is_complete": budget_accounted_total_usd_is_complete,
         "known_image_generation_usd": round(
             image_cost,
             6,
