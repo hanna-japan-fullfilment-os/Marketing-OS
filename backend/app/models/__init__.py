@@ -22,6 +22,7 @@ from .campaign import (
     PlatformCampaignVariant,
 )
 from .product_facts import VerifiedProductFact
+from .claim_evidence import ProductClaimEvidence
 from .research import ResearchRun, ResearchSource, ResearchInsight
 from .opportunity import Opportunity, CampaignOpportunity
 from .publishing import Publication, PerformanceMetric, PerformanceInsight
@@ -47,6 +48,7 @@ __all__ = [
     "Competitor", "CompetitorEvent", "DefensePlaybook",
     "COMPETITOR_EVENT_TYPES", "COMPETITOR_EVENT_STATUSES",
     "VerifiedProductFact",
+    "ProductClaimEvidence",
     "ReviewFeedback", "REVIEW_LEVELS", "REVIEW_ACTIONS",
     "BenchmarkCase", "BenchmarkRun", "BENCHMARK_CASE_STATUSES", "BENCHMARK_TEST_MODES",
 ]

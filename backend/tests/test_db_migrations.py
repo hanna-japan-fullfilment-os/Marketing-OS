@@ -167,6 +167,7 @@ def test_init_db_on_an_existing_never_tracked_database_migrates_without_data_los
     # f7a8b9c0d1e2) — same reasoning as the three columns just above.
     conn.execute("ALTER TABLE ai_usage DROP COLUMN scope")
     conn.execute("ALTER TABLE ai_usage DROP COLUMN budget_guard_adjustment_usd")
+    conn.execute("DROP TABLE product_claim_evidence")
     conn.commit()
     conn.close()
 
@@ -236,7 +237,7 @@ def test_init_db_on_an_existing_never_tracked_database_migrates_without_data_los
 
 
 
-def test_current_model_ai_usage_schema_is_recognized_as_dd7_head(
+def test_current_model_schema_is_recognized_as_v345_head(
     tmp_path,
     monkeypatch,
 ):
@@ -246,7 +247,7 @@ def test_current_model_ai_usage_schema_is_recognized_as_dd7_head(
     from app import db as db_module
     from app import models  # noqa: F401
 
-    db_path = tmp_path / "current_model_dd7.db"
+    db_path = tmp_path / "current_model_v345.db"
     _fresh_db_env(monkeypatch, db_path)
 
     test_engine = create_engine(
@@ -297,7 +298,7 @@ def test_current_model_ai_usage_schema_is_recognized_as_dd7_head(
             )
         ).scalar_one()
 
-    assert revision == "dd7f8d847cd9"
+    assert revision == "e3f4a5c1d001"
 
 
 def test_scope_only_ai_usage_schema_still_runs_dd7_migration(
@@ -333,6 +334,9 @@ def test_scope_only_ai_usage_schema_still_runs_dd7_migration(
                 "ALTER TABLE ai_usage "
                 "DROP COLUMN budget_guard_adjustment_usd"
             )
+        )
+        connection.execute(
+            text("DROP TABLE product_claim_evidence")
         )
 
     before_columns = {
@@ -384,4 +388,4 @@ def test_scope_only_ai_usage_schema_still_runs_dd7_migration(
             )
         ).scalar_one()
 
-    assert revision == "dd7f8d847cd9"
+    assert revision == "e3f4a5c1d001"
