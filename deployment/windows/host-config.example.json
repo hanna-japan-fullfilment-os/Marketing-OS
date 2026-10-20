@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "environment": "production",
+  "database": "C:\\My Apps\\marketing-os\\marketing-os_4\\backend\\data\\app.db",
+  "releasesRoot": "C:\\MarketingOS\\releases",
+  "pointerPath": "C:\\MarketingOS\\current",
+  "logsRoot": "C:\\MarketingOS\\logs",
+  "backupRoot": "C:\\MarketingOS\\backups",
+  "independentBackupRoot": null,
+  "sourceRoot": "C:\\Users\\wesle\\OneDrive\\Desktop\\Marketing Pictures Input",
+  "outputRoot": "C:\\Users\\wesle\\OneDrive\\Desktop\\Marketing Pictures Output",
+  "pythonPath": "C:\\MarketingOS\\releases\\APPROVED_COMMIT\\backend\\.venv\\Scripts\\python.exe",
+  "powershellPath": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+  "runtimeManifestPath": "C:\\MarketingOS\\approved\\runtime-manifest.json",
+  "nodePath": "C:\\Program Files\\nodejs\\node.exe",
+  "npmCliPath": "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
+  "runtimeFiles": [],
+  "backendHost": "127.0.0.1",
+  "backendPort": 8000,
+  "frontendOrigin": null,
+  "tailscale": {
+    "cliPath": "C:\\Program Files\\Tailscale\\tailscale.exe",
+    "ipv4": null,
+    "ipv6": null,
+    "hostname": null,
+    "aclApproved": false
+  },
+  "caddy": {
+    "approved": false,
+    "path": null,
+    "version": null,
+    "sha256": null
+  },
+  "chromium": {
+    "cacheRoot": "C:\\Users\\wesle\\AppData\\Local\\ms-playwright",
+    "path": "C:\\Users\\wesle\\AppData\\Local\\ms-playwright\\chromium-1194\\chrome-win\\chrome.exe",
+    "version": "141.0.7390.37",
+    "sha256": null,
+    "headlessShellPath": "C:\\Users\\wesle\\AppData\\Local\\ms-playwright\\chromium_headless_shell-1194\\chrome-win\\headless_shell.exe",
+    "headlessShellSha256": null
+  },
+  "runtimeAccount": "WESLEY\\wesle",
+  "expectedRevision": "e3f4a5c1d001",
+  "expectedCommit": "8f8d6273d4bbb22b279a65dd8c15419d87b8be6a",
+  "expectedTree": "497355e0e205f5c7e71ef3888a80d8d0c3071859",
+  "verifiedFactsProductId": "a5ea2272a1f89d743c089461bb2fb50f",
+  "acceptanceStaticPath": null,
+  "startupEvidencePath": null,
+  "startupEvidenceSha256": null,
+  "gates": {
+    "INDEPENDENT_BACKUP": {
+      "approved": false,
+      "evidencePath": null,
+      "sha256": null
+    },
+    "APPROVED_CADDY": {
+      "approved": false,
+      "evidencePath": null,
+      "sha256": null
+    },
+    "TAILSCALE_IDENTITY_ACL": {
+      "approved": false,
+      "evidencePath": null,
+      "sha256": null
+    },
+    "UNATTENDED_TASK_RIGHTS": {
+      "approved": false,
+      "evidencePath": null,
+      "sha256": null
+    },
+    "FILESYSTEM_ACCESS": {
+      "approved": false,
+      "evidencePath": null,
+      "sha256": null
+    },
+    "ONEDRIVE_AVAILABILITY": {
+      "approved": false,
+      "evidencePath": null,
+      "sha256": null
+    },
+    "VERIFIED_RUNTIME_ARTIFACTS": {
+      "approved": false,
+      "evidencePath": null,
+      "sha256": null
+    },
+    "PRODUCTION_ACCEPTANCE": {
+      "approved": false,
+      "evidencePath": null,
+      "sha256": null
+    }
+  },
+  "runtimeManifestSha256": null
+}

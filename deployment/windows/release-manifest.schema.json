@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "commit", "tree", "revision", "apiBase", "createdUtc", "artifacts"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "tree": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "revision": {"const": "e3f4a5c1d001"},
+    "apiBase": {"const": "/backend"},
+    "createdUtc": {"type": "string", "format": "date-time"},
+    "artifacts": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string", "pattern": "^[A-F0-9]{64}$"}}
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "artifactsApproved": false,
+  "python": {
+    "version": "3.14.6",
+    "architecture": "AMD64",
+    "observedExecutable": "C:\\My Apps\\marketing-os\\marketing-os_4\\backend\\.venv\\Scripts\\python.exe",
+    "sha256": "199CE15A9F0D4F9522EDBA59338E4879D28CF61F88E377B8164BCB716275ED22"
+  },
+  "node": {
+    "version": "v24.17.0",
+    "artifactSha256": null
+  },
+  "npm": {
+    "version": "12.0.2"
+  },
+  "playwright": {
+    "version": "1.56.0",
+    "chromiumRevision": "1194",
+    "chromiumVersion": "141.0.7390.37",
+    "artifactSha256": null
+  },
+  "packages": {
+    "aiofiles": "25.1.0",
+    "alembic": "1.19.2",
+    "annotated-doc": "0.0.5",
+    "annotated-types": "0.8.0",
+    "anyio": "4.15.1",
+    "certifi": "2026.7.22",
+    "click": "8.5.0",
+    "colorama": "0.4.6",
+    "fastapi": "0.141.1",
+    "greenlet": "3.5.5",
+    "h11": "0.16.0",
+    "httpcore": "1.0.9",
+    "httpcore2": "2.12.0",
+    "httptools": "0.8.0",
+    "httpx": "0.28.1",
+    "httpx2": "2.12.0",
+    "idna": "3.19",
+    "ImageHash": "4.3.2",
+    "iniconfig": "2.3.0",
+    "jiter": "0.16.0",
+    "Mako": "1.4.1",
+    "MarkupSafe": "3.0.3",
+    "numpy": "2.5.3",
+    "openai": "3.14.1",
+    "packaging": "26.3",
+    "pillow": "12.3.0",
+    "pip": "26.1.2",
+    "playwright": "1.56.0",
+    "pluggy": "1.6.0",
+    "pydantic": "2.13.5",
+    "pydantic_core": "2.46.5",
+    "pydantic-settings": "2.15.0",
+    "pyee": "13.0.1",
+    "Pygments": "2.21.0",
+    "pytest": "9.1.1",
+    "pytest-asyncio": "1.4.0",
+    "python-dotenv": "1.2.3",
+    "python-multipart": "0.0.32",
+    "PyWavelets": "1.9.0",
+    "PyYAML": "6.0.3",
+    "scipy": "1.18.1",
+    "sniffio": "1.3.1",
+    "SQLAlchemy": "2.0.52",
+    "starlette": "1.6.0",
+    "truststore": "0.10.4",
+    "typing_extensions": "4.16.0",
+    "typing-inspection": "0.4.4",
+    "uvicorn": "0.52.4",
+    "watchfiles": "1.2.0",
+    "websockets": "17.1"
+  },
+  "schema_contract": {
+    "revision": "e3f4a5c1d001",
+    "schema_sha256": "AD9A5A6E09F9458CB5B7A4058D77461282A1D5A436EEB06C3F4838B4D5219FA9",
+    "required_tables": [
+      "products",
+      "research_runs",
+      "research_insights",
+      "product_claim_evidence",
+      "ai_usage",
+      "settings",
+      "alembic_version"
+    ],
+    "expected_settings": {
+      "source_asset_root": "C:\\Users\\wesle\\OneDrive\\Desktop\\Marketing Pictures Input",
+      "output_root": "C:\\Users\\wesle\\OneDrive\\Desktop\\Marketing Pictures Output"
+    }
+  },
+  "unresolved": [
+    "Interpreter distribution and wheel provenance/hashes",
+    "Chromium artifact hash approval",
+    "Node/npm artifact approval",
+    "Caddy release/version/license/hash approval"
+  ],
+  "pathContract": {
+    "sourceRoot": "C:\\Users\\wesle\\OneDrive\\Desktop\\Marketing Pictures Input",
+    "outputRoot": "C:\\Users\\wesle\\OneDrive\\Desktop\\Marketing Pictures Output"
+  }
+}

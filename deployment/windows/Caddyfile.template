@@ -1,0 +1,16 @@
+{
+    admin off
+    auto_https off
+    persist_config off
+}
+http://:8080 {
+    bind 127.0.0.1 __TAILSCALE_IPV4__
+    handle_path /backend/* {
+        reverse_proxy 127.0.0.1:8000
+    }
+    handle {
+        root * "__FRONTEND_DIST__"
+        try_files {path} /index.html
+        file_server
+    }
+}
