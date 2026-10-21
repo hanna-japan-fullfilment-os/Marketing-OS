@@ -24,6 +24,64 @@ try {
     Refuses { Assert-AbsolutePath '\\server\share' } 'UNC SQLite path'
     Refuses { Assert-AbsolutePath (Join-Path $temp '..\escape') } 'traversal path'
     Refuses { Assert-AbsolutePath (Join-Path $temp 'absent') -MustExist } 'absent path'
+    $assetConfig = Read-Json (Join-Path $root 'deployment\windows\host-config.example.json')
+    Assert-ProductionAssetRoots $assetConfig -MustExist
+    Check $true 'actual approved OneDrive pair metadata only'
+    Check ((Assert-ProductionAssetRoot $assetConfig Source $assetConfig.sourceRoot.ToLowerInvariant() -MustExist) -eq $assetConfig.sourceRoot.ToLowerInvariant()) 'case insensitive approved root identity'
+    foreach ($role in @('Source','Output')) {
+        $key = if ($role -eq 'Source') { 'sourceRoot' } else { 'outputRoot' }
+        Check ((Assert-ProductionAssetRoot $assetConfig $role $assetConfig[$key] -MustExist) -eq $assetConfig[$key]) "actual $role root"
+        Refuses { Assert-AbsolutePath $assetConfig[$key] -MustExist } "generic guard still refuses $role cloud path"
+    }
+    foreach ($bad in @('', 'relative','\\server\share','\\?\C:\Users\wesle','C:\','C:\Users\wesle\..\wesle','C:\bad*','C:\bad:stream','C:\bad|path','C:\bad.','C:\NUL','C:\Users\wesle\OneDriveFake\input','C:\Users\other\OneDrive\Desktop\Marketing Pictures Input',($assetConfig.sourceRoot+'\child'))) {
+        Refuses { Assert-ProductionAssetRoot $assetConfig Source $bad } "unsafe asset syntax/identity $bad"
+    }
+    Refuses { Assert-ProductionAssetRoot $assetConfig Source $assetConfig.outputRoot } 'wrong role substitution'
+    $swap = $assetConfig.Clone(); $swap.sourceRoot=$assetConfig.outputRoot; $swap.outputRoot=$assetConfig.sourceRoot
+    Refuses { Assert-ProductionAssetRoots $swap } 'swapped production roots'
+    $local = $assetConfig.Clone(); $local.environment='isolated-test'
+    foreach ($key in @('sourceRoot','outputRoot','releasesRoot','pointerPath','logsRoot','backupRoot','pythonPath','powershellPath','runtimeManifestPath')) { $local[$key]=Join-Path $temp $key }
+    $local.database=Join-Path $temp 'data\db.sqlite'
+    $null=New-Item -ItemType Directory -Path $local.sourceRoot,$local.outputRoot
+    Assert-ProductionAssetRoots $local -MustExist; Check $true 'ordinary isolated asset directories'
+    Refuses { Assert-ProductionAssetRoot $local Source (Join-Path $temp 'missing') -MustExist } 'missing required asset'
+    foreach ($pair in @(@($local.sourceRoot,$local.sourceRoot),@($local.sourceRoot,(Join-Path $local.sourceRoot 'child')),@((Join-Path $local.outputRoot 'child'),$local.outputRoot))) {
+        $bad=$local.Clone();$bad.sourceRoot=$pair[0];$bad.outputRoot=$pair[1]
+        Refuses { Assert-ProductionAssetRoots $bad } 'source output equality or ancestry'
+    }
+    foreach ($key in @('releasesRoot','pointerPath','logsRoot','backupRoot','database','independentBackupRoot','nodePath','npmCliPath')) {
+        $bad=$local.Clone();$bad[$key]=$local.sourceRoot
+        Refuses { Assert-ProductionAssetRoots $bad } "protected collision $key"
+    }
+    $bad=$local.Clone();$bad.database=Join-Path $local.sourceRoot 'app.db'
+    Refuses { Assert-ProductionAssetRoots $bad } 'protected database directory collision'
+    foreach ($key in @('caddy','chromium')) {
+        $bad=$local.Clone();$bad[$key]=@{path=$local.sourceRoot}
+        Refuses { Assert-ProductionAssetRoots $bad } "protected $key artifact collision"
+    }
+    # Replace only the module metadata seam in memory; no links/reparse objects are created.
+    $module=Get-Module Common
+    $originalMetadata = & $module { (Get-Item Function:Get-AssetPathMetadata).ScriptBlock }
+    try {
+        foreach ($tag in @(0x9000e01au,0x9000601au,0x9000701au)) {
+            & $module { param($t) $script:assetTestTag=$t; function script:Get-AssetPathMetadata($Path) { @{Directory=$true;Reparse=($Path -like '*\OneDrive*');LinkType=$null;Tag=$script:assetTestTag} } } $tag
+            Assert-ProductionAssetRoots $assetConfig -MustExist; Check $true "approved cloud tag $tag scoped to pair"
+        }
+        foreach ($tag in @(0xA000000Cu,0xA0000003u,0xA000001Du,0x9000101Au,0x00000001u)) {
+            & $module { param($t) $script:assetTestTag=$t }
+            Refuses { Assert-ProductionAssetRoots $assetConfig -MustExist } "unknown or redirecting tag $tag"
+        }
+        & $module { function script:Get-AssetPathMetadata($Path) { @{Directory=$true;Reparse=$true;LinkType='SymbolicLink';Tag=0x9000e01au} } }
+        Refuses { Assert-ProductionAssetRoots $assetConfig } 'link type denied even with cloud tag'
+        & $module { function script:Get-AssetPathMetadata($Path) { @{Directory=$true;Reparse=$true;LinkType=$null;Tag=$null} } }
+        Refuses { Assert-ProductionAssetRoots $assetConfig } 'missing reparse tag refused'
+        & $module { function script:Get-AssetPathMetadata($Path) { @{Directory=$true;Reparse=$true;LinkType=$null;Tag=0x9000e01au} } }
+        Refuses { Assert-ProductionAssetRoots $assetConfig } 'cloud tag outside approved ancestor chain refused'
+        & $module { function script:Get-AssetPathMetadata($Path) { @{Directory=$false;Reparse=$false;LinkType=$null;Tag=$null} } }
+        Refuses { Assert-ProductionAssetRoots $assetConfig } 'file used as asset directory refused'
+        & $module { function script:Get-AssetPathMetadata($Path) { throw 'fixture metadata read failure' } }
+        Refuses { Assert-ProductionAssetRoots $assetConfig } 'metadata failure closed'
+    } finally { & $module { param($body) Set-Item Function:script:Get-AssetPathMetadata $body } $originalMetadata }
     $jsonArray = Join-Path $temp 'array.json'
     Write-Json $jsonArray @(@{verified=$true})
     Check ([IO.File]::ReadAllText($jsonArray).TrimStart().StartsWith('[')) 'single manifest array preserved'
@@ -109,6 +167,8 @@ try {
     $isolated = Read-Json (Join-Path $root 'deployment\windows\host-config.example.json')
     $isolated.environment = 'isolated-test'
     foreach ($key in @('database','pointerPath','logsRoot','backupRoot','sourceRoot','outputRoot','pythonPath','powershellPath','runtimeManifestPath')) { $isolated[$key] = Join-Path $temp $key }
+    # Keep assets outside the protected DB directory under the new role contract.
+    $isolated.database=Join-Path $temp 'database\app.db'
     $isolated.releasesRoot=$temp
     # Persistent fixture paths must not be inside its fake immutable release root.
     $isolated.releasesRoot=Join-Path $temp 'releases'
@@ -117,6 +177,12 @@ try {
     Check ($report.IMPLEMENTATION_READY -eq $true -and $report.DEPLOYMENT_READY -eq $false) 'readiness distinction'
     Check ('INDEPENDENT_BACKUP' -in $report.unresolvedGates -and 'PRODUCTION_ACCEPTANCE' -in $report.unresolvedGates) 'deployment blockers preserved'
     Refuses { & (Join-Path $root 'scripts\production\Test-ProductionPreflight.ps1') -ConfigPath $fixtureConfig -Mode Deployment } 'deployment refusal'
+    $cloudFixture=$isolated.Clone();$cloudFixture.sourceRoot=$assetConfig.sourceRoot;$cloudFixture.outputRoot=$assetConfig.outputRoot
+    $cloudConfig=Join-Path $temp 'cloud-host.json';Write-Json $cloudConfig $cloudFixture
+    $cloudReport=& (Join-Path $root 'scripts\production\Test-ProductionPreflight.ps1') -ConfigPath $cloudConfig -Mode Implementation | ConvertFrom-Json
+    Check ($cloudReport.IMPLEMENTATION_READY -and -not $cloudReport.DEPLOYMENT_READY) 'actual cloud pair through isolated preflight'
+    foreach ($gate in $assetConfig.gates.Keys) { Check ($gate -in $cloudReport.unresolvedGates) "cloud preflight preserves $gate" }
+    Refuses { & (Join-Path $root 'scripts\production\Test-ProductionPreflight.ps1') -ConfigPath $cloudConfig -Mode Deployment } 'cloud preflight deployment refusal'
     Refuses { Wait-PrivateInterface $isolated } 'unresolved private gate refuses before wait'
     foreach ($entry in @(@('Start-Backend.ps1','Run'),@('Start-Frontend.ps1','Run'),@('Invoke-DatabaseBackup.ps1','Execute'),@('Set-ActiveRelease.ps1','Activate'),@('Restore-PreviousRelease.ps1','Rollback'),@('Test-ProductionAcceptance.ps1','Execute'))) {
         $parameters=@{ConfigPath=$fixtureConfig;$entry[1]=$false}

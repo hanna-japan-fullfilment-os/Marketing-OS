@@ -7,7 +7,8 @@ if (-not $Execute) { throw 'Explicit acceptance execution required' }
 $c = Read-HostConfig $ConfigPath; $p = Read-ActiveRelease $c
 $null = & (Join-Path $PSScriptRoot 'Test-ProductionPreflight.ps1') -ConfigPath $ConfigPath -ReleasePath $p.releasePath -ManifestSha256 $p.manifestSha256 -Mode Deployment
 $db = Assert-Database $c
-foreach ($root in @($c.sourceRoot,$c.outputRoot)) { $null = Assert-AbsolutePath $root -MustExist; $null = Get-ChildItem -LiteralPath $root -ErrorAction Stop | Select-Object -First 1 }
+Assert-ProductionAssetRoots $c -MustExist
+foreach ($root in @($c.sourceRoot,$c.outputRoot)) { $null = Get-ChildItem -LiteralPath $root -ErrorAction Stop | Select-Object -First 1 }
 if (-not (Get-Health 'http://127.0.0.1:8000/api/health') -or -not (Get-Health ($c.frontendOrigin + '/backend/api/health'))) { throw 'Health failed' }
 if ($c.verifiedFactsProductId -notmatch '^[a-f0-9]{32}$' -or $c.acceptanceStaticPath -notmatch '^/assets/[a-zA-Z0-9._/-]+\.(js|css)$' -or $c.acceptanceStaticPath.Contains('..')) { throw 'Safe acceptance targets required' }
 foreach ($path in @('/backend/api/products/' + $c.verifiedFactsProductId + '/verified-facts','/',$c.acceptanceStaticPath,'/brands')) {

@@ -24,7 +24,8 @@ try {
     if ((Get-TimeZone).Id -ne 'Tokyo Standard Time') { throw '02:00 JST task requires Tokyo host timezone' }
 } catch { $failed.Add('RUNTIME_ACCOUNT_AND_TASKS') }
 try {
-    foreach ($path in @($c.sourceRoot,$c.outputRoot,$c.logsRoot,$c.backupRoot,$c.releasesRoot)) { $null = Assert-AbsolutePath $path -MustExist }
+    Assert-ProductionAssetRoots $c -MustExist
+    foreach ($path in @($c.logsRoot,$c.backupRoot,$c.releasesRoot)) { $null = Assert-AbsolutePath $path -MustExist }
     $null = Assert-Database $c
     Assert-NoFailureLatch $c
 } catch { $failed.Add('PATHS_DATABASE_SCHEMA') }

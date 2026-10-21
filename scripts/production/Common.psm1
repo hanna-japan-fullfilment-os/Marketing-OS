@@ -18,6 +18,68 @@ function Assert-AbsolutePath([string]$Path, [switch]$MustExist) {
     if ($MustExist -and -not (Test-Path -LiteralPath $full)) { throw 'Required path absent' }
     return $full
 }
+function ConvertTo-AssetPath([string]$Path) {
+    if (-not $Path -or $Path -notmatch '^[A-Za-z]:\\' -or $Path -match '[\x00-\x1f<>"|?*]' -or $Path.Substring(2).Contains(':') -or $Path.Contains('/')) { throw 'Canonical local asset directory required' }
+    if ($Path -match '(^|\\)\.{1,2}(\\|$)' -or $Path -match '[ .](\\|$)') { throw 'Asset traversal or ambiguous component' }
+    $full = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+    if ($full.Length -le 3 -or -not [StringComparer]::OrdinalIgnoreCase.Equals($full,$Path.TrimEnd('\'))) { throw 'Canonical non-root asset directory required' }
+    foreach ($part in $full.Substring(3).Split('\')) { if (-not $part -or $part -match '^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)') { throw 'Invalid asset component' } }
+    return $full
+}
+function Test-AssetPathOverlap([string]$Left, [string]$Right) {
+    return [StringComparer]::OrdinalIgnoreCase.Equals($Left,$Right) -or $Left.StartsWith($Right+'\',[StringComparison]::OrdinalIgnoreCase) -or $Right.StartsWith($Left+'\',[StringComparison]::OrdinalIgnoreCase)
+}
+function Get-AssetPathMetadata([string]$Path) {
+    $i = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    $tag = $null
+    if ($i.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        # Query the reparse metadata only; never open cloud file contents.
+        $fsutil = Join-Path ([Environment]::GetFolderPath('Windows')) 'System32\fsutil.exe'
+        $text = & $fsutil reparsepoint query $Path 2>&1
+        $exitCode = $LASTEXITCODE
+        $match = [regex]::Match(($text -join ' '),'0x[0-9a-fA-F]{8}')
+        if ($exitCode -ne 0 -or -not $match.Success) { throw 'Asset reparse metadata unavailable' }
+        $tag = [Convert]::ToUInt32($match.Value.Substring(2),16)
+    }
+    return @{Directory=$i.PSIsContainer;Reparse=[bool]($i.Attributes -band [IO.FileAttributes]::ReparsePoint);LinkType=$i.LinkType;Tag=$tag}
+}
+function Assert-ProductionAssetRoot($Config, [ValidateSet('Source','Output')][string]$Role, [string]$Path, [switch]$MustExist) {
+    $key = if ($Role -eq 'Source') { 'sourceRoot' } else { 'outputRoot' }
+    $full = ConvertTo-AssetPath $Path
+    if (-not [StringComparer]::OrdinalIgnoreCase.Equals($full,(ConvertTo-AssetPath $Config[$key]))) { throw 'Asset role/configured root mismatch' }
+    $approved = 'C:\Users\wesle\OneDrive\Desktop\Marketing Pictures ' + $(if ($Role -eq 'Source') { 'Input' } else { 'Output' })
+    $cloud = [StringComparer]::OrdinalIgnoreCase.Equals($full,$approved)
+    if ($Config.environment -ne 'isolated-test' -and -not $cloud) { throw 'Unapproved production asset root' }
+    if ($Config.environment -eq 'isolated-test' -and -not $cloud) { $null = Assert-AbsolutePath $full }
+    $item = $full
+    while ($item) {
+        if (Test-Path -LiteralPath $item -ErrorAction Stop) {
+            $m = Get-AssetPathMetadata $item
+            if (-not $m.Directory) { throw 'Asset directory required' }
+            if ($m.Reparse) {
+                $approvedChain = $cloud -and ($item -eq $full -or $item -eq 'C:\Users\wesle\OneDrive\Desktop' -or $item -eq 'C:\Users\wesle\OneDrive')
+                if (-not $approvedChain -or $m.LinkType -or $null -eq $m.Tag -or ([uint32]$m.Tag -band 0x20000000) -ne 0 -or [uint32]$m.Tag -notin @(0x9000e01au,0x9000601au,0x9000701au)) { throw 'Unapproved asset reparse metadata' }
+            }
+        } elseif ($MustExist -or $Config.environment -ne 'isolated-test') { throw 'Required asset directory absent' }
+        $item = [IO.Path]::GetDirectoryName($item)
+    }
+    return $full
+}
+function Assert-ProductionAssetRoots($Config, [switch]$MustExist) {
+    $source = Assert-ProductionAssetRoot $Config Source $Config.sourceRoot -MustExist:$MustExist
+    $output = Assert-ProductionAssetRoot $Config Output $Config.outputRoot -MustExist:$MustExist
+    if (Test-AssetPathOverlap $source $output) { throw 'Source/output overlap' }
+    $protected = @($Config.releasesRoot,$Config.pointerPath,$Config.logsRoot,$Config.backupRoot,$Config.database,(Split-Path -Parent $Config.database),$Config.pythonPath,$Config.powershellPath,$Config.runtimeManifestPath)
+    foreach ($optional in @('independentBackupRoot','nodePath','npmCliPath')) { if ($Config.ContainsKey($optional) -and $Config[$optional]) { $protected += $Config[$optional] } }
+    foreach ($entry in @(@('caddy','path'),@('chromium','cacheRoot'),@('chromium','path'),@('chromium','headlessShellPath'))) {
+        if ($Config.ContainsKey($entry[0]) -and $Config[$entry[0]].ContainsKey($entry[1]) -and $Config[$entry[0]][$entry[1]]) { $protected += $Config[$entry[0]][$entry[1]] }
+    }
+    if ($Config.ContainsKey('runtimeFiles')) { foreach ($artifact in $Config.runtimeFiles) { $protected += $artifact.path } }
+    foreach ($path in $protected) {
+        $safe = Assert-AbsolutePath $path
+        foreach ($asset in @($source,$output)) { if (Test-AssetPathOverlap $asset $safe.TrimEnd('\')) { throw 'Asset/protected path collision' } }
+    }
+}
 function Get-Sha256([string]$Path) { (Get-FileHash -LiteralPath (Assert-AbsolutePath $Path -MustExist) -Algorithm SHA256).Hash }
 function Read-Json([string]$Path) { [IO.File]::ReadAllText((Assert-AbsolutePath $Path -MustExist), $script:Utf8) | ConvertFrom-Json -AsHashtable }
 function Write-Json([string]$Path, $Value) {
@@ -59,7 +121,8 @@ function Invoke-Native([string]$File, [string[]]$Arguments, [string]$WorkingDire
 }
 function Read-HostConfig([string]$Path) {
     $c = Read-Json $Path
-    foreach ($key in @('database','releasesRoot','pointerPath','logsRoot','backupRoot','sourceRoot','outputRoot','pythonPath','powershellPath','runtimeManifestPath')) { $null = Assert-AbsolutePath $c[$key] }
+    foreach ($key in @('database','releasesRoot','pointerPath','logsRoot','backupRoot','pythonPath','powershellPath','runtimeManifestPath')) { $null = Assert-AbsolutePath $c[$key] }
+    Assert-ProductionAssetRoots $c
     if ($c.schemaVersion -ne 1 -or $c.backendHost -ne '127.0.0.1' -or $c.backendPort -ne 8000 -or $c.expectedRevision -ne 'e3f4a5c1d001') { throw 'Unsupported host contract' }
     if ($c.expectedCommit -notmatch '^[0-9a-f]{40}$' -or $c.expectedTree -notmatch '^[0-9a-f]{40}$') { throw 'Approved Git identity required' }
     if ($c.database -ne 'C:\My Apps\marketing-os\marketing-os_4\backend\data\app.db' -and $c.environment -ne 'isolated-test') { throw 'Unapproved canonical target' }

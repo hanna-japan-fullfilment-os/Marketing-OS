@@ -32,8 +32,22 @@ after changing working directory. Keep the observed source and output roots:
 Existing DB rows contain absolute paths. Do not migrate asset locations as part
 of deployment. Confirm OneDrive files are locally available without interactive
 sign-in. Output ACLs currently include a child-deletion deny; verify required
-operations explicitly. Configuration validation rejects reparse traversal; cloud
-placeholders/junctions that violate this policy remain a deployment gate.
+operations explicitly. Asset validation permits only the exact configured source
+and output pair above, in their respective roles, with the explicitly recognized
+cloud tags on those roots and their approved OneDrive ancestor chain. Arbitrary
+OneDrive paths, descendants, other users, junctions, symlinks, name-surrogate tags,
+unknown tags and unreadable metadata are refused. Source/output overlap and
+collisions with protected production paths are refused. Isolated test configuration
+may use ordinary canonical local non-reparse directories.
+
+The generic path guard remains strict for DBs, releases, pointers, logs, backups,
+executables and evidence. Cloud allowance does not establish hydration, permanent
+local availability or effective access, and never automatically hydrates files.
+Files On-Demand, ACLs and unattended access remain independent deployment gates;
+deployment preflight and separately authorized acceptance must verify runtime access.
+Validation reduces misconfiguration and unintended redirection but cannot prevent
+concurrent replacement by a sufficiently privileged writer. It does not replace
+filesystem permissions. Filesystem access and OneDrive availability remain unresolved.
 
 ## Approval inputs and secrets
 
