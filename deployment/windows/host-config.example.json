@@ -13,7 +13,7 @@
   "powershellPath": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
   "runtimeManifestPath": "C:\\MarketingOS\\approved\\runtime-manifest.json",
   "nodePath": "C:\\Program Files\\nodejs\\node.exe",
-  "npmCliPath": "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
+  "npmCliPath": "C:\\Users\\wesle\\AppData\\Roaming\\npm\\node_modules\\npm\\bin\\npm-cli.js",
   "runtimeFiles": [],
   "backendHost": "127.0.0.1",
   "backendPort": 8000,
