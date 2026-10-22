@@ -158,8 +158,7 @@ def test_v342_locked_service_is_local_only_and_has_no_provider_surface():
         assert forbidden not in source
 
 
-@pytest.mark.asyncio
-async def test_v342_background_generation_sends_no_references_when_locked(monkeypatch):
+def test_v342_background_generation_sends_no_references_when_locked(monkeypatch):
     def _unexpected_reference_lookup(*args, **kwargs):
         raise AssertionError(
             "Locked background route must not resolve reference images."
@@ -187,7 +186,7 @@ async def test_v342_background_generation_sends_no_references_when_locked(monkey
     provider = FakeImageProvider()
     brand = SimpleNamespace(id="brand-1", name="Hanna")
 
-    image = await orchestrator.generate_ai_background(
+    image = _complete_background_fake(orchestrator.generate_ai_background(
         SimpleNamespace(),
         image_provider=provider,
         brand=brand,
@@ -198,7 +197,7 @@ async def test_v342_background_generation_sends_no_references_when_locked(monkey
         quality="high",
         creative_direction=None,
         allow_reference_images=False,
-    )
+    ))
 
     assert image is not None
     assert len(provider.calls) == 1
@@ -210,7 +209,7 @@ def test_v342_orchestrator_wires_primary_and_variant_locked_routes():
 
     assert "from .locked_product_pipeline import (" in source
     assert "inspect_locked_product_master_candidate" in source
-    assert "build_locked_product_composite" in source
+    assert "build_trusted_product_composite" in source
 
     assert source.count(
         "allow_reference_images=(\n"
@@ -223,7 +222,7 @@ def test_v342_orchestrator_wires_primary_and_variant_locked_routes():
         "                                ),"
     ) == 1
 
-    assert source.count('"locked_product_composite"') >= 2
+    assert source.count("locked_product_composite=locked_result") == 2
     assert source.count('qa_dict["locked_product_pipeline"]') == 1
     assert source.count('qa_payload["locked_product_pipeline"]') == 1
     assert "BUILD6R_IMMUTABLE_PRODUCT_LAYER_RUN_VISUALS_GUARD" in source
@@ -261,3 +260,36 @@ def test_v342_full_ai_product_recreation_guard_is_preserved():
 
     assert "Full AI product recreation is prohibited" in source
     assert "use_ai_background=True and recreate_with_ai=False" in source
+
+
+def _complete_background_fake(coro):
+    try:
+        coro.send(None)
+    except StopIteration as done:
+        return done.value
+    finally:
+        coro.close()
+    raise AssertionError("Fake background call yielded external work")
+
+
+@pytest.mark.parametrize("with_reference", [False, True])
+def test_repair_background_consumes_exact_selected_reference_set(tmp_path, monkeypatch, with_reference):
+    def forbidden_lookup(*args, **kwargs):
+        raise AssertionError("No latest-reference substitution allowed")
+    monkeypatch.setattr(orchestrator, "_resolve_visual_reference_paths", forbidden_lookup)
+    monkeypatch.setattr(orchestrator, "_brand_style_prompt_notes", lambda brand: "")
+    reference = tmp_path / "selected.png"
+    Image.new("RGB", (30, 30), "blue").save(reference)
+    selected = [reference] if with_reference else []
+    calls = []
+    class FakeProvider:
+        async def generate(self, **kwargs):
+            calls.append(kwargs)
+            return _png_bytes()
+    result = _complete_background_fake(orchestrator.generate_ai_background(
+        SimpleNamespace(), image_provider=FakeProvider(), brand=SimpleNamespace(id="brand", name="Brand"),
+        model="fake", width=1080, height=1350, visual_brief="Editorial", selected_references=selected))
+    assert result is not None
+    assert calls[0]["reference_images"] == (selected or None)
+    if selected:
+        assert "QUALITY_AND_COMPOSITION_REFERENCE_NOT_PRODUCT_FACT_EVIDENCE" in calls[0]["prompt"]

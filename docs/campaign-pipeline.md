@@ -1993,3 +1993,131 @@ list this maps to, the exact test coverage added (`tests/test_build6_
 repair.py`, plus updates to `test_build3_qa_engine.py`, `test_usage_
 tracking.py`, `test_db_migrations.py`), and the completion-packet fields
 reported to the owner.
+
+
+### Creative Output Repair: current plan, render, QA and approval
+
+Current product creative plans use the existing typed `SlidePlan`. Each slide
+retains canonical V3.45 `ProductClaimEvidence` IDs, their source IDs and evidence
+snapshot hash; the selected product `Asset` ID/role/path/SHA256; selected
+`BrandAsset` visual-reference IDs/path/SHA256; and selection rationale.
+Historical plans without these fields still deserialize, but must be replanned
+before entering current product rendering or obtaining approval. Unknown plan
+and nested provenance fields fail validation instead of disappearing.
+
+Planning chooses product and composition references once. Model-selected claim
+IDs must resolve to verified, marketing-eligible, unexpired, promoted V3.45
+records for that product and remain in canonical verified product facts. Current
+product slides containing factual assertions require matching selected canonical claims;
+wholly nonfactual copy can use an empty claim set. No claim ID or
+claim evidence is invented or promoted by this workflow. The existing claims
+auditor checks slide copy against only its selected claims. Product facts without
+eligible V3.45 evidence cannot enter the current creative flow until evidence
+is governed separately. No database migration or parallel evidence store is used.
+
+Rendering revalidates exact selected identities and bytes; it does not reselect
+latest assets. Background generation receives exactly the selected reference
+set, including an explicit empty set, as composition guidance rather than factual
+evidence. A locked product composite travels through `TrustedProductComposite`,
+separate from prohibited `recreated_image`. Its factory checks the existing
+owner-approved product-master contract, canonical source link and bytes before
+deterministic composition. The renderer verifies the in-process capability,
+selected asset identity and composite bytes, then owns all typography. A path,
+filename or role label alone cannot confer trust. Ordinary historical local
+renders remain available, without granting approval eligibility.
+
+Each rendered slide's existing render-context sidecar contains the complete
+serialized plan, its digest and output SHA256. Creative QA rejects missing or
+changed plans, selections, evidence, renders or technical reports before its
+critic call. It sends the same per-slide contracts to the critic and records
+attestations covering every required slide, campaign/copy, variant direction,
+render context and technical report in existing QA evidence and variant JSON.
+A failed contract-bound QA result requires an explicit plan/render revision;
+automatic copy or scene retries cannot silently replace its authorized contract.
+
+Both campaign approval and human APPROVE feedback require all selected
+platform/language variants to be rendered and have passing creative QA, no hard
+fails, matching evidence-file hashes and attestations recomputed from current
+inputs. Technical render success alone is insufficient. Any subsequent change
+requires fresh QA. Missing historical provenance or unsupported/script-only
+variants fail closed at this approval boundary. No test or development bypass is
+provided.
+
+Verification uses temporary SQLite databases, fake critics/image providers and
+a fake renderer. It does not generate a live carousel or establish visual
+acceptance. Deployment, runtime preparation and production activation remain
+paused; implementation does not commit, push or deploy itself.
+
+
+#### Exact visible assertion binding (V4 blocker correction)
+
+An ID/evidence presence check cannot authorize copy. Each current visible claim
+field now has a typed `SlideClaimBinding` containing its field path, exact
+assertion text and canonical V3.45 claim ID. The evidence snapshot also carries
+the canonical claim text. Planning, rendering, QA and approval recompute this
+relationship. The host resolves the ID to the existing verified, eligible,
+promoted, unexpired claim record and its actual source references; the renderer
+checks exact text equality against that snapshot. No text similarity, model
+judgment, arbitrary-string equivalence or separate evidence authority can make
+a different claim valid. Unused/unrelated selected IDs and unmatched assertion
+fields fail closed, including optional feature, badge and callout text.
+
+Neutral copy is deliberately bounded to the explicit non-factual forms in the
+renderer contract (for example `Meet the collection` and `Learn more`). Unknown
+wording requires an exact canonical assertion or a new plan; absence of a regex
+finding is not evidence of non-factuality. Claims must use the canonical text
+verbatim. Arbitrary paraphrases and mixed promotional sentences are not inferred
+to be equivalent. This conservative boundary does not add new creative facts.
+
+Deterministic hero mode uses the same production plan and binding path, choosing
+only eligible claim IDs whose exact canonical text occurs as an actual visible
+field. Multiple matches are resolved deterministically; unrelated available
+claims cannot satisfy the requirement. Missing or unsupported evidence stops the
+hero without fabricating IDs, source references or promotional text. The common
+post-hero plan construction/binding remains one assignment and retains the
+existing no-carousel-model-call behavior. No migration or live acceptance is
+part of this correction.
+
+
+#### Complete rendered text authority (V5 factual-text closure)
+
+The typed SlidePlan now also contains the real brand-style disclaimer/footer.
+Planning captures it before binding assertions; the renderer receives that
+captured value, rather than independently injecting current brand text. Brand
+footer changes require a new plan, render and QA. A disclaimer, footnote, CTA,
+badge, feature icon/title/subtitle, callout or specification has no automatic
+factual exemption based on its label. The same content rule applies throughout.
+
+The existing templates expose eyebrow, headline, body, CTA, badge, intro,
+feature icon/title/subtitle, callout label/value, bottom-feature strings, trust
+badges and disclaimer text. There is no separate caption/footnote template
+input: in-slide captions use body/intro and footnotes use the disclaimer/footer.
+All these inputs are inventoried and compared with the complete authorized
+text contract. Every factual assertion needs its exact V3.45 canonical claim
+and source references, independent of the field carrying it. The existing
+brand resolver's ` · ` list separator is handled deterministically, with each
+component governed; this is not similarity matching or arbitrary paraphrasing.
+
+Known non-factual editorial/CTA/brand forms, bounded decorative glyphs and legal
+boilerplate such as `Results may vary.` and `For informational purposes only.`
+remain supported without product claim IDs. Entirely non-factual slides need
+no product claim or fabricated evidence. Unknown wording remains fail-closed;
+a role label or owner-editable disclaimer does not turn a product fact into
+non-factual copy. Each factual selected ID must still authorize an actual
+visible assertion.
+
+Renderer sidecars store both the complete typed-plan text contract and the
+actual renderer text inventory. QA compares the two, checks current canonical
+authority and current brand footer, and supplies all text roles to the critic.
+Approval recomputes that same complete revision. Footer, badge, specification
+and other text edits invalidate old QA, even when the new wording has eligible
+evidence. A valid replacement still needs a fresh render and fresh QA.
+
+Slide-position counters are validated integer structure, and fixed template
+arrows/checks are decoration. CSS font/color controls cannot inject new HTML,
+CSS declarations or generated factual text. The TemplateContext inventory is
+closed: any future unexamined field fails before rendering. Product/logo/scene
+images remain under existing media provenance and visual-QA controls; this
+text closure does not claim OCR or live visual acceptance. Historical local
+renders remain possible but cannot gain approval without current typed
+provenance, complete text snapshots and creative QA.

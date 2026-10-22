@@ -53,7 +53,7 @@ from .claims_audit import (
 )
 from .creative.brand_style import resolve_brand_style
 from .creative.pipeline import (
-    SlideCreativeInput, build_variant_qa_report_path, build_variant_slide_output_path, render_slide,
+    SlideCreativeInput, build_render_context_path, build_variant_qa_report_path, build_variant_slide_output_path, render_slide,
 )
 from .creative.qa import CreativeQAResult as MechanicalQAResult
 from .creative.renderer import PlaywrightRenderer
@@ -62,11 +62,13 @@ from .product_facts import format_verified_facts_for_prompt, resolve_verified_pr
 from .prompt_registry import record_prompt_usage
 from .usage_tracking import record_stage_usage
 from ..data.platform_creative_specs import PlatformCreativeSpec, resolve_platform_creative_spec
-from ..models import Campaign, PlatformCampaignVariant, Product
+from ..models import Campaign, CampaignSlide, PlatformCampaignVariant, Product
 from ..schemas.creative_director import CreativeDirection, MasterCampaignConcept, PlatformAdaptation, VideoConcept
+from ..schemas.ai import SlidePlan
 from ..schemas.qa import CreativeCritiqueResult, LanguageQAResult, RevisedCopy, TechnicalQAResult, VideoQAResult
 from .orchestrator import (
     AutopilotConfig, _audit, _claims_boundary_instruction, _deterministic_creative_direction, _enforce_previsual_claim_grounding_gate, _sparse_fact_grounding_instruction,
+    validate_slide_provenance, _provenance_hash,
     _load_campaign_context, _load_stage_json, _resolve_image_model_and_quality, _resolve_platform_adaptation,
     _select_candidate_assets, _stage_language_variant, generate_ai_background, get_platform_campaign_variants,
     resolve_brand_colors, resolve_brand_logo_path,
@@ -85,6 +87,87 @@ _IDENTICAL_TEXT_MIN_LENGTH = 8
 # ---------------------------------------------------------------------------
 # Part A — Technical QA (deterministic, no AI).
 # ---------------------------------------------------------------------------
+
+def current_slide_attestations(db, campaign, variant, *, creative_data=None):
+    """Bind current plan, canonical authority, copy, direction, and actual rendered bytes."""
+    from .creative.pipeline import (build_render_context_path, slide_contract_digest,
+        complete_slide_text_contract, structural_slide_text)
+    creative_data = creative_data if creative_data is not None else _load_stage_json(db, campaign.id, "creative")
+    creative = _stage_language_variant(creative_data, variant.language) or {}
+    plans = [SlidePlan.model_validate(raw) for raw in creative.get("carousel_plan", {}).get("slides", [])]
+    spec = resolve_platform_creative_spec(variant.target_platform, variant.content_type)
+    if not spec.supports_carousel:
+        plans = plans[:max(1, spec.recommended_slide_count)]
+    paths = list(variant.slide_asset_paths or [])
+    if not plans or len(paths) != len(plans) or len(set(paths)) != len(paths):
+        raise ValueError("Missing or duplicate required slide output")
+    if campaign.target_slide_count and spec.supports_carousel and len(plans) != campaign.target_slide_count:
+        raise ValueError("Required campaign slide count differs from current plan")
+    campaign_contract = {field: getattr(campaign, field, None) for field in
+        ("id", "brand_id", "product_id", "category_id", "hook", "angle", "main_promise", "cta",
+         "languages", "language", "target_platforms", "target_slide_count", "platform_key", "template_id")}
+    copy_data = _load_stage_json(db, campaign.id, "copy")
+    if not _stage_language_variant(copy_data, variant.language):
+        raise ValueError("Current language copy is missing")
+    slide_rows = db.query(CampaignSlide).filter(CampaignSlide.campaign_id == campaign.id).order_by(CampaignSlide.slide_number).all()
+    slide_rows_hash = _provenance_hash([{c.name: getattr(row, c.name) for c in row.__table__.columns} for row in slide_rows])
+    reports = list(variant.qa_report_paths or [])
+    if len(reports) != len(plans):
+        raise ValueError("Missing required slide technical QA reports")
+    result = []
+    for plan, raw_path, report_path in zip(plans, paths, reports, strict=True):
+        report_bytes = Path(report_path).read_bytes()
+        if json.loads(report_bytes).get("passed") is not True:
+            raise ValueError("Slide technical QA did not pass")
+        validate_slide_provenance(db, campaign, plan)
+        path = Path(raw_path)
+        context = json.loads(build_render_context_path(path).read_text(encoding="utf-8"))
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if (context.get("slide_contract") != plan.model_dump()
+                or context.get("slide_contract_sha256") != slide_contract_digest(plan)
+                or context.get("render_sha256") != digest
+                or context.get("complete_text_contract") != complete_slide_text_contract(plan)
+                or context.get("rendered_text_fields") != complete_slide_text_contract(plan)["fields"]
+                or context.get("structural_text") != structural_slide_text(plan.slide_number, len(plans))):
+            raise ValueError("Render is stale relative to selected slide contract or bytes")
+        result.append({"slide_id": plan.slide_id, "contract_sha256": slide_contract_digest(plan),
+            "render_path": str(path.resolve()), "render_sha256": digest,
+            "render_context_sha256": hashlib.sha256(build_render_context_path(path).read_bytes()).hexdigest(),
+            "technical_report_sha256": hashlib.sha256(report_bytes).hexdigest(),
+            "campaign_slides_sha256": slide_rows_hash,
+            "campaign_sha256": _provenance_hash(campaign_contract), "copy_sha256": _provenance_hash(copy_data),
+            "variant_sha256": _provenance_hash({"platform": variant.target_platform, "language": variant.language,
+                "content_type": variant.content_type, "format": variant.render_format_key,
+                "direction": variant.creative_direction})})
+    return result
+
+
+def assert_campaign_creative_qa_current(db, campaign):
+    """Single approval boundary. A successful PNG render alone is never creative QA."""
+    variants = db.query(PlatformCampaignVariant).filter(PlatformCampaignVariant.campaign_id == campaign.id).all()
+    platforms = list(campaign.target_platforms or ["instagram"])
+    languages = list(campaign.languages or [campaign.language or "pt-BR"])
+    expected = {(p, lang) for p in platforms for lang in languages}
+    if len(variants) != len(expected) or {(v.target_platform, v.language) for v in variants} != expected:
+        raise ValueError("Creative QA missing for a required platform/language")
+    for variant in variants:
+        scores = variant.qa_scores or {}
+        if (variant.status != "RENDERED" or variant.qa_status != "PASS" or variant.qa_hard_fails
+                or not scores.get("creative") or not scores.get("technical", {}).get("passed")):
+            raise ValueError("Every required variant needs current passing creative QA")
+        attestations = current_slide_attestations(db, campaign, variant)
+        if scores.get("slide_attestations") != attestations:
+            raise ValueError("Creative QA is stale for current copy/contracts/assets")
+        if not variant.qa_evidence_paths:
+            raise ValueError("Missing creative QA evidence")
+        evidence_path = Path(variant.qa_evidence_paths[-1])
+        if scores.get("evidence_sha256") != hashlib.sha256(evidence_path.read_bytes()).hexdigest():
+            raise ValueError("Creative QA evidence changed")
+        evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+        if (evidence.get("passed") is not True or evidence.get("slide_attestations") != attestations
+                or evidence.get("creative") != scores["creative"] or evidence.get("hard_fails")):
+            raise ValueError("Creative QA evidence does not attest current slides")
+
 
 def run_technical_qa(variant: PlatformCampaignVariant, spec: PlatformCreativeSpec) -> TechnicalQAResult:
     """Dimensions, valid file, aspect ratio, safe zones, text overflow, logo
@@ -535,7 +618,7 @@ async def revise_video_concept(
 
 def _planned_slides_for_variant(creative_data_raw: dict | None, language: str, spec: PlatformCreativeSpec) -> list:
     creative_variant = _stage_language_variant(creative_data_raw, language) or {}
-    planned = [SimpleNamespace(**s) for s in creative_variant.get("carousel_plan", {}).get("slides", [])]
+    planned = [SlidePlan.model_validate(s) for s in creative_variant.get("carousel_plan", {}).get("slides", [])]
     if not spec.supports_carousel:
         planned = planned[: max(1, spec.recommended_slide_count)]
     return planned
@@ -544,6 +627,8 @@ def _planned_slides_for_variant(creative_data_raw: dict | None, language: str, s
 def _slide_assets_for_variant(
     db: Session, *, campaign: Campaign, brand, is_discovery: bool, discovery_products: list, planned_slides: list,
 ) -> list:
+    if planned_slides and all(isinstance(plan, SlidePlan) and plan.product_asset for plan in planned_slides):
+        return [validate_slide_provenance(db, campaign, plan) for plan in planned_slides]
     from .product_asset_selection import select_render_assets as _select_render_assets
 
     if is_discovery:
@@ -987,7 +1072,8 @@ async def _regenerate_variant_render(
                 )
                 or []
             ),
-            disclaimer=brand_style.disclaimer_text,
+            disclaimer=slide.disclaimer,
+            slide_plan=slide,
             slide_number=idx,
             total_slides=len(
                 planned_slides
@@ -1421,6 +1507,15 @@ async def _qa_one_static_variant(
     intended, rather than looping forever trying to "fix" a scorecard no
     provider can ever produce.
     """
+    try:
+        slide_attestations = current_slide_attestations(db, campaign, variant, creative_data=creative_data_raw)
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        variant.qa_status = "NEEDS_REVIEW"
+        variant.qa_hard_fails = ["Slide provenance: " + str(exc)]
+        variant.qa_scores = {}
+        variant.qa_notes = "Replan/re-render with current provenance before creative QA."
+        db.commit()
+        return
     language = variant.language
     platform = variant.target_platform
     copy_data = _stage_language_variant(copy_data_raw, language) or {}
@@ -1537,6 +1632,12 @@ async def _qa_one_static_variant(
             content_type=variant.content_type, slide_count=len(image_paths),
             verified_facts_text=verified_facts_note, brand_requirements_text=brand_requirements_note,
         )
+        scoring_context += "\nAUTHORIZED PER-SLIDE CONTRACTS: " + json.dumps([
+            json.loads(build_render_context_path(path).read_text(encoding="utf-8"))["slide_contract"]
+            for path in image_paths], sort_keys=True)
+        scoring_context += "\nCOMPLETE RENDERED TEXT CONTRACTS (ALL ROLES, INCLUDING FOOTERS): " + json.dumps([
+            json.loads(build_render_context_path(path).read_text(encoding="utf-8"))["complete_text_contract"]
+            for path in image_paths], sort_keys=True)
         creative = await run_creative_qa(
             ai_provider, image_paths=image_paths, source_image_path=source_product_image_path, context=scoring_context,
             model=config.creative_qa_model,
@@ -1582,9 +1683,12 @@ async def _qa_one_static_variant(
         hard_fails = hard_fails + claims_hard_fails
         # Fail closed (REQUIREMENT 5): an unsupported claim can never receive
         # PASS regardless of how high `overall` scores otherwise.
-        passed = not hard_fails and overall >= config.qa_pass_threshold
+        if current_slide_attestations(db, campaign, variant, creative_data=creative_data_raw) != slide_attestations:
+            hard_fails.append("Slide contract changed during creative QA")
+        passed = creative is not None and not hard_fails and overall >= config.qa_pass_threshold
 
         payload = {
+            "slide_attestations": slide_attestations,
             "attempt": attempt, "overall": overall, "hard_fails": hard_fails, "passed": passed,
             "technical": technical.to_dict(),
             "creative": creative.model_dump() if creative is not None else None,
@@ -1594,6 +1698,8 @@ async def _qa_one_static_variant(
         evidence_path = _write_qa_evidence(config, campaign=campaign, variant=variant, attempt=attempt, payload=payload)
 
         variant.qa_scores = {
+            "slide_attestations": slide_attestations,
+            "evidence_sha256": hashlib.sha256(evidence_path.read_bytes()).hexdigest(),
             "overall": overall, "technical": technical.to_dict(),
             "creative": creative.model_dump() if creative is not None else None,
             "language": language_qa.model_dump() if language_qa is not None else None,
@@ -1612,9 +1718,12 @@ async def _qa_one_static_variant(
             variant.qa_notes = ""
             db.commit()
             return
-        if attempt == max_attempts:
+        if slide_attestations or attempt == max_attempts:
             variant.qa_status = "NEEDS_REVIEW"
-            variant.qa_notes = f"Retry limit ({config.qa_max_retries}) reached without a passing QA result."
+            variant.qa_notes = (
+                "Creative QA failed; explicitly revise plan/render and rerun QA."
+                if slide_attestations else f"Retry limit ({config.qa_max_retries}) reached without a passing QA result."
+            )
             db.commit()
             return
 

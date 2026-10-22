@@ -782,6 +782,14 @@ def get_campaign_slide_image(campaign_id: str, slide_number: int, db: Session = 
     return FileResponse(path, media_type="image/png")
 
 
+def _require_current_creative_qa(db, campaign):
+    from ..services.qa_engine import assert_campaign_creative_qa_current
+    try:
+        assert_campaign_creative_qa_current(db, campaign)
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        raise HTTPException(409, "Current creative QA required: " + str(exc)) from exc
+
+
 @router.post("/{campaign_id}/approve")
 def approve_campaign(campaign_id: str, db: Session = Depends(get_db)):
     campaign = db.get(Campaign, campaign_id)
@@ -789,6 +797,7 @@ def approve_campaign(campaign_id: str, db: Session = Depends(get_db)):
         raise HTTPException(404, "Campaign not found.")
     if campaign.status != "REVIEW":
         raise HTTPException(400, f"Campaign must be in REVIEW to approve (currently {campaign.status}).")
+    _require_current_creative_qa(db, campaign)
     campaign.status = "APPROVED"
     campaign.approved_at = datetime.now(timezone.utc)
     db.commit()
@@ -1331,6 +1340,8 @@ async def submit_campaign_review(campaign_id: str, payload: ReviewActionRequest,
     campaign = _require_campaign(db, campaign_id)
     if payload.level not in LEVELS:
         raise HTTPException(400, f"level must be one of {LEVELS}.")
+    if payload.action == "APPROVE":
+        _require_current_creative_qa(db, campaign)
     if payload.action not in ("APPROVE", "REJECT", "REQUEST_REVISION"):
         raise HTTPException(400, "action must be one of APPROVE, REJECT, REQUEST_REVISION.")
     if payload.reason_code and payload.reason_code not in FEEDBACK_REASON_CODES:
@@ -1611,6 +1622,7 @@ async def auto_publish_campaign(campaign_id: str, payload: AutoPublishRequest, d
         raise HTTPException(
             400, f"Campaign must be approved before publishing (current status: {campaign.status}).",
         )
+    _require_current_creative_qa(db, campaign)
     if payload.provider not in ("facebook_page", "instagram"):
         raise HTTPException(400, "provider must be 'facebook_page' or 'instagram'.")
 

@@ -50,6 +50,7 @@ awaits a `Session` and reports progress through the `ProgressReporter` it's give
 from __future__ import annotations
 
 import io
+import hashlib
 import json
 import tempfile
 from dataclasses import dataclass
@@ -74,7 +75,7 @@ from ..schemas.ai import (
     CampaignCopy, CampaignStrategy, CampaignStrategyCandidates, CarouselPlan, CreativeBrief,
     ProductFidelityCheck, ProductZoneDetection, SourceProductIdentityCheck,
 )
-from ..schemas.ai import SlidePlan  # BUILD6R_PREMIUM_HERO_NO_CAROUSEL_CALL_V2
+from ..schemas.ai import SlidePlan, SlideAssetReference, SlideEvidenceReference
 from ..schemas.creative_director import (
     CreativeDirection, MasterCampaignConcept, PlatformAdaptation, VideoConcept,
 )
@@ -83,6 +84,10 @@ from .analytics import average_engagement_rate_for_strategy_type
 from .creative.brand_style import resolve_brand_style
 from .creative.pipeline import (
     SlideCreativeInput,
+    build_trusted_product_composite,
+    canonical_slide_claim_bindings,
+    slide_visible_copy_fields,
+    validate_slide_claim_bindings,
     build_qa_report_path,
     build_slide_output_path,
     build_variant_qa_report_path,
@@ -97,7 +102,6 @@ from .product_facts import format_verified_facts_for_prompt, resolve_verified_pr
 from .prompt_registry import record_prompt_usage
 from .usage_tracking import record_stage_usage
 from .locked_product_pipeline import (
-    build_locked_product_composite,
     inspect_locked_product_master_candidate,
 )
 from .fingerprint import NOVELTY_FRESH, NOVELTY_SIMILAR_BUT_ACCEPTABLE, classify_novelty, text_hash
@@ -693,6 +697,7 @@ async def generate_ai_background(
     creative_direction: CreativeDirection | None = None,
     allow_reference_images: bool = True,
     reference_art_direction_only: bool = False,
+    selected_references: list[Path] | None = None,
 ) -> Image.Image | None:
     """Best-effort AI-generated scene background — the brief's documented
     `SlideCreativeInput.generated_background` hook, finally wired up. Shared by
@@ -721,7 +726,10 @@ async def generate_ai_background(
     returns `None`.
     """
     try:
-        if reference_art_direction_only:
+        if selected_references is not None:
+            reference_art_direction_only = True
+            reference_paths = list(selected_references)
+        elif reference_art_direction_only:
             reference_paths = _resolve_visual_reference_paths(
                 db,
                 brand.id,
@@ -1742,6 +1750,207 @@ def check_visuals_stage_prerequisite(db: Session, campaign_id: str) -> None:
             "Run the Copy stage for this campaign before generating visuals — no campaign copy or "
             "carousel plan is on file yet."
         )
+
+
+def _provenance_hash(value) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, default=str, separators=(",", ":")).encode()).hexdigest()
+
+
+def _claim_reference(db, claim_id: str, product_id: str) -> SlideEvidenceReference:
+    """Read V3.45 authority; never promote or create evidence during creative work."""
+    from ..models.claim_evidence import ProductClaimEvidence
+    from .claim_evidence import (
+        _is_expired, _validate_marketing_evidence, _validate_source_scope,
+        _require_research_run, _require_insight, _validate_sources,
+    )
+    row = db.get(ProductClaimEvidence, claim_id)
+    if (row is None or row.product_id != product_id or row.status != "verified"
+            or not row.marketing_eligible or not row.verified_at or not row.promoted_at
+            or _is_expired(row.expires_at) or not row.source_ids or not row.source_excerpt):
+        raise ValueError("Selected claim is not current canonical marketing evidence: " + claim_id)
+    _validate_source_scope(row.source_scope)
+    _validate_marketing_evidence(row)
+    _require_research_run(db, research_run_id=row.research_run_id, product_id=product_id)
+    insight = _require_insight(db, research_insight_id=row.research_insight_id, research_run_id=row.research_run_id)
+    _validate_sources(db, research_run_id=row.research_run_id, research_insight=insight, source_ids=row.source_ids)
+    facts = resolve_verified_product_facts(db, db.get(Product, product_id))
+    if row.claim_text not in (facts.verified_claims if facts else []):
+        raise ValueError("Selected evidence is not promoted into canonical product facts")
+    snapshot = {column.name: getattr(row, column.name) for column in row.__table__.columns}
+    return SlideEvidenceReference(claim_id=row.id, source_ids=list(row.source_ids),
+                                  evidence_sha256=_provenance_hash(snapshot), claim_text=row.claim_text)
+
+
+def _asset_reference(asset, *, reference=False) -> SlideAssetReference:
+    path = Path(asset.file_path if reference else asset.absolute_path).resolve()
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if not reference and digest.lower() != str(asset.sha256).lower():
+        raise ValueError("Canonical product asset SHA256 mismatch")
+    return SlideAssetReference(asset_id=asset.id,
+        role=asset.kind if reference else asset.image_role, path=str(path), sha256=digest,
+        provenance_sha256="" if reference else _provenance_hash(asset.ai_metadata or {}))
+
+
+def _current_brand_disclaimer(db, campaign) -> str:
+    brand = db.get(Brand, campaign.brand_id)
+    if brand is None:
+        raise ValueError("Missing brand text authority")
+    return resolve_brand_style(db, brand).disclaimer_text
+
+
+def validate_slide_provenance(db, campaign, plan: SlidePlan):
+    """Re-resolve identities, not selection. Any change requires a new plan and QA."""
+    from .product_asset_selection import choose_approved_product_master
+    if not plan.slide_id or not plan.selection_rationale or plan.product_asset is None:
+        raise ValueError("Current creative plan requires typed per-slide provenance")
+    selected = plan.product_asset
+    asset = db.get(Asset, selected.asset_id)
+    if (asset is None or not asset.is_active or asset.brand_id != campaign.brand_id
+            or (campaign.product_id and asset.product_id != campaign.product_id)
+            or _asset_reference(asset) != selected):
+        raise ValueError("Product asset selection changed")
+    if selected.role == "product_master_approved":
+        if choose_approved_product_master([asset], source_lookup=lambda key: db.get(Asset, key)) is None:
+            raise ValueError("Product master approval is no longer valid")
+        source = db.get(Asset, asset.ai_metadata["source_asset_id"])
+        if hashlib.sha256(Path(source.absolute_path).read_bytes()).hexdigest().lower() != source.sha256.lower():
+            raise ValueError("Canonical source product bytes changed")
+    elif selected.role != "product":
+        raise ValueError("Product asset role escalation")
+    if plan.disclaimer != _current_brand_disclaimer(db, campaign):
+        raise ValueError("Brand disclaimer changed; replan/render and rerun QA")
+    if len(plan.verified_claim_ids) != len(set(plan.verified_claim_ids)):
+        raise ValueError("Duplicate selected claim IDs")
+    expected = [_claim_reference(db, key, asset.product_id) for key in plan.verified_claim_ids]
+    if expected != plan.evidence_references:
+        raise ValueError("Claim evidence substitution or stale evidence")
+    validate_slide_claim_bindings(plan)
+    if plan.reference_asset_ids != [ref.asset_id for ref in plan.reference_assets]:
+        raise ValueError("Reference selection substitution")
+    if len(set(plan.reference_asset_ids)) != len(plan.reference_asset_ids):
+        raise ValueError("Duplicate selected references")
+    for selected_ref in plan.reference_assets:
+        ref = db.get(BrandAsset, selected_ref.asset_id)
+        if (ref is None or ref.brand_id != campaign.brand_id or ref.kind != "visual_reference"
+                or _asset_reference(ref, reference=True) != selected_ref):
+            raise ValueError("Reference asset substitution or stale bytes")
+    from ..schemas.product_facts import VERIFIED_FACT_FIELDS
+    from ..models.claim_evidence import ProductClaimEvidence
+    from .claims_audit import audit_text_fields, collect_carousel_slide_fields
+    facts = resolve_verified_product_facts(db, db.get(Product, asset.product_id))
+    updates = {key: ([] if isinstance(getattr(facts, key), list) else "") for key in VERIFIED_FACT_FIELDS}
+    updates["verified_claims"] = [db.get(ProductClaimEvidence, key).claim_text for key in plan.verified_claim_ids]
+    selected_facts = facts.model_copy(update=updates)
+    audit = audit_text_fields(collect_carousel_slide_fields([plan]), selected_facts, db.get(Brand, campaign.brand_id))
+    if not audit.passed:
+        raise ValueError("Slide factual copy is unsupported by its selected canonical claim IDs")
+    return asset
+
+
+def _select_hero_claim_ids(db, product_id, plan: SlidePlan) -> list[str]:
+    """Select only exact assertions actually used by this deterministic hero."""
+    from ..models.claim_evidence import ProductClaimEvidence
+    eligible = []
+    for row in db.query(ProductClaimEvidence).filter(ProductClaimEvidence.product_id == product_id).all():
+        try:
+            eligible.append(_claim_reference(db, row.id, product_id))
+        except ValueError:
+            continue
+    selected = []
+    for full_text in slide_visible_copy_fields(plan).values():
+        parts = [full_text] if any(ref.claim_text == full_text for ref in eligible) else full_text.split(" · ")
+        for text in parts:
+            matches = sorted(ref.claim_id for ref in eligible if ref.claim_text == text)
+            if matches and matches[0] not in selected:
+                selected.append(matches[0])
+    if not selected:
+        # A wholly non-factual hero needs no product claim ID. Unknown wording
+        # still fails closed through the same content rule, regardless of role.
+        try:
+            canonical_slide_claim_bindings(plan.model_copy(update={"verified_claim_ids": [], "evidence_references": [], "claim_bindings": []}))
+        except ValueError as exc:
+            raise ValueError("Hero has no eligible exact canonical claim for its visible assertions") from exc
+    return selected
+
+
+def _bind_slide_provenance(db, campaign, slides, *, language, cta, select_claims_for_hero=False):
+    """Choose product/reference once; model-selected claim IDs must already be canonical."""
+    from .product_asset_selection import select_render_assets
+    assets = select_render_assets(db, brand_id=campaign.brand_id, category_id=campaign.category_id,
+                                  product_id=campaign.product_id, limit=max(4, len(slides)))
+    if not assets:
+        raise ValueError("No canonical product asset for slide planning")
+    refs = db.query(BrandAsset).filter(BrandAsset.brand_id == campaign.brand_id,
+        BrandAsset.kind == "visual_reference").order_by(BrandAsset.created_at.desc(), BrandAsset.id.asc()).limit(3).all()
+    result = []
+    for index, raw in enumerate(slides, 1):
+        data = _slide_plan_to_dict(raw)
+        plan = SlidePlan.model_validate(data)
+        discovery = list(campaign.discovery_products) if campaign.product_id is None else []
+        if discovery:
+            if index > len(discovery):
+                raise ValueError("More discovery slides than selected products")
+            candidates = select_render_assets(db, brand_id=campaign.brand_id, category_id=None,
+                product_id=discovery[index - 1].product_id, limit=1)
+            if not candidates:
+                raise ValueError("Selected discovery product has no eligible asset")
+            asset = candidates[0]
+        else:
+            asset = assets[(index - 1) % len(assets)]
+        # Capture the real brand-style footer as part of the typed slide before
+        # claim selection. Its role never exempts its content from evidence.
+        disclaimer = _current_brand_disclaimer(db, campaign)
+        if plan.disclaimer and plan.disclaimer != disclaimer:
+            raise ValueError("Planner supplied a different brand disclaimer")
+        plan = plan.model_copy(update={"cta": plan.cta or cta or "", "disclaimer": disclaimer})
+        if select_claims_for_hero:
+            selected_ids = _select_hero_claim_ids(db, asset.product_id, plan)
+            if plan.verified_claim_ids and plan.verified_claim_ids != selected_ids:
+                raise ValueError("Hero supplied unrelated claim IDs")
+            plan = plan.model_copy(update={"verified_claim_ids": selected_ids})
+        # Caller-supplied snapshots cannot replace the host's canonical identities.
+        product_ref = _asset_reference(asset)
+        reference_refs = [_asset_reference(ref, reference=True) for ref in refs]
+        evidence = [_claim_reference(db, key, asset.product_id) for key in plan.verified_claim_ids]
+        if plan.evidence_references and plan.evidence_references != evidence:
+            raise ValueError("Planner supplied inconsistent evidence references")
+        if plan.product_asset and plan.product_asset != product_ref:
+            raise ValueError("Planner attempted product substitution")
+        if plan.reference_asset_ids and plan.reference_asset_ids != [r.asset_id for r in reference_refs]:
+            raise ValueError("Planner attempted reference substitution")
+        if plan.reference_assets and plan.reference_assets != reference_refs:
+            raise ValueError("Planner attempted reference snapshot substitution")
+        plan = plan.model_copy(update=dict(slide_number=index, slide_id=f"{campaign.id}:{language}:{index}",
+            cta=plan.cta or cta or "", product_asset=product_ref,
+            evidence_references=evidence, reference_assets=reference_refs,
+            reference_asset_ids=[r.asset_id for r in reference_refs],
+            selection_rationale=plan.selection_rationale or "Canonical product selection; latest brand composition references; explicit verified claim selection."))
+        bindings = canonical_slide_claim_bindings(plan)
+        if plan.claim_bindings and plan.claim_bindings != bindings:
+            raise ValueError("Planner supplied inconsistent visible claim bindings")
+        plan = plan.model_copy(update={"claim_bindings": bindings})
+        validate_slide_provenance(db, campaign, plan)
+        result.append(plan)
+    return result
+
+
+def _claim_selection_prompt(db, product) -> str:
+    from ..models.claim_evidence import ProductClaimEvidence
+    if product is None:
+        return "No verified claim IDs available; do not make factual product claims."
+    pool = []
+    for row in db.query(ProductClaimEvidence).filter(ProductClaimEvidence.product_id == product.id).all():
+        try:
+            _claim_reference(db, row.id, product.id)
+        except ValueError:
+            continue
+        pool.append({"claim_id": row.id, "claim_text": row.claim_text})
+    return ("Select verified_claim_ids per slide only from this canonical pool, only for claims actually used. "
+            "Do not invent IDs or factual claims outside this pool. Supply selection_rationale. "
+            "Leave evidence_references, product_asset, reference_asset_ids and reference_assets empty; "
+            "the host binds those canonical selections after planning. "
+            "Factual visible fields must use the exact selected canonical claim_text, without paraphrase. "
+            "Unknown wording fails closed; neutral styling is limited to the existing bounded neutral forms. " + json.dumps(pool))
 
 
 def _slide_plan_to_dict(slide) -> dict:
@@ -4258,6 +4467,7 @@ async def run_copy_stage(
                     ) + _sparse_fact_grounding_instruction()
                     ),
                     user=(
+                        f"{_claim_selection_prompt(db, product)}\n"
                         f"Language: {language}. Hook: {campaign_copy.hook}. Headline: {campaign_copy.headline}. "
                         f"Supporting copy: {campaign_copy.supporting_copy}. CTA: {campaign_copy.cta}. Design "
                         f"concept: {creative_brief.design_concept}. Product: "
@@ -4275,11 +4485,16 @@ async def run_copy_stage(
                 )
                 effective_max_slides = target_slide_count or config.max_slides
 
-        planned_slides = carousel_plan.slides[:effective_max_slides] or [
-            SlidePlanFallback(
-                headline=campaign_copy.headline, body=campaign_copy.supporting_copy, cta=campaign_copy.cta
-            )
-        ]
+        planned_slides = _bind_slide_provenance(
+            db, campaign,
+            carousel_plan.slides[:effective_max_slides] or [
+                SlidePlanFallback(
+                    headline=campaign_copy.headline, body=campaign_copy.supporting_copy, cta=campaign_copy.cta
+                )
+            ],
+            language=language, cta=campaign_copy.cta,
+            select_claims_for_hero=config.hero_only,
+        )
         carousel_plan_by_language[language] = carousel_plan
         planned_slides_by_language[language] = planned_slides
         if not config.hero_only:
@@ -4492,7 +4707,9 @@ async def run_visuals_stage(
     creative_variant = _stage_language_variant(creative_data_raw, primary_language) or {}
     campaign_cta = copy_data.get("cta") or campaign.cta
     campaign_headline = copy_data.get("headline", "")
-    planned_slides = [SimpleNamespace(**s) for s in creative_variant["carousel_plan"]["slides"]]
+    planned_slides = [SlidePlan.model_validate(s) for s in creative_variant["carousel_plan"]["slides"]]
+    for plan in planned_slides:
+        validate_slide_provenance(db, campaign, plan)
     # Build 2 (the core carry-forward requirement from Build 1's own documented
     # limitation): every selected language, and every selected target
     # platform, not just the primary of each — used below by
@@ -4541,81 +4758,9 @@ async def run_visuals_stage(
     discovery_products = list(campaign.discovery_products)
     is_discovery = campaign.product_id is None and len(discovery_products) > 0
 
-    if is_discovery:
-        # One slide per hand-picked product, in the order they were picked — this
-        # is NOT round-robin: each slide must show a DIFFERENT specific product,
-        # never cycle back through one already used. A picked product with no
-        # active photo on file simply doesn't get a slide (best-effort, same "a
-        # moved/deleted source file shouldn't fail the whole run" philosophy as
-        # the rest of this loop) rather than failing the whole run over one gap.
-        slide_assets: list[Asset] = []
-        slides: list[SimpleNamespace] = []
-        # Build 6 repair (Critical Defect 1): paired alongside slide_assets so
-        # the pre-generation identity gate below can check each discovery
-        # slide's own asset against ITS OWN picked product — never the
-        # deep-dive campaign's single `product` (there isn't one here).
-        asset_product_pairs: list[tuple[Asset, Product | None]] = []
-        for idx, dp in enumerate(discovery_products):
-            if idx >= len(planned_slides):
-                break  # the model planned fewer slides than products were picked
-            per_product = _select_render_assets(
-                db, brand_id=brand.id, category_id=None, product_id=dp.product_id, limit=1,
-            )
-            asset = per_product[0] if per_product else None
-            if asset is None or not Path(asset.absolute_path).exists():
-                continue
-            slide_assets.append(asset)
-            slides.append(planned_slides[idx])
-            asset_product_pairs.append((asset, db.get(Product, dp.product_id)))
-        if not slide_assets:
-            campaign.status = "FAILED"
-            db.commit()
-            raise ValueError(
-                "None of this discovery campaign's picked products have an active photo on file — "
-                "scan your library, add a photo for at least one picked product, or pick different "
-                "products before generating visuals."
-            )
-    else:
-        # Sized off the plan actually persisted by run_copy_stage (which already honors
-        # campaign.target_slide_count), not config.max_slides alone — a custom slide
-        # count larger than the default cap should still get enough DISTINCT candidate
-        # photos to cover every planned slide when that many actually exist. When
-        # fewer photos exist than planned slides, the loop below round-robins through
-        # whatever this returns rather than truncating the carousel (see the Round 18
-        # fix comment just below) — this `limit` only controls how many distinct
-        # photos get a chance to be used, never how many slides get rendered.
-        candidate_assets = _select_render_assets(
-            db, brand_id=brand.id, category_id=campaign.category_id, product_id=campaign.product_id,
-            limit=max(4, len(planned_slides) * 2, config.max_slides * 2),
-        )
-        if not candidate_assets:
-            campaign.status = "FAILED"
-            db.commit()
-            raise ValueError(
-                "No active photos found for this category — scan your library or add photos before "
-                "generating visuals."
-            )
-
-        # Round 18 fix: a carousel is NOT capped to however many distinct source
-        # photos happen to be on file for this product/category — a user with just
-        # one product photo, asking for a 6-slide carousel "like these reference
-        # slides" (each a different AI-recreated composition of the SAME real
-        # product, per `recreate_with_ai`/the visual-master mechanism above), must
-        # still get all 6 slides, not silently just 1. Every planned slide is kept;
-        # `candidate_assets` is cycled (round-robin via modulo) when there are
-        # fewer photos than planned slides, rather than truncating the carousel
-        # down to the photo count. With recreate_with_ai on, reusing one photo
-        # across slides is exactly the intended workflow (six different recreated
-        # compositions of one real product); with it off, slides reusing the same
-        # photo still differ by their own headline/body/cta, same as any ordinary
-        # multi-slide carousel built from one hero shot.
-        slides = planned_slides
-        slide_assets = [candidate_assets[(i - 1) % len(candidate_assets)] for i in range(1, len(slides) + 1)]
-        # Build 6 repair (Critical Defect 1): every slide here shares the SAME
-        # deep-dive `product` (resolved by `_load_campaign_context` above) —
-        # `None` for a category-only campaign, which correctly makes the gate
-        # below a no-op (a category-only campaign makes no per-product claim).
-        asset_product_pairs = [(asset, product) for asset in slide_assets]
+    slides = planned_slides
+    slide_assets = [validate_slide_provenance(db, campaign, plan) for plan in slides]
+    asset_product_pairs = [(asset, db.get(Product, asset.product_id)) for asset in slide_assets]
 
     # Build 6 repair (Critical Defect 1) — a PRE-GENERATION source-product
     # identity gate: before ANY billed AI image generation below (full
@@ -4784,7 +4929,7 @@ async def run_visuals_stage(
     primary_creative_directions: dict[int, CreativeDirection] = {}
 
     for i, slide in enumerate(slides, start=1):
-        asset = slide_assets[i - 1]
+        asset = validate_slide_provenance(db, campaign, slide)
         source_path = Path(asset.absolute_path)
         if not source_path.exists():
             continue  # a moved/deleted source file shouldn't fail the whole run
@@ -4797,6 +4942,7 @@ async def run_visuals_stage(
         )
         locked_product_composite = None
         locked_product_metadata = None
+        locked_result = None
 
         output_path = build_slide_output_path(
             output_root=config.output_root, brand_slug=brand.slug, category_slug=category_slug,
@@ -4935,7 +5081,7 @@ async def run_visuals_stage(
             if config.use_ai_background and image_provider is not None:
                 fmt = get_platform_format(effective_platform_key)
                 generated_background = await generate_ai_background(
-                    db, image_provider=image_provider, brand=brand, model=quality_image_model,
+                    db, selected_references=[Path(r.path) for r in slide.reference_assets], image_provider=image_provider, brand=brand, model=quality_image_model,
                     width=fmt.width, height=fmt.height, visual_brief=getattr(slide, "visual_brief", ""),
                     quality=quality_tier,
                     creative_direction=primary_creative_direction,
@@ -4961,11 +5107,12 @@ async def run_visuals_stage(
                 generated_background is not None
                 and locked_product_candidate is not None
             ):
-                locked_result = build_locked_product_composite(
+                locked_result = build_trusted_product_composite(
                     background=generated_background,
                     master_path=source_path,
                     expected_sha256=str(asset.sha256 or ""),
                     canvas_size=(fmt.width, fmt.height),
+                    approved_asset=asset, source_lookup=lambda key: db.get(Asset, key),
                 )
                 locked_product_composite = locked_result.image
                 locked_product_metadata = locked_result.metadata
@@ -4998,7 +5145,7 @@ async def run_visuals_stage(
         # without recreation later.
         text_baked_in = False  # Build 6R-C1: deterministic renderer owns campaign text
         slide_features = [
-            Feature(icon=f.get("icon", ""), title=f.get("title", ""), subtitle=f.get("subtitle", ""))
+            Feature(**(f.model_dump() if hasattr(f, "model_dump") else f))
             for f in (getattr(slide, "features", None) or [])
         ]
         creative_input = SlideCreativeInput(
@@ -5011,11 +5158,9 @@ async def run_visuals_stage(
             accent_color=brand_style.accent_color, text_color=brand_style.text_color,
             font_family=brand_style.primary_font,
             generated_background=generated_background, product_zone_detection=zone_detection,
-            recreated_image=(
-                locked_product_composite
-                if locked_product_composite is not None
-                else recreated_image
-            ),
+            recreated_image=recreated_image,
+            locked_product_composite=locked_result,
+            slide_plan=slide,
             # Round 17 feature_showcase fields — also suppressed when the AI baked
             # its own text into a recreated image, same reasoning as eyebrow/etc
             # above (never draw two competing text layers).
@@ -5029,7 +5174,7 @@ async def run_visuals_stage(
             # Build 1 (Part H): deterministic disclaimer text, never baked into an
             # AI-recreated image (same never-two-competing-text-layers rule as
             # every other text field above).
-            disclaimer="" if text_baked_in else brand_style.disclaimer_text,
+            disclaimer="" if text_baked_in else slide.disclaimer,
             slide_number=i, total_slides=len(slides),
             campaign_archetype=(
                 primary_creative_direction.campaign_archetype
@@ -5069,16 +5214,12 @@ async def run_visuals_stage(
             slide_output_path=result.output_path,
             creative_direction=primary_creative_direction.model_dump(),
             visual_base=(
-                locked_product_composite
-                if locked_product_composite is not None
-                else recreated_image
+                recreated_image
                 if recreated_image is not None
                 else generated_background
             ),
             visual_base_kind=(
-                "locked_product_composite"
-                if locked_product_composite is not None
-                else "recreated_image"
+                "recreated_image"
                 if recreated_image is not None
                 else "generated_background"
                 if generated_background is not None
@@ -5824,7 +5965,7 @@ product=None, verified_facts_note: str = "") -> int:
                 copy_variant = _stage_language_variant(copy_data_raw, language) or {}
                 creative_variant = _stage_language_variant(creative_data_raw, language) or {}
                 planned_slides = [
-                    SimpleNamespace(**s) for s in creative_variant.get("carousel_plan", {}).get("slides", [])
+                    SlidePlan.model_validate(s) for s in creative_variant.get("carousel_plan", {}).get("slides", [])
                 ]
                 if not spec.supports_carousel:
                     planned_slides = planned_slides[: max(1, spec.recommended_slide_count)]
@@ -5837,30 +5978,8 @@ product=None, verified_facts_note: str = "") -> int:
                     db.commit()
                     continue
 
-                if is_discovery:
-                    slide_assets: list[Asset] = []
-                    slides: list = []
-                    for idx, dp in enumerate(discovery_products):
-                        if idx >= len(planned_slides):
-                            break
-                        per_product = _select_render_assets(
-                            db, brand_id=brand.id, category_id=None, product_id=dp.product_id, limit=1,
-                        )
-                        asset = per_product[0] if per_product else None
-                        if asset is None or not Path(asset.absolute_path).exists():
-                            continue
-                        slide_assets.append(asset)
-                        slides.append(planned_slides[idx])
-                else:
-                    candidate_assets = _select_render_assets(
-                        db, brand_id=brand.id, category_id=campaign.category_id, product_id=campaign.product_id,
-                        limit=max(4, len(planned_slides) * 2),
-                    )
-                    slides = planned_slides
-                    slide_assets = (
-                        [candidate_assets[(i - 1) % len(candidate_assets)] for i in range(1, len(slides) + 1)]
-                        if candidate_assets else []
-                    )
+                slides = planned_slides
+                slide_assets = [validate_slide_provenance(db, campaign, plan) for plan in slides]
 
                 if not slide_assets:
                     db.add(PlatformCampaignVariant(
@@ -5891,7 +6010,7 @@ product=None, verified_facts_note: str = "") -> int:
                 ))
 
                 for idx, slide in enumerate(slides, start=1):
-                    asset = slide_assets[idx - 1]
+                    asset = validate_slide_provenance(db, campaign, slide)
                     source_path = Path(asset.absolute_path)
                     if not source_path.exists():
                         continue
@@ -5904,6 +6023,7 @@ product=None, verified_facts_note: str = "") -> int:
                     )
                     locked_product_composite = None
                     locked_product_metadata = None
+                    locked_result = None
 
                     fallback_direction = _deterministic_creative_direction(
                         master_concept=master_concept, adaptation=adaptation, platform=platform,
@@ -5941,7 +6061,7 @@ product=None, verified_facts_note: str = "") -> int:
 
                     generated_background = None
                     if config.use_ai_background and image_provider is not None:
-                        signature = _scene_signature(creative_direction)
+                        signature = (_scene_signature(creative_direction), tuple(slide.reference_asset_ids))
                         cached_match = next(
                             (img for sig, img in background_cache.get(idx, []) if sig == signature), None,
                         )
@@ -5950,7 +6070,7 @@ product=None, verified_facts_note: str = "") -> int:
                             shared_source_parts.append(f"{platform}:slide-{idx}")
                         else:
                             generated_background = await generate_ai_background(
-                                db, image_provider=image_provider, brand=brand, model=quality_image_model,
+                                db, selected_references=[Path(r.path) for r in slide.reference_assets], image_provider=image_provider, brand=brand, model=quality_image_model,
                                 width=fmt.width, height=fmt.height, visual_brief=getattr(slide, "visual_brief", ""),
                                 quality=quality_tier, creative_direction=creative_direction,
                                 allow_reference_images=(
@@ -5972,20 +6092,17 @@ product=None, verified_facts_note: str = "") -> int:
                         generated_background is not None
                         and locked_product_candidate is not None
                     ):
-                        locked_result = build_locked_product_composite(
+                        locked_result = build_trusted_product_composite(
                             background=generated_background,
                             master_path=source_path,
                             expected_sha256=str(asset.sha256 or ""),
                             canvas_size=(fmt.width, fmt.height),
+                            approved_asset=asset, source_lookup=lambda key: db.get(Asset, key),
                         )
                         locked_product_composite = locked_result.image
                         locked_product_metadata = locked_result.metadata
 
-                    recreated_image = (
-                        locked_product_composite
-                        if locked_product_composite is not None
-                        else None
-                    )
+                    recreated_image = None
                     if config.recreate_with_ai and image_provider is not None and ai_provider is not None:
                         # Cannot be shared across languages — see this function's
                         # own docstring on why full recreation's cost can't be
@@ -6021,7 +6138,7 @@ product=None, verified_facts_note: str = "") -> int:
                         platform_key=render_format_key, language=language, slide_number=idx,
                     )
                     slide_features = [
-                        Feature(icon=f.get("icon", ""), title=f.get("title", ""), subtitle=f.get("subtitle", ""))
+                        Feature(**(f.model_dump() if hasattr(f, "model_dump") else f))
                         for f in (getattr(slide, "features", None) or [])
                     ]
                     creative_input = SlideCreativeInput(
@@ -6035,6 +6152,7 @@ product=None, verified_facts_note: str = "") -> int:
                         accent_color=brand_style.accent_color, text_color=brand_style.text_color,
                         font_family=brand_style.primary_font,
                         generated_background=generated_background, recreated_image=recreated_image,
+                        locked_product_composite=locked_result, slide_plan=slide,
                         badge_text="" if text_baked_in else getattr(slide, "badge_text", ""),
                         intro="" if text_baked_in else getattr(slide, "intro", ""),
                         features=[] if text_baked_in else slide_features,
@@ -6042,7 +6160,7 @@ product=None, verified_facts_note: str = "") -> int:
                         callout_value="" if text_baked_in else getattr(slide, "callout_value", ""),
                         bottom_features=[] if text_baked_in else list(getattr(slide, "bottom_features", None) or []),
                         trust_badges=[] if text_baked_in else list(getattr(slide, "trust_badges", None) or []),
-                        disclaimer="" if text_baked_in else brand_style.disclaimer_text,
+                        disclaimer="" if text_baked_in else slide.disclaimer,
                         slide_number=idx, total_slides=len(slides),
                         campaign_archetype=(
                             creative_direction.campaign_archetype
@@ -6082,16 +6200,12 @@ product=None, verified_facts_note: str = "") -> int:
                         slide_output_path=result.output_path,
                         creative_direction=creative_direction.model_dump(),
                         visual_base=(
-                            locked_product_composite
-                            if locked_product_composite is not None
-                            else recreated_image
+                            recreated_image
                             if recreated_image is not None
                             else generated_background
                         ),
                         visual_base_kind=(
-                            "locked_product_composite"
-                            if locked_product_composite is not None
-                            else "recreated_image"
+                            "recreated_image"
                             if recreated_image is not None
                             else "generated_background"
                             if generated_background is not None

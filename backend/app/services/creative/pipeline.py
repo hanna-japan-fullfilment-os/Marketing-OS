@@ -22,12 +22,15 @@ from __future__ import annotations
 
 import base64
 import io
-from dataclasses import dataclass, replace
+import hashlib
+import json
+from dataclasses import dataclass, fields as dataclass_fields, replace
 from pathlib import Path
 
 from PIL import Image
 
 from ...schemas.ai import ProductZoneDetection
+from ...schemas.ai import SlidePlan, SlideClaimBinding
 from .background import BackgroundIsolator, get_isolator
 from .compositor import (
     build_product_overlay,
@@ -53,6 +56,185 @@ def _file_to_data_uri(path: Path) -> str:
     ext = path.suffix.lstrip(".").lower() or "png"
     mime = "image/png" if ext == "png" else f"image/{ext}"
     return f"data:{mime};base64,{b64}"
+
+
+_COMPOSITE_SEAL = object()
+
+
+@dataclass(frozen=True)
+class TrustedProductComposite:
+    """In-process capability produced only by deterministic product compositing."""
+    image: Image.Image
+    metadata: dict
+    source_sha256: str
+    image_sha256: str
+    asset_id: str
+    seal: object
+
+
+def _image_digest(image: Image.Image) -> str:
+    return hashlib.sha256(image.mode.encode() + str(image.size).encode() + image.tobytes()).hexdigest()
+
+
+def build_trusted_product_composite(*, background, master_path, expected_sha256, canvas_size,
+                                    approved_asset, source_lookup):
+    from ..locked_product_pipeline import build_locked_product_composite
+    from ..product_asset_selection import choose_approved_product_master
+    if (choose_approved_product_master([approved_asset], source_lookup=source_lookup) is None
+            or Path(approved_asset.absolute_path).resolve() != Path(master_path).resolve()
+            or str(approved_asset.sha256).lower() != str(expected_sha256).lower()):
+        raise ValueError("Canonical approved product provenance required for trusted composite")
+    source = source_lookup(approved_asset.ai_metadata["source_asset_id"])
+    if hashlib.sha256(Path(source.absolute_path).read_bytes()).hexdigest().lower() != source.sha256.lower():
+        raise ValueError("Canonical source product bytes changed")
+    result = build_locked_product_composite(
+        background=background, master_path=master_path,
+        expected_sha256=expected_sha256, canvas_size=canvas_size,
+    )
+    return TrustedProductComposite(result.image, result.metadata, expected_sha256.lower(),
+                                   _image_digest(result.image), approved_asset.id, _COMPOSITE_SEAL)
+
+
+def slide_contract_digest(plan: SlidePlan) -> str:
+    return hashlib.sha256(plan.model_dump_json().encode()).hexdigest()
+
+
+# Bounded non-factual forms already supported by the creative contract. Unknown
+# copy is not guessed to be neutral: use an exact canonical assertion or replan.
+_NEUTRAL_SLIDE_COPY = frozenset({
+    "meet the collection", "discover the collection", "discover", "learn more",
+    "shop now", "explore", "details", "saiba mais", "conheça a coleção",
+    "descubra a coleção", "compre agora", "descubra", "detalhes",
+    "results may vary.", "for informational purposes only.",
+    "for illustrative purposes only.", "not medical advice.",
+    "imagens meramente ilustrativas.", "consulte as informações do produto.",
+    "✦", "✧", "★", "☆", "•", "●", "○", "✓", "✔", "→", "›", "💧", "✨", "🌿", "⭐",
+})
+
+
+def slide_visible_copy_fields(plan: SlidePlan) -> dict[str, str]:
+    fields = {name: getattr(plan, name) for name in (
+        "eyebrow", "headline", "body", "cta", "badge_text", "intro",
+        "callout_label", "callout_value", "disclaimer",
+    ) if getattr(plan, name)}
+    for index, feature in enumerate(plan.features):
+        for name in ("title", "subtitle"):
+            if getattr(feature, name):
+                fields[f"features.{index}.{name}"] = getattr(feature, name)
+        # Every icon value is inventoried too; only bounded decorative content
+        # is neutral. A role or Unicode character class cannot grant authority.
+        if feature.icon:
+            fields[f"features.{index}.icon"] = feature.icon
+    for name in ("bottom_features", "trust_badges"):
+        for index, text in enumerate(getattr(plan, name)):
+            if text:
+                fields[f"{name}.{index}"] = text
+    return fields
+
+
+def canonical_slide_claim_bindings(plan: SlidePlan) -> list[SlideClaimBinding]:
+    """Exact equality to the selected canonical text, never semantic similarity.
+
+    These snapshots are checked against V3.45 by the host before rendering/QA/
+    approval. This DB-free check also rejects renderer-side copy substitutions.
+    """
+    if plan.verified_claim_ids != [ref.claim_id for ref in plan.evidence_references]:
+        raise ValueError("Claim/evidence substitution")
+    if len(set(plan.verified_claim_ids)) != len(plan.verified_claim_ids):
+        raise ValueError("Duplicate selected claim IDs")
+    if any(not ref.claim_text or not ref.source_ids or not ref.evidence_sha256 for ref in plan.evidence_references):
+        raise ValueError("Unresolved canonical claim/evidence relationship")
+    result = []
+    used = set()
+    for field_path, full_text in slide_visible_copy_fields(plan).items():
+        # The existing brand resolver joins disclaimer entries with this exact
+        # separator. Each component needs its own authority, in every text role.
+        # No arbitrary punctuation splitting or semantic equivalence is inferred.
+        parts = [full_text] if any(ref.claim_text == full_text for ref in plan.evidence_references) else full_text.split(" · ")
+        for index, text in enumerate(parts):
+            path = field_path if len(parts) == 1 else f"{field_path}.segment.{index}"
+            matches = [ref for ref in plan.evidence_references if ref.claim_text == text]
+            if matches:
+                ref = min(matches, key=lambda item: item.claim_id)
+                result.append(SlideClaimBinding(field_path=path, claim_id=ref.claim_id, assertion_text=text))
+                used.add(ref.claim_id)
+            elif text.strip().casefold() not in _NEUTRAL_SLIDE_COPY:
+                if not plan.verified_claim_ids:
+                    raise ValueError("Visible factual assertion requires selected canonical claim IDs: " + path)
+                raise ValueError("Visible assertion lacks exact selected canonical claim support: " + path)
+    if used != set(plan.verified_claim_ids):
+        raise ValueError("Selected canonical claim IDs are unrelated to visible assertions")
+    return result
+
+
+def validate_slide_claim_bindings(plan: SlidePlan) -> None:
+    if plan.claim_bindings != canonical_slide_claim_bindings(plan):
+        raise ValueError("Visible claim/evidence binding changed or is missing")
+
+
+def complete_slide_text_contract(plan: SlidePlan) -> dict:
+    """Derived from typed plan fields; never an independent evidence authority."""
+    validate_slide_claim_bindings(plan)
+    return {"version": 5, "fields": slide_visible_copy_fields(plan),
+            "claim_bindings": [binding.model_dump() for binding in plan.claim_bindings]}
+
+
+def structural_slide_text(slide_number: int, total_slides: int) -> dict[str, str]:
+    if type(slide_number) is not int or type(total_slides) is not int:
+        raise ValueError("Slide counters must be integers, not a text injection path")
+    if total_slides > 1:
+        if not 1 <= slide_number <= total_slides:
+            raise ValueError("Invalid structural slide counter")
+        return {"slide_marker": f"{slide_number}/{total_slides}"}
+    return {}
+
+
+def _validate_template_control_inventory(creative_input) -> None:
+    # These context members are not visible copy. Unknown future members fail
+    # closed until inventoried, and raw CSS controls cannot emit injected text.
+    text_fields = {"eyebrow", "headline", "body", "cta", "badge_text", "intro", "features",
+                   "callout_label", "callout_value", "bottom_features", "trust_badges", "disclaimer"}
+    nontext_fields = {"width", "height", "composited_image_data_uri", "logo_data_uri", "accent_color",
+        "text_color", "font_family", "slide_number", "total_slides", "layout_variant", "campaign_archetype",
+        "slide_role", "direction_palette", "secondary_font_family", "typography_direction", "headline_emphasis",
+        "cta_treatment", "hero_treatment", "visual_style", "mood", "negative_space", "masked_scene_background"}
+    if {field.name for field in dataclass_fields(TemplateContext)} != text_fields | nontext_fields:
+        raise ValueError("Unexamined template context field")
+    controls = [creative_input.accent_color, creative_input.text_color, creative_input.font_family,
+                creative_input.secondary_font_family, *(creative_input.direction_palette or [])]
+    if any(any(token in value for token in (";", "{", "}", "<", ">", "\r", "\n", "/*", "*/")) for value in controls):
+        raise ValueError("CSS controls cannot inject unbound rendered text")
+
+
+def validate_render_slide_contract(creative_input):
+    plan = creative_input.slide_plan
+    if plan is None:
+        return  # Historical/local renders remain valid, but cannot obtain approval.
+    if not isinstance(plan, SlidePlan) or not plan.slide_id or not plan.selection_rationale or plan.product_asset is None:
+        raise ValueError("Complete typed slide provenance required")
+    if len(set(plan.verified_claim_ids)) != len(plan.verified_claim_ids) or plan.verified_claim_ids != [e.claim_id for e in plan.evidence_references]:
+        raise ValueError("Claim/evidence substitution")
+    validate_slide_claim_bindings(plan)
+    _validate_template_control_inventory(creative_input)
+    structural_slide_text(creative_input.slide_number, creative_input.total_slides)
+    if creative_input.total_slides > 1 and creative_input.slide_number != plan.slide_number:
+        raise ValueError("Slide counter differs from authorized plan")
+    if plan.reference_asset_ids != [a.asset_id for a in plan.reference_assets]:
+        raise ValueError("Reference substitution")
+    for asset in [plan.product_asset, *plan.reference_assets]:
+        if hashlib.sha256(Path(asset.path).read_bytes()).hexdigest().lower() != asset.sha256.lower():
+            raise ValueError("Selected asset bytes changed")
+    if any(a.role != "visual_reference" for a in plan.reference_assets):
+        raise ValueError("Reference asset role escalation")
+    if plan.product_asset.role not in {"product", "product_master_approved"}:
+        raise ValueError("Unsupported product role")
+    if Path(plan.product_asset.path).resolve() != Path(creative_input.source_image_path).resolve():
+        raise ValueError("Product asset substitution")
+    for field in ("eyebrow", "headline", "body", "cta", "badge_text", "intro", "callout_label", "callout_value", "bottom_features", "trust_badges", "disclaimer"):
+        if getattr(plan, field) != getattr(creative_input, field):
+            raise ValueError("Slide copy substitution: " + field)
+    if [f.model_dump() for f in plan.features] != [vars(f) for f in creative_input.features]:
+        raise ValueError("Slide feature substitution")
 
 
 @dataclass
@@ -92,6 +274,8 @@ class SlideCreativeInput:
     # logo is never left to the AI either way — it always renders separately via
     # `logo_path` below, per the brief's "no AI-generated logos" rule.
     recreated_image: Image.Image | None = None
+    locked_product_composite: TrustedProductComposite | None = None
+    slide_plan: SlidePlan | None = None
     # Round 17 fields for the `feature_showcase` template — passed straight
     # through to TemplateContext (see templates.py::_build_feature_showcase).
     # Unused by other templates, so left empty is always safe.
@@ -687,6 +871,19 @@ async def render_slide(
             "composite the authentic source product layer."
         )
 
+    validate_render_slide_contract(creative_input)
+    trusted = creative_input.locked_product_composite
+    if trusted is not None:
+        if not isinstance(trusted, TrustedProductComposite) or trusted.seal is not _COMPOSITE_SEAL:
+            raise ValueError("Untrusted composite role")
+        if (hashlib.sha256(Path(creative_input.source_image_path).read_bytes()).hexdigest() != trusted.source_sha256
+                or _image_digest(trusted.image) != trusted.image_sha256):
+            raise ValueError("Locked composite identity changed")
+        if (creative_input.slide_plan is None
+                or creative_input.slide_plan.product_asset.role != "product_master_approved"
+                or creative_input.slide_plan.product_asset.asset_id != trusted.asset_id):
+            raise ValueError("Locked composite requires approved product role")
+
     fmt = get_platform_format(creative_input.platform_key)
     template = get_template(creative_input.template_id)
 
@@ -702,13 +899,11 @@ async def render_slide(
     product_zone_detected = False
     background_isolator_used = "none"
 
-    if creative_input.recreated_image is not None:
-        # Full AI recreation already produced the whole scene (product included) —
-        # isolation/background/compositing below are skipped entirely; just get it
-        # to the exact platform canvas size.
-        composited = creative_input.recreated_image.convert("RGB")
+    if trusted is not None:
+        # Capability contains deterministic composition of the approved product layer.
+        composited = trusted.image.convert("RGB")
         composited = _resize_cover(composited, fmt.width, fmt.height)
-        background_isolator_used = "ai_recreated"
+        background_isolator_used = "trusted_locked_product_composite"
     else:
         # BUILD6R_IMMUTABLE_PRODUCT_CUTOUT_SELECTION
         # Prefer the SHA-keyed deterministic cutout for every supported
@@ -825,6 +1020,17 @@ async def render_slide(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_bytes(png_bytes)
+    if creative_input.slide_plan is not None:
+        context_path = build_render_context_path(output_path)
+        context_path.write_text(json.dumps({
+            "slide_contract": creative_input.slide_plan.model_dump(),
+            "slide_contract_sha256": slide_contract_digest(creative_input.slide_plan),
+            "render_sha256": hashlib.sha256(png_bytes).hexdigest(),
+            "composite_sha256": trusted.image_sha256 if trusted else "",
+            "complete_text_contract": complete_slide_text_contract(creative_input.slide_plan),
+            "rendered_text_fields": slide_visible_copy_fields(creative_input),
+            "structural_text": structural_slide_text(creative_input.slide_number, creative_input.total_slides),
+        }, sort_keys=True), encoding="utf-8")
 
     return SlideRenderResult(
         output_path=output_path,
@@ -987,6 +1193,11 @@ def persist_render_context(
         "product_zone_detection": zone_payload,
         "slide_role": slide_role or "",
     }
+    if context_path.exists():
+        previous = json.loads(context_path.read_text(encoding="utf-8"))
+        for key in ("slide_contract", "slide_contract_sha256", "render_sha256", "composite_sha256", "complete_text_contract", "rendered_text_fields", "structural_text"):
+            if key in previous:
+                payload[key] = previous[key]
 
     temporary_context = context_path.with_name(
         context_path.name

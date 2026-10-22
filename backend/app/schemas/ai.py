@@ -87,7 +87,34 @@ class SlideFeature(BaseModel):
     subtitle: str = ""
 
 
+class SlideEvidenceReference(BaseModel):
+    """Snapshot of canonical V3.45 evidence, never a second evidence authority."""
+    model_config = {"extra": "forbid"}
+    claim_id: str
+    source_ids: list[str]
+    evidence_sha256: str
+    claim_text: str = ""
+
+
+class SlideClaimBinding(BaseModel):
+    """Exact visible-field assertion linked to an existing V3.45 claim ID."""
+    model_config = {"extra": "forbid"}
+    field_path: str
+    claim_id: str
+    assertion_text: str
+
+
+class SlideAssetReference(BaseModel):
+    model_config = {"extra": "forbid"}
+    asset_id: str
+    role: str
+    path: str
+    sha256: str
+    provenance_sha256: str = ""
+
+
 class SlidePlan(BaseModel):
+    model_config = {"extra": "forbid"}
     slide_number: int
     purpose: str
     eyebrow: str = ""
@@ -95,6 +122,17 @@ class SlidePlan(BaseModel):
     body: str = ""
     cta: str = ""
     visual_brief: str
+    disclaimer: str = ""
+    # Defaults allow historical plans to load; current creative boundaries require
+    # a complete, verified selection before any image generation.
+    slide_id: str = ""
+    verified_claim_ids: list[str] = Field(default_factory=list)
+    evidence_references: list[SlideEvidenceReference] = Field(default_factory=list)
+    claim_bindings: list[SlideClaimBinding] = Field(default_factory=list)
+    reference_asset_ids: list[str] = Field(default_factory=list)
+    reference_assets: list[SlideAssetReference] = Field(default_factory=list)
+    product_asset: SlideAssetReference | None = None
+    selection_rationale: str = ""
     # Round 17 fields for the `feature_showcase` template — all optional so a
     # model response that omits them still produces a valid, if plainer, slide
     # (see `_build_feature_showcase`'s per-section conditional rendering).

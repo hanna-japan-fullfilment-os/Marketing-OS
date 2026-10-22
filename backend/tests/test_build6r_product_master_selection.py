@@ -178,32 +178,55 @@ def test_valid_master_can_follow_invalid_master():
 
 
 def test_orchestrator_separates_source_and_render_selection():
-    text = Path(
-        "app/services/orchestrator.py"
-    ).read_text(
-        encoding="utf-8"
-    )
+    import ast
 
-    assert (
-        text.count(
-            "candidate_assets = _select_candidate_assets("
-        )
-        == 1
-    )
+    text = Path("app/services/orchestrator.py").read_text(encoding="utf-8")
+    tree = ast.parse(text)
+    functions = {node.name: node for node in tree.body
+                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
 
-    assert (
-        text.count(
-            "per_product = _select_render_assets("
-        )
-        == 2
-    )
+    # Source authority remains separate from approved render-master selection.
+    assert text.count("candidate_assets = _select_candidate_assets(") == 1
+    source_calls = [node for node in ast.walk(functions["_select_candidate_assets"])
+                    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)]
+    assert any(call.func.id == "select_source_assets" for call in source_calls)
 
-    assert (
-        text.count(
-            "candidate_assets = _select_render_assets("
-        )
-        == 2
-    )
+    for name in ("run_visuals_stage", "_render_additional_platform_variants"):
+        function = functions[name]
+        calls = [node for node in ast.walk(function) if isinstance(node, ast.Call)]
+        named = [call for call in calls if isinstance(call.func, ast.Name)]
+        # Resolve the persisted identity instead of reselecting a latest master
+        # or round-robin product at render time.
+        assert not any(call.func.id == "_select_render_assets" for call in named), name
+        selections = [node for node in ast.walk(function) if isinstance(node, ast.Assign)
+                      and any(isinstance(target, ast.Name) and target.id == "asset" for target in node.targets)]
+        assert selections, name
+        for selection in selections:
+            value = selection.value
+            assert isinstance(value, ast.Call) and isinstance(value.func, ast.Name), name
+            assert value.func.id == "validate_slide_provenance", name
+            assert [ast.unparse(arg) for arg in value.args] == ["db", "campaign", "slide"], name
+
+        inputs = [call for call in named if call.func.id == "SlideCreativeInput"]
+        assert len(inputs) == 1, name
+        keywords = {arg.arg: ast.unparse(arg.value) for arg in inputs[0].keywords}
+        assert keywords["source_image_path"] == "source_path", name
+        assert keywords["slide_plan"] == "slide", name
+        assert keywords["locked_product_composite"] == "locked_result", name
+        assert keywords["recreated_image"] == "recreated_image", name
+        source_assignments = [node for node in ast.walk(function) if isinstance(node, ast.Assign)
+                              and any(isinstance(target, ast.Name) and target.id == "source_path"
+                                      for target in node.targets)]
+        assert source_assignments, name
+        assert all(ast.unparse(node.value) == "Path(asset.absolute_path)" for node in source_assignments), name
+
+        # A path/role label alone cannot mint trust: the canonical approved asset
+        # and source lookup must reach the validating composite factory.
+        factories = [call for call in named if call.func.id == "build_trusted_product_composite"]
+        assert len(factories) == 1, name
+        factory_keywords = {arg.arg: ast.unparse(arg.value) for arg in factories[0].keywords}
+        assert factory_keywords["approved_asset"] == "asset", name
+        assert factory_keywords["source_lookup"] == "lambda key: db.get(Asset, key)", name
 
 
 def test_qa_keeps_canonical_source_authority():
