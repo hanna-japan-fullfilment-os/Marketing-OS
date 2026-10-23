@@ -7,6 +7,10 @@ here, per the brief's "model names live in configuration" rule.
 from __future__ import annotations
 
 import base64
+import math
+import hashlib
+import json
+from decimal import Decimal, ROUND_CEILING
 from pathlib import Path
 from typing import TypeVar
 
@@ -246,6 +250,60 @@ _HARD_BUDGET_INPUT_OVERHEAD_TOKENS = 12000
 _HARD_BUDGET_VISION_IMAGE_TOKENS = 20000
 _HARD_BUDGET_WEB_SEARCH_RESERVE_USD = 0.10
 
+# Versioned guard inputs, checked against official documentation on 2026-10-23.
+# Direct Images edits receive no cached-input discount. Rates alone are NOT
+# a billable-token maximum; Sunburst remains blocked until that is established.
+_ACCEPTANCE_PRICING = {
+    "version": "2026-10-23",
+    "text_source": "https://developers.openai.com/api/docs/models/gpt-5.1",
+    "image_source": "https://developers.openai.com/api/docs/models/gpt-image-2.5-sunburst",
+    "gpt-5.1": {"input": "1.25", "output": "10", "context": 400000},
+    "gpt-image-2.5-sunburst-2026-09-08": {
+        "text_input": "5", "image_input": "8", "image_output": "30",
+        "maximum_billable_tokens": None,
+    },
+}
+
+
+def _response_has_image(value) -> bool:
+    if isinstance(value, dict):
+        return value.get("type") == "input_image" or any(
+            _response_has_image(item) for item in value.values()
+        )
+    if isinstance(value, (list, tuple)):
+        return any(_response_has_image(item) for item in value)
+    return False
+
+
+def _acceptance_text_reservation(model: str) -> float:
+    # Reserve the entire documented context window rather than relying on a
+    # guessed vision-token count or omitting structured-output schema overhead.
+    pricing = _ACCEPTANCE_PRICING.get(model)
+    if model != "gpt-5.1" or not isinstance(pricing, dict):
+        raise HardBudgetExceededError("HARD_BUDGET_MISSING_PRICING: " + model)
+    try:
+        if (_ACCEPTANCE_PRICING.get("version") != "2026-10-23"
+                or _ACCEPTANCE_PRICING.get("text_source") != "https://developers.openai.com/api/docs/models/gpt-5.1"
+                or pricing.get("context") != 400000):
+            raise ValueError("missing or unsupported pricing authority/context")
+        input_rate = Decimal(pricing["input"])
+        output_rate = Decimal(pricing["output"])
+        if not all(rate.is_finite() and rate > 0 for rate in (input_rate, output_rate)):
+            raise ValueError("invalid rates")
+        amount = (Decimal(pricing["context"]) * input_rate
+                  + Decimal(_HARD_BUDGET_MAX_OUTPUT_TOKENS) * output_rate) / 1000000
+        return float(amount.quantize(Decimal("0.000001"), rounding=ROUND_CEILING))
+    except (KeyError, ValueError, ArithmeticError, TypeError) as exc:
+        raise HardBudgetExceededError("HARD_BUDGET_MISSING_PRICING: " + model) from exc
+
+
+def _sunburst_reservation() -> float:
+    raise HardBudgetExceededError(
+        "HARD_BUDGET_UNKNOWN_IMAGE_MAXIMUM: official Sunburst rates are known, "
+        "but a documented maximum billable token exposure for this Images "
+        "request is not established. No provider call was made."
+    )
+
 
 def _hard_budget_input_token_upper_bound(value) -> int:
     """Conservative upper bound used only for pre-call reservation.
@@ -390,10 +448,12 @@ class _HardBudgetLedger:
     def __init__(
         self,
         limit_usd: float | None,
+        *,
+        call_limits: dict[str, int] | None = None,
     ):
         if (
             limit_usd is not None
-            and limit_usd <= 0
+            and (not math.isfinite(limit_usd) or limit_usd <= 0)
         ):
             raise ValueError(
                 "hard_budget_usd must be > 0."
@@ -408,6 +468,23 @@ class _HardBudgetLedger:
         self.spent_usd = 0.0
         self.reserved_usd = 0.0
         self.blocked_call_count = 0
+        self.halted = False
+        self.call_limits = dict(call_limits) if call_limits is not None else None
+        self.call_counts = dict.fromkeys(("image", "text", "vision", "other"), 0)
+        if self.call_limits is not None:
+            if not self.enabled or set(self.call_limits) != set(self.call_counts):
+                raise ValueError("Acceptance requires a dollar ceiling and all four call-class limits.")
+            if any(type(n) is not int or n < 0 for n in self.call_limits.values()):
+                raise ValueError("Call limits must be nonnegative integers.")
+
+    def count_attempt(self, call_class: str) -> None:
+        if self.halted:
+            raise HardBudgetExceededError("HARD_BUDGET_HALTED: further calls prohibited.")
+        if call_class not in self.call_counts:
+            raise HardBudgetExceededError("HARD_BUDGET_UNKNOWN_CALL_CLASS")
+        if self.call_limits is not None and self.call_counts[call_class] >= self.call_limits[call_class]:
+            raise HardBudgetExceededError("HARD_CALL_CAP_PRECALL_BLOCK: " + call_class)
+        self.call_counts[call_class] += 1
 
     @property
     def enabled(self) -> bool:
@@ -421,23 +498,20 @@ class _HardBudgetLedger:
         *,
         operation: str,
     ) -> float:
-        amount = max(
-            0.0,
-            float(amount_usd),
-        )
+        amount = float(amount_usd)
+        if self.halted or not math.isfinite(amount) or amount <= 0:
+            raise HardBudgetExceededError("HARD_BUDGET_INVALID_RESERVATION_OR_HALTED")
+        amount = float(Decimal(str(amount)).quantize(Decimal("0.000001"), rounding=ROUND_CEILING))
 
         if not self.enabled:
             return amount
 
-        projected = (
-            self.spent_usd
-            + self.reserved_usd
-            + amount
-        )
+        projected = (Decimal(str(self.spent_usd)) + Decimal(str(self.reserved_usd))
+                     + Decimal(str(amount)))
 
         if (
             projected
-            > self.limit_usd + 1e-12
+            > Decimal(str(self.limit_usd))
         ):
             self.blocked_call_count += 1
 
@@ -498,19 +572,13 @@ class _HardBudgetLedger:
             reserved_usd
         )
 
-        actual = max(
-            0.0,
-            float(actual_usd),
-        )
-
-        self.release(
-            reserved
-        )
+        actual = float(actual_usd)
 
         if (
-            actual
+            not math.isfinite(actual) or actual < 0 or actual
             > reserved + 1e-9
         ):
+            self.halted = True
             raise HardBudgetExceededError(
                 "HARD_BUDGET_RESERVATION_BREACH: "
                 + operation
@@ -530,6 +598,7 @@ class _HardBudgetLedger:
             projected
             > self.limit_usd + 1e-9
         ):
+            self.halted = True
             raise HardBudgetExceededError(
                 "HARD_BUDGET_ACCOUNTING_BREACH: "
                 + operation
@@ -540,10 +609,9 @@ class _HardBudgetLedger:
                 + "."
             )
 
-        self.spent_usd = round(
-            projected,
-            6,
-        )
+        self.release(reserved)
+        self.spent_usd = float(Decimal(str(projected)).quantize(
+            Decimal("0.000001"), rounding=ROUND_CEILING))
 
     def snapshot(self) -> dict:
         remaining = None
@@ -560,6 +628,9 @@ class _HardBudgetLedger:
             )
 
         return {
+            "call_limits": self.call_limits,
+            "call_counts": dict(self.call_counts),
+            "halted": self.halted,
             "enabled": self.enabled,
             "limit_usd": self.limit_usd,
             "spent_usd": round(
@@ -610,6 +681,17 @@ class _BudgetedResponsesProxy:
             kwargs
         )
 
+        strict = self._ledger.call_limits is not None
+        if strict:
+            allowed = {"model", "input", "text_format", "max_output_tokens"}
+            if set(request_kwargs) - allowed:
+                raise HardBudgetExceededError("HARD_BUDGET_UNSUPPORTED_REQUEST_VARIANT")
+            output_limit = request_kwargs.get("max_output_tokens", _HARD_BUDGET_MAX_OUTPUT_TOKENS)
+            if type(output_limit) is not int or not 0 < output_limit <= _HARD_BUDGET_MAX_OUTPUT_TOKENS:
+                raise HardBudgetExceededError("HARD_BUDGET_OUTPUT_LIMIT_REQUIRED")
+        elif request_kwargs.get("max_output_tokens", _HARD_BUDGET_MAX_OUTPUT_TOKENS) > _HARD_BUDGET_MAX_OUTPUT_TOKENS:
+            raise HardBudgetExceededError("HARD_BUDGET_OUTPUT_LIMIT_REQUIRED")
+
         request_kwargs.setdefault(
             "max_output_tokens",
             _HARD_BUDGET_MAX_OUTPUT_TOKENS,
@@ -622,7 +704,7 @@ class _BudgetedResponsesProxy:
             )
         )
 
-        reserved = (
+        reserved = _acceptance_text_reservation(model) if strict else (
             _hard_budget_text_cost_upper_bound(
                 model=model,
                 request_kwargs=request_kwargs,
@@ -640,6 +722,12 @@ class _BudgetedResponsesProxy:
         )
 
         try:
+            self._ledger.count_attempt("vision" if _response_has_image(request_kwargs.get("input")) else "text")
+        except HardBudgetExceededError:
+            self._ledger.release(reservation)
+            raise
+
+        try:
             method = getattr(
                 self._target,
                 method_name,
@@ -649,10 +737,9 @@ class _BudgetedResponsesProxy:
                 **request_kwargs
             )
 
-        except Exception:
-            self._ledger.release(
-                reservation
-            )
+        except BaseException:
+            # A timeout/cancellation/error can still be billed. Retain the
+            # maximum reservation and consumed attempt, including on retries.
             raise
 
         try:
@@ -661,6 +748,9 @@ class _BudgetedResponsesProxy:
                 "usage",
                 None,
             )
+            if any(type(getattr(usage, key, None)) is not int or getattr(usage, key) < 0
+                   for key in ("input_tokens", "output_tokens")):
+                return response  # incomplete usage: keep the entire reservation
 
             actual_input_tokens = (
                 int(
@@ -696,11 +786,13 @@ class _BudgetedResponsesProxy:
                 )
             )
 
-            if actual <= 0:
-                raise HardBudgetExceededError(
-                    "HARD_BUDGET_UNPRICEABLE_TEXT_ACTUAL: "
-                    + model
-                )
+            if usage is None or actual <= 0:
+                return response  # retain maximum; missing usage never means free
+
+            if strict:
+                rates = _ACCEPTANCE_PRICING[model]
+                actual = float((Decimal(actual_input_tokens) * Decimal(rates["input"])
+                                + Decimal(actual_output_tokens) * Decimal(rates["output"])) / 1000000)
 
             tools = (
                 request_kwargs.get(
@@ -729,8 +821,7 @@ class _BudgetedResponsesProxy:
             )
 
         except Exception:
-            # commit() releases its reservation before
-            # raising on an accounting breach.
+            # A breach is sticky and its reservation remains encumbered.
             raise
 
         return response
@@ -757,6 +848,8 @@ class _BudgetedResponsesProxy:
         self,
         name,
     ):
+        if self._ledger.call_limits is not None:
+            raise HardBudgetExceededError("HARD_BUDGET_UNSUPPORTED_RESPONSES_METHOD: " + name)
         return getattr(
             self._target,
             name,
@@ -784,18 +877,6 @@ class _BudgetedImagesProxy:
             )
         )
 
-        if _is_gpt_image_2_5(
-            model
-        ):
-            method = getattr(
-                self._target,
-                method_name,
-            )
-
-            return await method(
-                **kwargs
-            )
-
         if not self._ledger.enabled:
             method = getattr(
                 self._target,
@@ -805,6 +886,14 @@ class _BudgetedImagesProxy:
             return await method(
                 **kwargs
             )
+
+        token_priced = _is_gpt_image_2_5(model)
+        if token_priced:
+            estimated = _sunburst_reservation()  # fails before invocation today
+        elif self._ledger.call_limits is not None:
+            # Legacy fixed-output estimates omit edit input charges. They are
+            # not a supported substitute for the configured Sunburst contract.
+            raise HardBudgetExceededError("HARD_BUDGET_UNSUPPORTED_IMAGE_PRICING: " + model)
 
         quality = str(
             kwargs.get(
@@ -822,7 +911,7 @@ class _BudgetedImagesProxy:
         )
 
         try:
-            estimated = float(
+            estimated = estimated if token_priced else float(
                 _image_usage_cost(
                     model,
                     quality,
@@ -855,6 +944,12 @@ class _BudgetedImagesProxy:
         )
 
         try:
+            self._ledger.count_attempt("image")
+        except HardBudgetExceededError:
+            self._ledger.release(reservation)
+            raise
+
+        try:
             method = getattr(
                 self._target,
                 method_name,
@@ -864,12 +959,26 @@ class _BudgetedImagesProxy:
                 **kwargs
             )
 
-        except Exception:
-            self._ledger.release(
-                reservation
-            )
-
+        except BaseException:
             raise
+
+        if token_priced:
+            # Do not infer token usage from dimensions or output byte length.
+            usage = getattr(response, "usage", None)
+            details = getattr(usage, "input_tokens_details", None)
+            counts = [getattr(details, "text_tokens", None),
+                      getattr(details, "image_tokens", None),
+                      getattr(usage, "output_tokens", None)]
+            if any(type(n) is not int or n < 0 for n in counts):
+                return response  # retain the full maximum reservation
+            rates = _ACCEPTANCE_PRICING.get(model)
+            if not rates:
+                self._ledger.halted = True
+                raise HardBudgetExceededError("HARD_BUDGET_MISSING_PRICING: " + model)
+            actual = sum(Decimal(n) * Decimal(rates[key]) for n, key in zip(
+                counts, ("text_input", "image_input", "image_output"))) / 1000000
+            self._ledger.commit(reservation, float(actual), operation="images." + method_name)
+            return response
 
         self._ledger.commit(
             reservation,
@@ -904,6 +1013,8 @@ class _BudgetedImagesProxy:
         self,
         name,
     ):
+        if self._ledger.call_limits is not None:
+            raise HardBudgetExceededError("HARD_BUDGET_UNSUPPORTED_IMAGES_METHOD: " + name)
         return getattr(
             self._target,
             name,
@@ -917,6 +1028,7 @@ class _BudgetedOpenAIClient:
         ledger: _HardBudgetLedger,
     ):
         self._target = target
+        self._ledger = ledger
         self.responses = (
             _BudgetedResponsesProxy(
                 target.responses,
@@ -934,10 +1046,194 @@ class _BudgetedOpenAIClient:
         self,
         name,
     ):
+        if self._ledger.call_limits is not None:
+            raise HardBudgetExceededError("HARD_BUDGET_UNSUPPORTED_SDK_RESOURCE: " + name)
         return getattr(
             self._target,
             name,
         )
+
+
+_BOUNDED_ACCEPTANCE_LIMITS = {"image": 6, "text": 10, "vision": 2, "other": 0}
+_SUNBURST_PAYLOAD_LIMITS = {
+    "prompt_bytes": 128000, "prompt_characters": 32000,
+    "reference_count": 1, "reference_file_bytes": 20 * 1024 * 1024,
+    "reference_width": 2048, "reference_height": 2048,
+    "reference_pixels": 2048 * 2048,
+}
+
+
+def _actual_bounded_cost(response, model: str, *, image: bool) -> float | None:
+    """Uncached Standard usage cost, never a pre-call price guarantee."""
+    rates = _ACCEPTANCE_PRICING.get(model)
+    if not isinstance(rates, dict):
+        raise HardBudgetExceededError("BOUNDED_MISSING_PRICING: " + model)
+    usage = getattr(response, "usage", None)
+    if image:
+        details = getattr(usage, "input_tokens_details", None)
+        counts = [getattr(details, "text_tokens", None), getattr(details, "image_tokens", None),
+                  getattr(usage, "output_tokens", None)]
+        keys = ("text_input", "image_input", "image_output")
+    else:
+        counts = [getattr(usage, "input_tokens", None), getattr(usage, "output_tokens", None)]
+        keys = ("input", "output")
+    if any(type(n) is not int or n < 0 for n in counts):
+        return None
+    try:
+        prices = [Decimal(rates[key]) for key in keys]
+        if any(not rate.is_finite() or rate <= 0 for rate in prices):
+            raise ValueError("invalid pricing")
+        return float(sum(Decimal(n) * rate for n, rate in zip(counts, prices)) / 1000000)
+    except (KeyError, ArithmeticError, ValueError) as exc:
+        raise HardBudgetExceededError("BOUNDED_MISSING_PRICING: " + model) from exc
+
+
+class _BoundedExposureLedger(_HardBudgetLedger):
+    """Provider-attempt exposure, deliberately NOT a hard USD budget."""
+
+    def __init__(self):
+        super().__init__(None)
+        self.call_limits = dict(_BOUNDED_ACCEPTANCE_LIMITS)
+        self.in_flight = False
+        self.entries: list[dict] = []
+
+    def begin(self, kind: str, request: dict) -> dict:
+        if self.in_flight:
+            raise HardBudgetExceededError("BOUNDED_CONCURRENT_CALL_REJECTED")
+        self.count_attempt(kind)
+        entry = {"class": kind, "status": "attempted", "actual_cost_usd": None,
+                 "request_sha256": hashlib.sha256(json.dumps(request, sort_keys=True, default=str).encode()).hexdigest()}
+        self.entries.append(entry)
+        self.in_flight = True
+        return entry
+
+    def snapshot(self) -> dict:
+        result = super().snapshot()
+        known = [entry["actual_cost_usd"] for entry in self.entries if entry["actual_cost_usd"] is not None]
+        result.update(bounded_exposure=True, exact_per_run_usd_ceiling=False,
+                      in_flight=self.in_flight, entries=[dict(entry) for entry in self.entries],
+                      actual_cost_usd=sum(known) if len(known) == len(self.entries) else None,
+                      known_actual_cost_usd=sum(known), actual_usage_complete=len(known) == len(self.entries),
+                      payload_limits=dict(_SUNBURST_PAYLOAD_LIMITS),
+                      sdk_retries=0, http_retries=0, max_concurrent_paid_calls=1)
+        return result
+
+
+def _bounded_image_request(method: str, kwargs: dict) -> dict:
+    allowed = {"model", "image", "prompt", "size", "quality", "n", "output_format", "partial_images", "stream"}
+    if method != "edit" or set(kwargs) - allowed:
+        raise HardBudgetExceededError("BOUNDED_IMAGE_EDIT_ONLY_NO_FALLBACK")
+    expected = {"model": "gpt-image-2.5-sunburst-2026-09-08", "size": "1088x1360", "quality": "xhigh"}
+    if any(kwargs.get(key) != value for key, value in expected.items()):
+        raise HardBudgetExceededError("BOUNDED_IMAGE_MODEL_SIZE_QUALITY_REQUIRED")
+    if (kwargs.get("n", 1) != 1 or kwargs.get("output_format", "png") != "png"
+            or kwargs.get("partial_images", 0) != 0 or kwargs.get("stream", False) is not False):
+        raise HardBudgetExceededError("BOUNDED_IMAGE_SINGLE_PNG_NO_STREAM")
+    prompt = kwargs.get("prompt")
+    limits = _SUNBURST_PAYLOAD_LIMITS
+    if (not isinstance(prompt, str) or not prompt or len(prompt) > limits["prompt_characters"]
+            or len(prompt.encode("utf-8")) > limits["prompt_bytes"]):
+        raise HardBudgetExceededError("BOUNDED_PROMPT_PAYLOAD_EXCEEDED")
+    images = kwargs.get("image")
+    if not isinstance(images, list) or len(images) != limits["reference_count"]:
+        raise HardBudgetExceededError("BOUNDED_REFERENCE_COUNT_EXCEEDED")
+    image_metadata = []
+    for stream in images:
+        # Only immutable local uploads already prepared by this adapter; no URL,
+        # file-id fetch, or external stream can hide unbounded input exposure.
+        if not isinstance(stream, io.BytesIO):
+            raise HardBudgetExceededError("BOUNDED_LOCAL_REFERENCE_REQUIRED")
+        raw = stream.getvalue()
+        if not raw or len(raw) > limits["reference_file_bytes"]:
+            raise HardBudgetExceededError("BOUNDED_REFERENCE_FILE_BYTES_EXCEEDED")
+        with Image.open(io.BytesIO(raw)) as image:
+            width, height = image.size
+            if (width > limits["reference_width"] or height > limits["reference_height"]
+                    or width * height > limits["reference_pixels"] or getattr(image, "n_frames", 1) != 1):
+                raise HardBudgetExceededError("BOUNDED_REFERENCE_PIXELS_EXCEEDED")
+        image_metadata.append({"sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw),
+                               "width": width, "height": height})
+    return {"prompt_bytes": len(prompt.encode("utf-8")), "prompt_characters": len(prompt),
+            "reference_images": image_metadata, **expected}
+
+
+class _BoundedAcceptanceResource:
+    def __init__(self, target, ledger, *, image=False):
+        self._target, self._ledger, self._image = target, ledger, image
+
+    async def _call(self, method, **kwargs):
+        model = kwargs.get("model", "")
+        if self._ledger.halted:
+            raise HardBudgetExceededError("BOUNDED_HALTED_NO_RETRY_OR_FALLBACK")
+        if self._image:
+            metadata = _bounded_image_request(method, kwargs)
+            # Validate all official rates BEFORE invocation, without pretending
+            # that those rates establish a maximum number of image tokens.
+            from types import SimpleNamespace
+            unit_usage = SimpleNamespace(input_tokens_details=SimpleNamespace(text_tokens=1, image_tokens=1), output_tokens=1)
+            _actual_bounded_cost(SimpleNamespace(usage=unit_usage), model, image=True)
+            kwargs = {**kwargs, "n": 1, "output_format": "png", "partial_images": 0, "stream": False}
+            kind = "image"
+        else:
+            if method not in {"parse", "create"} or set(kwargs) - {"model", "input", "text_format", "max_output_tokens"}:
+                raise HardBudgetExceededError("BOUNDED_UNSUPPORTED_RESPONSES_REQUEST")
+            _acceptance_text_reservation(model)  # validates official pricing/model
+            output = kwargs.get("max_output_tokens", _HARD_BUDGET_MAX_OUTPUT_TOKENS)
+            if type(output) is not int or not 0 < output <= _HARD_BUDGET_MAX_OUTPUT_TOKENS:
+                raise HardBudgetExceededError("BOUNDED_OUTPUT_TOKEN_LIMIT")
+            kwargs = {**kwargs, "max_output_tokens": output}
+            kind = "vision" if _response_has_image(kwargs.get("input")) else "text"
+            metadata = {"max_output_tokens": output}
+        entry = self._ledger.begin(kind, kwargs)
+        entry.update(metadata)
+        try:
+            response = await getattr(self._target, method)(**kwargs)
+            if self._image:
+                data = getattr(response, "data", None)
+                if not data or len(data) != 1 or not getattr(data[0], "b64_json", None):
+                    raise ValueError("Malformed single-image response")
+                base64.b64decode(data[0].b64_json, validate=True)
+            elif method == "parse" and getattr(response, "output_parsed", None) is None:
+                raise ValueError("Malformed structured response")
+            entry["actual_cost_usd"] = _actual_bounded_cost(response, model, image=self._image)
+            entry["status"] = "completed"
+            return response
+        except BaseException:
+            entry["status"] = "failed_or_incomplete"
+            self._ledger.halted = True  # no automatic retry/fallback after ANY failure
+            raise
+        finally:
+            self._ledger.in_flight = False
+
+    async def parse(self, **kwargs):
+        if self._image:
+            raise HardBudgetExceededError("BOUNDED_UNSUPPORTED_IMAGE_METHOD")
+        return await self._call("parse", **kwargs)
+
+    async def create(self, **kwargs):
+        if self._image:
+            raise HardBudgetExceededError("BOUNDED_UNSUPPORTED_IMAGE_METHOD")
+        return await self._call("create", **kwargs)
+
+    async def edit(self, **kwargs):
+        if not self._image:
+            raise HardBudgetExceededError("BOUNDED_UNSUPPORTED_RESPONSES_METHOD")
+        return await self._call("edit", **kwargs)
+
+    async def generate(self, **kwargs):
+        raise HardBudgetExceededError("BOUNDED_IMAGE_EDIT_ONLY_NO_FALLBACK")
+
+    def __getattr__(self, name):
+        raise HardBudgetExceededError("BOUNDED_UNSUPPORTED_SDK_METHOD: " + name)
+
+
+class _BoundedAcceptanceClient:
+    def __init__(self, target, ledger):
+        self.responses = _BoundedAcceptanceResource(target.responses, ledger)
+        self.images = _BoundedAcceptanceResource(target.images, ledger, image=True)
+
+    def __getattr__(self, name):
+        raise HardBudgetExceededError("BOUNDED_UNSUPPORTED_SDK_RESOURCE: " + name)
 
 
 class OpenAIProvider:
@@ -955,6 +1251,8 @@ class OpenAIProvider:
     drain_provider_usage_events` relies on.
     """
 
+    _bounded_acceptance = False
+
     def __init__(
         self,
         api_key: str | None = None,
@@ -963,12 +1261,24 @@ class OpenAIProvider:
         project_id: str | None = None,
         provider_hard_limit_attested: bool = False,
         max_image_calls: int | None = None,
+        acceptance_call_limits: dict[str, int] | None = None,
+        bounded_acceptance: bool = False,
     ):
+        if bounded_acceptance and (hard_budget_usd is not None or acceptance_call_limits not in (None, _BOUNDED_ACCEPTANCE_LIMITS)):
+            raise ValueError("Bounded exposure is not an exact USD ceiling; requires fixed 6/10/2/0 limits.")
+        self._bounded_acceptance = bounded_acceptance
+        if bounded_acceptance:
+            import httpx
+            bounded_http = httpx.AsyncClient(
+                transport=httpx.AsyncHTTPTransport(retries=0),
+                timeout=_OPENAI_REQUEST_TIMEOUT_SECONDS, follow_redirects=False, trust_env=False)
         raw_client = (
             AsyncOpenAI(
                 api_key=api_key,
                 timeout=_OPENAI_REQUEST_TIMEOUT_SECONDS,
                 max_retries=_OPENAI_MAX_RETRIES,
+                **({"project": project_id} if bounded_acceptance and project_id else {}),
+                **({"http_client": bounded_http} if bounded_acceptance else {}),
             )
             if api_key
             else None
@@ -985,8 +1295,9 @@ class OpenAIProvider:
         self._usage_events: list[dict] = []
 
         self._hard_budget_ledger = (
-            _HardBudgetLedger(
-                hard_budget_usd
+            _BoundedExposureLedger() if bounded_acceptance else _HardBudgetLedger(
+                hard_budget_usd,
+                call_limits=acceptance_call_limits,
             )
         )
 
@@ -1008,7 +1319,8 @@ class OpenAIProvider:
         self._image_calls_used = 0
 
         self._client = (
-            _BudgetedOpenAIClient(
+            _BoundedAcceptanceClient(raw_client, self._hard_budget_ledger)
+            if bounded_acceptance and raw_client is not None else _BudgetedOpenAIClient(
                 raw_client,
                 self._hard_budget_ledger,
             )
@@ -1050,6 +1362,10 @@ class OpenAIProvider:
             }
         )
 
+        if self._bounded_acceptance:
+            used = self._hard_budget_ledger.call_counts["image"]
+            snapshot.update(max_image_calls=6, image_calls_used=used, image_calls_remaining=max(0, 6-used))
+
         return snapshot
 
 
@@ -1073,12 +1389,19 @@ class OpenAIProvider:
             "estimated_cost_usd": _text_usage_cost(model, input_tokens, output_tokens),
             "budget_guard_adjustment_usd": float(budget_guard_adjustment_usd),
         })
+        if self._bounded_acceptance:
+            actual = _actual_bounded_cost(response, model, image=False)
+            self._usage_events[-1].update(actual_cost_usd=actual, cost_known=actual is not None,
+                                          estimated_cost_usd=actual if actual is not None else 0.0,
+                                          pricing_basis="official_standard_tokens; missing usage remains unknown")
 
     def _record_image_usage(
         self,
         model: str,
         quality: str,
         count: int = 1,
+        *,
+        response=None,
     ) -> None:
         cost_known = (
             not _is_gpt_image_2_5(
@@ -1112,6 +1435,14 @@ class OpenAIProvider:
                 ),
             }
         )
+        if self._bounded_acceptance and response is not None:
+            actual = _actual_bounded_cost(response, model, image=True)
+            usage = getattr(response, "usage", None)
+            self._usage_events[-1].update(actual_cost_usd=actual, cost_known=actual is not None,
+                                          input_tokens=getattr(usage, "input_tokens", 0) or 0,
+                                          output_tokens=getattr(usage, "output_tokens", 0) or 0,
+                                          estimated_cost_usd=actual if actual is not None else 0.0,
+                                          pricing_basis="official_standard_tokens; no guaranteed pre-call USD maximum")
 
     def _validate_gpt_image_2_5_call(
         self,
@@ -1121,6 +1452,11 @@ class OpenAIProvider:
         size: str | None,
         count: int = 1,
     ) -> None:
+        if self._bounded_acceptance:
+            if (model != "gpt-image-2.5-sunburst-2026-09-08" or quality != "xhigh"
+                    or size != "1088x1360" or count != 1):
+                raise HardBudgetExceededError("BOUNDED_IMAGE_MODEL_SIZE_QUALITY_REQUIRED")
+            return  # unified ledger checks immediately before the actual attempt
         if not _is_gpt_image_2_5(
             model
         ):
@@ -1580,6 +1916,16 @@ class OpenAIProvider:
         )
 
         if reference_images:
+            if self._bounded_acceptance:
+                if len(reference_images) != 1:
+                    raise HardBudgetExceededError("BOUNDED_REFERENCE_COUNT_EXCEEDED")
+                for path in reference_images:
+                    if Path(path).stat().st_size > _SUNBURST_PAYLOAD_LIMITS["reference_file_bytes"]:
+                        raise HardBudgetExceededError("BOUNDED_REFERENCE_FILE_BYTES_EXCEEDED")
+                    with Image.open(path) as source:
+                        w, h = source.size
+                        if w > 2048 or h > 2048 or w*h > 2048*2048:
+                            raise HardBudgetExceededError("BOUNDED_REFERENCE_PIXELS_EXCEEDED")
             opened = [
                 _openai_image_upload(
                     path
@@ -1622,6 +1968,7 @@ class OpenAIProvider:
             model,
             quality,
             count=1,
+            response=response,
         )
 
         return base64.b64decode(
@@ -1790,6 +2137,8 @@ def openai_provider_from_effective_settings(
     *,
     hard_budget_usd: float | None = None,
     max_image_calls_override: int | None = None,
+    acceptance_call_limits: dict[str, int] | None = None,
+    bounded_acceptance: bool = False,
 ) -> OpenAIProvider:
     """Create the canonical runtime OpenAI provider from effective settings.
 
@@ -1809,6 +2158,8 @@ def openai_provider_from_effective_settings(
             or None
         ),
         hard_budget_usd=hard_budget_usd,
+        acceptance_call_limits=acceptance_call_limits,
+        bounded_acceptance=bounded_acceptance,
         project_id=str(
             effective.get(
                 "openai_project_id"

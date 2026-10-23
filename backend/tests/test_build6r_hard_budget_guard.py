@@ -599,7 +599,8 @@ async def test_gpt_image_2_5_call_limit_is_enforced_on_real_provider_path(
 
     provider = provider_module.OpenAIProvider(
         "sk-fake",
-        hard_budget_usd=1.00,
+        # Exercise the independent historical counter; dollar-guarded
+        # Sunburst calls are now tested separately and must fail closed.
         project_id="proj_marketing_os",
         provider_hard_limit_attested=True,
         max_image_calls=1,
@@ -925,3 +926,477 @@ def test_live_runner_preserves_provider_precall_budget_guard():
         "hard_budget_usd=args.max_budget_usd"
         in text
     )
+
+
+LIMITS = {"image": 6, "text": 10, "vision": 2, "other": 0}
+SUNBURST = "gpt-image-2.5-sunburst-2026-09-08"
+
+
+@pytest.mark.parametrize("kind,maximum", [("image", 6), ("text", 10), ("vision", 2), ("other", 0)])
+def test_independent_attempt_caps(kind, maximum):
+    ledger = provider_module._HardBudgetLedger(10, call_limits=LIMITS)
+    for _ in range(maximum):
+        ledger.count_attempt(kind)
+    with pytest.raises(provider_module.HardBudgetExceededError, match="HARD_CALL_CAP_PRECALL_BLOCK"):
+        ledger.count_attempt(kind)
+    assert ledger.call_counts[kind] == maximum
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("vision,maximum", [(False, 10), (True, 2)])
+async def test_response_caps_on_actual_proxy_prevent_extra_invocation(vision, maximum):
+    ledger = provider_module._HardBudgetLedger(20, call_limits=LIMITS)
+    target = FakeResponses()
+    proxy = provider_module._BudgetedResponsesProxy(target, ledger)
+    content = [{"type": "input_image", "image_url": "data:image/png;base64,AA=="}] if vision else "text"
+    for _ in range(maximum):
+        await proxy.parse(model="gpt-5.1", input=[{"role": "user", "content": content}])
+    with pytest.raises(provider_module.HardBudgetExceededError, match="HARD_CALL_CAP_PRECALL_BLOCK"):
+        await proxy.create(model="gpt-5.1", input=[{"role": "user", "content": content}])
+    assert len(target.calls) == maximum
+    assert all(call[1]["max_output_tokens"] == 4096 for call in target.calls)
+    assert ledger.reserved_usd == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["generate", "edit"])
+async def test_sunburst_unknown_maximum_blocks_before_fake_sdk(method):
+    ledger = provider_module._HardBudgetLedger(10, call_limits=LIMITS)
+    target = FakeImages()
+    proxy = provider_module._BudgetedImagesProxy(target, ledger)
+    with pytest.raises(provider_module.HardBudgetExceededError, match="UNKNOWN_IMAGE_MAXIMUM"):
+        await getattr(proxy, method)(model=SUNBURST, prompt="fixture", size="1088x1360", quality="xhigh")
+    assert target.calls == []
+    assert ledger.reserved_usd == ledger.spent_usd == 0
+
+
+@pytest.mark.asyncio
+async def test_sunburst_no_longer_bypasses_non_strict_dollar_budget():
+    target = FakeImages()
+    proxy = provider_module._BudgetedImagesProxy(target, provider_module._HardBudgetLedger(0.000001))
+    with pytest.raises(provider_module.HardBudgetExceededError, match="UNKNOWN_IMAGE_MAXIMUM"):
+        await proxy.edit(model=SUNBURST)
+    assert target.calls == []
+
+
+@pytest.mark.asyncio
+async def test_unknown_and_missing_pricing_block_before_sdk(monkeypatch):
+    target = FakeResponses()
+    proxy = provider_module._BudgetedResponsesProxy(target, provider_module._HardBudgetLedger(10, call_limits=LIMITS))
+    with pytest.raises(provider_module.HardBudgetExceededError, match="MISSING_PRICING"):
+        await proxy.create(model="unknown", input="text")
+    monkeypatch.delitem(provider_module._ACCEPTANCE_PRICING, "gpt-5.1")
+    with pytest.raises(provider_module.HardBudgetExceededError, match="MISSING_PRICING"):
+        await proxy.create(model="gpt-5.1", input="text")
+    assert target.calls == []
+
+
+@pytest.mark.parametrize("rate", ["NaN", "Infinity", "0", "-1", "bad"])
+def test_invalid_versioned_pricing_rejected(monkeypatch, rate):
+    monkeypatch.setitem(provider_module._ACCEPTANCE_PRICING, "gpt-5.1", {"input": rate, "output": "10", "context": 400000})
+    with pytest.raises(provider_module.HardBudgetExceededError, match="MISSING_PRICING"):
+        provider_module._acceptance_text_reservation("gpt-5.1")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("result", ["failure", "missing", "partial"])
+async def test_failed_and_missing_usage_keep_full_reservation_and_attempt(result):
+    class Target:
+        calls = 0
+
+        async def create(self, **kwargs):
+            self.calls += 1
+            assert ledger.reserved_usd == provider_module._acceptance_text_reservation("gpt-5.1")
+            assert ledger.call_counts["text"] == 1
+            if result == "failure":
+                raise TimeoutError("fake timeout; potentially billed")
+            return SimpleNamespace(usage=None if result == "missing" else SimpleNamespace(input_tokens=1))
+
+    reservation = provider_module._acceptance_text_reservation("gpt-5.1")
+    ledger = provider_module._HardBudgetLedger(reservation, call_limits=LIMITS)
+    target = Target()
+    proxy = provider_module._BudgetedResponsesProxy(target, ledger)
+    if result == "failure":
+        with pytest.raises(TimeoutError):
+            await proxy.create(model="gpt-5.1", input="text")
+    else:
+        await proxy.create(model="gpt-5.1", input="text")
+    assert ledger.reserved_usd == reservation and ledger.spent_usd == 0
+    with pytest.raises(provider_module.HardBudgetExceededError, match="PRECALL_BLOCK"):
+        await proxy.create(model="gpt-5.1", input="retry")
+    assert target.calls == 1 and ledger.call_counts["text"] == 1
+
+
+@pytest.mark.asyncio
+async def test_application_retry_consumes_fresh_attempt_and_budget():
+    class Target:
+        calls = 0
+
+        async def create(self, **kwargs):
+            self.calls += 1
+            raise TimeoutError("fake")
+
+    ledger = provider_module._HardBudgetLedger(10, call_limits=LIMITS)
+    target = Target()
+    proxy = provider_module._BudgetedResponsesProxy(target, ledger)
+    for _ in range(10):
+        with pytest.raises(TimeoutError):
+            await proxy.create(model="gpt-5.1", input="retry")
+    with pytest.raises(provider_module.HardBudgetExceededError, match="HARD_CALL_CAP"):
+        await proxy.create(model="gpt-5.1", input="retry")
+    assert target.calls == ledger.call_counts["text"] == 10
+    assert ledger.reserved_usd == 10 * provider_module._acceptance_text_reservation("gpt-5.1")
+
+
+@pytest.mark.asyncio
+async def test_text_and_vision_share_budget_and_reconcile_actual_usage():
+    ledger = provider_module._HardBudgetLedger(1, call_limits=LIMITS)
+    proxy = provider_module._BudgetedResponsesProxy(FakeResponses(), ledger)
+    await proxy.parse(model="gpt-5.1", input="text")
+    await proxy.create(model="gpt-5.1", input=[{"type": "input_image", "image_url": "fake"}])
+    assert ledger.call_counts == {"image": 0, "text": 1, "vision": 1, "other": 0}
+    assert ledger.spent_usd >= 2 * (100 * 1.25 + 50 * 10) / 1000000
+    assert ledger.reserved_usd == 0
+
+
+def test_breach_is_sticky_and_retains_reservation():
+    ledger = provider_module._HardBudgetLedger(1, call_limits=LIMITS)
+    reservation = ledger.reserve(0.1, operation="fixture")
+    with pytest.raises(provider_module.HardBudgetExceededError, match="RESERVATION_BREACH"):
+        ledger.commit(reservation, 0.2, operation="fixture")
+    assert ledger.halted and ledger.reserved_usd == 0.1
+    with pytest.raises(provider_module.HardBudgetExceededError):
+        ledger.reserve(0.1, operation="cannot resume")
+
+
+@pytest.mark.parametrize("limit", [float("nan"), float("inf"), 0, -1])
+def test_invalid_budget_rejected(limit):
+    with pytest.raises(ValueError):
+        provider_module._HardBudgetLedger(limit, call_limits=LIMITS)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("options", [{"max_output_tokens": 4097}, {"tools": [{"type": "web_search"}]},
+                                         {"stream": True}, {"extra_body": {"model": "unknown"}},
+                                         {"previous_response_id": "old"}])
+async def test_unaccounted_request_variants_rejected(options):
+    target = FakeResponses()
+    proxy = provider_module._BudgetedResponsesProxy(target, provider_module._HardBudgetLedger(10, call_limits=LIMITS))
+    with pytest.raises(provider_module.HardBudgetExceededError):
+        await proxy.create(model="gpt-5.1", input="text", **options)
+    assert target.calls == []
+
+
+def test_guarded_sdk_public_paths_cannot_escape():
+    client = provider_module._BudgetedOpenAIClient(FakeClient(), provider_module._HardBudgetLedger(10, call_limits=LIMITS))
+    for obj, name in [(client, "chat"), (client, "with_options"), (client.responses, "with_raw_response"),
+                      (client.images, "with_streaming_response"), (client.images, "create_variation")]:
+        with pytest.raises(provider_module.HardBudgetExceededError, match="UNSUPPORTED"):
+            getattr(obj, name)
+
+
+@pytest.mark.asyncio
+async def test_prepared_control_path_blocks_before_either_stage(monkeypatch):
+    from scripts import run_live_acceptance as runner
+
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("No stage, database write, renderer or provider may start")
+
+    monkeypatch.setattr(runner, "run_visuals_stage", forbidden)
+    monkeypatch.setattr(runner, "run_qa_stage", forbidden)
+    provider = provider_module.OpenAIProvider(None, hard_budget_usd=10, acceptance_call_limits=LIMITS)
+    config = SimpleNamespace(qa_max_retries=0, qa_best_of_n=1, recreate_with_ai=False,
+                             use_masked_scene_edit=False, detect_product_zone=False, hero_only=False,
+                             use_ai_background=True, require_ai_background_success=True,
+                             enable_qa_stage=True, quality_mode="premium")
+    with pytest.raises(provider_module.HardBudgetExceededError, match="UNKNOWN_IMAGE_MAXIMUM"):
+        await runner.run_prepared_acceptance(None, campaign_id="prepared", config=config, renderer=None, provider=provider)
+    assert provider.hard_budget_snapshot()["call_counts"] == dict.fromkeys(LIMITS, 0)
+
+
+def test_actual_runtime_cost_calculation_refuses_fabricated_image_ceiling():
+    from scripts import run_live_acceptance as runner
+
+    with pytest.raises(provider_module.HardBudgetExceededError, match="UNKNOWN_IMAGE_MAXIMUM"):
+        runner.prepared_acceptance_reserved_costs()
+
+
+@pytest.mark.asyncio
+async def test_synthetic_maximum_exercises_image_edit_ledger_and_seventh_call(monkeypatch):
+    # Synthetic reservation tests accounting mechanics only. It is NOT a
+    # Sunburst pricing assertion and cannot authorize or unblock a live run.
+    monkeypatch.setattr(provider_module, "_sunburst_reservation", lambda: 0.2)
+    ledger = provider_module._HardBudgetLedger(10, call_limits=LIMITS)
+
+    class Images(FakeImages):
+        async def edit(self, **kwargs):
+            assert ledger.reserved_usd >= 0.2
+            assert ledger.call_counts["image"] == len(self.calls) + 1
+            return await super().edit(**kwargs)
+
+    target = Images()
+    images = provider_module._BudgetedImagesProxy(target, ledger)
+    responses = provider_module._BudgetedResponsesProxy(FakeResponses(), ledger)
+    await responses.create(model="gpt-5.1", input="text")
+    await responses.create(model="gpt-5.1", input=[{"type": "input_image", "image_url": "fake"}])
+    for _ in range(6):
+        await images.edit(model=SUNBURST, prompt="fake", size="1088x1360", quality="xhigh")
+    with pytest.raises(provider_module.HardBudgetExceededError, match="HARD_CALL_CAP"):
+        await images.edit(model=SUNBURST)
+    assert len(target.calls) == 6
+    assert ledger.reserved_usd == 1.2  # missing usage retains all six maxima
+    assert ledger.spent_usd > 0  # text and vision share this same ledger
+
+
+@pytest.mark.asyncio
+async def test_synthetic_image_usage_reconciliation(monkeypatch):
+    monkeypatch.setattr(provider_module, "_sunburst_reservation", lambda: 0.2)
+    ledger = provider_module._HardBudgetLedger(1, call_limits=LIMITS)
+
+    class Images:
+        async def edit(self, **kwargs):
+            return SimpleNamespace(usage=SimpleNamespace(
+                input_tokens_details=SimpleNamespace(text_tokens=100, image_tokens=200), output_tokens=1000))
+
+    proxy = provider_module._BudgetedImagesProxy(Images(), ledger)
+    await proxy.edit(model=SUNBURST)
+    assert ledger.reserved_usd == 0
+    assert ledger.spent_usd == 0.0321  # (100*5 + 200*8 + 1000*30)/1e6
+
+
+def _bounded_upload(width=8, height=8):
+    import io
+    from PIL import Image
+    stream = io.BytesIO()
+    Image.new("RGB", (width, height)).save(stream, format="PNG")
+    stream.name = "fixture.png"
+    return stream
+
+
+def _bounded_image_kwargs(**overrides):
+    return dict(model=SUNBURST, prompt="Immutable prepared visual direction", size="1088x1360",
+                quality="xhigh", image=[_bounded_upload()], **overrides)
+
+
+@pytest.mark.asyncio
+async def test_bounded_successful_exposure_schedule_and_independent_extra_attempts():
+    ledger = provider_module._BoundedExposureLedger()
+    raw = FakeClient()
+    client = provider_module._BoundedAcceptanceClient(raw, ledger)
+    for _ in range(10):
+        await client.responses.parse(model="gpt-5.1", input="prepared")
+    for _ in range(2):
+        await client.responses.parse(model="gpt-5.1", input=[{"type": "input_image", "image_url": "fake"}])
+    for _ in range(6):
+        await client.images.edit(**_bounded_image_kwargs())
+    for kwargs, call in [(_bounded_image_kwargs(), client.images.edit),
+                         ({"model": "gpt-5.1", "input": "text"}, client.responses.parse),
+                         ({"model": "gpt-5.1", "input": [{"type": "input_image"}]}, client.responses.parse)]:
+        with pytest.raises(provider_module.HardBudgetExceededError, match="HARD_CALL_CAP"):
+            await call(**kwargs)
+    assert ledger.call_counts == LIMITS
+    assert len(raw.images.calls) == 6 and len(raw.responses.calls) == 12
+    assert ledger.snapshot()["actual_cost_usd"] is None  # fake images omit usage
+    assert ledger.snapshot()["exact_per_run_usd_ceiling"] is False
+    assert all(kwargs["partial_images"] == 0 and kwargs["n"] == 1 and kwargs["output_format"] == "png"
+               for _, kwargs in raw.images.calls)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["image", "text", "vision"])
+async def test_bounded_failed_attempt_halts_retry_and_fallback(kind):
+    class Failure:
+        calls = 0
+        async def parse(self, **kwargs):
+            self.calls += 1
+            raise TimeoutError("fake potentially billed request")
+        edit = parse
+    target = Failure()
+    ledger = provider_module._BoundedExposureLedger()
+    proxy = provider_module._BoundedAcceptanceResource(target, ledger, image=kind == "image")
+    kwargs = _bounded_image_kwargs() if kind == "image" else dict(
+        model="gpt-5.1", input=[{"type": "input_image"}] if kind == "vision" else "text")
+    method = proxy.edit if kind == "image" else proxy.parse
+    with pytest.raises(TimeoutError):
+        await method(**kwargs)
+    with pytest.raises(provider_module.HardBudgetExceededError, match="HALTED_NO_RETRY_OR_FALLBACK"):
+        await method(**kwargs)
+    assert target.calls == ledger.call_counts[kind] == 1
+    assert ledger.snapshot()["actual_cost_usd"] is None
+
+
+@pytest.mark.asyncio
+async def test_bounded_rejects_concurrent_request_before_invocation():
+    class Pause:
+        def __await__(self):
+            yield "fake-in-flight"
+    class Responses:
+        calls = 0
+        async def parse(self, **kwargs):
+            self.calls += 1
+            await Pause()
+    target = Responses()
+    ledger = provider_module._BoundedExposureLedger()
+    proxy = provider_module._BoundedAcceptanceResource(target, ledger)
+    pending = proxy.parse(model="gpt-5.1", input="first")
+    assert pending.send(None) == "fake-in-flight"
+    try:
+        with pytest.raises(provider_module.HardBudgetExceededError, match="CONCURRENT"):
+            await proxy.parse(model="gpt-5.1", input="second")
+        assert target.calls == ledger.call_counts["text"] == 1
+    finally:
+        pending.close()
+    assert ledger.halted and not ledger.in_flight
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("override", [{"size": "auto"}, {"quality": "auto"}, {"n": 2},
+                                         {"partial_images": 1}, {"stream": True},
+                                         {"output_format": "jpeg"}, {"model": "fallback-model"},
+                                         {"input_fidelity": "high"}, {"extra_body": {"n": 10}},
+                                         {"prompt": "x"*32001}, {"prompt": "\ud800"}])
+async def test_bounded_rejects_cost_affecting_image_variants(override):
+    raw = FakeImages()
+    ledger = provider_module._BoundedExposureLedger()
+    proxy = provider_module._BoundedAcceptanceResource(raw, ledger, image=True)
+    kwargs = _bounded_image_kwargs(); kwargs.update(override)
+    with pytest.raises((provider_module.HardBudgetExceededError, UnicodeError)):
+        await proxy.edit(**kwargs)
+    assert raw.calls == [] and ledger.call_counts["image"] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("images", [[], [_bounded_upload(), _bounded_upload()], [_bounded_upload(2049, 1)]])
+async def test_bounded_rejects_reference_count_or_dimensions(images):
+    raw = FakeImages(); ledger = provider_module._BoundedExposureLedger()
+    proxy = provider_module._BoundedAcceptanceResource(raw, ledger, image=True)
+    kwargs = _bounded_image_kwargs(); kwargs["image"] = images
+    with pytest.raises(provider_module.HardBudgetExceededError):
+        await proxy.edit(**kwargs)
+    assert not raw.calls
+
+
+@pytest.mark.asyncio
+async def test_bounded_rejects_reference_file_bytes(monkeypatch):
+    monkeypatch.setitem(provider_module._SUNBURST_PAYLOAD_LIMITS, "reference_file_bytes", 1)
+    raw = FakeImages(); ledger = provider_module._BoundedExposureLedger()
+    with pytest.raises(provider_module.HardBudgetExceededError, match="FILE_BYTES"):
+        await provider_module._BoundedAcceptanceResource(raw, ledger, image=True).edit(**_bounded_image_kwargs())
+    assert not raw.calls
+
+
+@pytest.mark.asyncio
+async def test_bounded_unknown_pricing_and_unknown_paid_class_rejected(monkeypatch):
+    raw = FakeImages(); ledger = provider_module._BoundedExposureLedger()
+    with pytest.raises(provider_module.HardBudgetExceededError, match="UNKNOWN_CALL_CLASS"):
+        ledger.begin("unclassified", {})
+    monkeypatch.delitem(provider_module._ACCEPTANCE_PRICING, SUNBURST)
+    with pytest.raises(provider_module.HardBudgetExceededError, match="MISSING_PRICING"):
+        await provider_module._BoundedAcceptanceResource(raw, ledger, image=True).edit(**_bounded_image_kwargs())
+    assert not raw.calls
+
+
+@pytest.mark.asyncio
+async def test_bounded_image_actual_cost_uses_official_token_rates():
+    class Images:
+        async def edit(self, **kwargs):
+            return SimpleNamespace(data=[SimpleNamespace(b64_json="AA==")], usage=SimpleNamespace(
+                input_tokens=300, input_tokens_details=SimpleNamespace(text_tokens=100, image_tokens=200), output_tokens=1000))
+    ledger = provider_module._BoundedExposureLedger()
+    await provider_module._BoundedAcceptanceResource(Images(), ledger, image=True).edit(**_bounded_image_kwargs())
+    assert ledger.snapshot()["actual_cost_usd"] == 0.0321
+
+
+@pytest.mark.asyncio
+async def test_bounded_malformed_response_consumes_attempt():
+    class Target:
+        async def parse(self, **kwargs):return SimpleNamespace(output_parsed=None)
+    ledger = provider_module._BoundedExposureLedger()
+    with pytest.raises(ValueError, match="Malformed"):
+        await provider_module._BoundedAcceptanceResource(Target(), ledger).parse(model="gpt-5.1", input="text")
+    assert ledger.halted and ledger.call_counts["text"] == 1
+
+
+def test_bounded_provider_uses_shared_wrapper_no_usd_guarantee_and_zero_sdk_retries(monkeypatch):
+    captured = {}
+    def factory(**kwargs):
+        captured.update(kwargs)
+        return FakeClient()
+    monkeypatch.setattr(provider_module, "AsyncOpenAI", factory)
+    provider = provider_module.OpenAIProvider("sk-fake", bounded_acceptance=True)
+    assert isinstance(provider._require_client(), provider_module._BoundedAcceptanceClient)
+    assert provider.hard_budget_snapshot()["bounded_exposure"] is True
+    assert captured["max_retries"] == 0 and captured["timeout"] == 180
+    assert captured["http_client"].follow_redirects is False
+    assert provider._client.images._ledger is provider._client.responses._ledger
+    with pytest.raises(ValueError, match="not an exact USD"):
+        provider_module.OpenAIProvider(None, bounded_acceptance=True, hard_budget_usd=1)
+
+
+@pytest.mark.asyncio
+async def test_project_backstop_optional_read_only_and_not_exact_cap():
+    from scripts import run_live_acceptance as runner
+    absent = await runner.verify_project_spend_backstop("proj_fake")
+    assert absent["readable"] is False and absent["enforced"] is False
+    calls = []
+    async def read_only_get(path, **kwargs):
+        calls.append((path, kwargs))
+        return dict(object="project.spend_limit", threshold_amount=1000, currency="USD",
+                    interval="month", enforcement={"status": "enforcing"})
+    result = await runner.verify_project_spend_backstop("proj_fake", read_only_get=read_only_get)
+    assert result["limit_usd"] == 10 and result["enforced"] is True
+    assert result["exact_per_run_cap"] is False
+    assert calls == [("/organization/projects/proj_fake/spend_limit", {"timeout": 15, "retries": 0})]
+
+
+@pytest.mark.parametrize("cta", ["", "Saiba mais"])
+def test_explicit_slide_cta_is_preserved_without_campaign_substitution(cta):
+    from app.schemas.ai import SlidePlan
+    from app.services.orchestrator import _resolve_slide_cta
+    plan = SlidePlan(slide_number=1, purpose="hero", headline="Prepared", visual_brief="Prepared", cta=cta)
+    assert "cta" in plan.model_fields_set
+    assert _resolve_slide_cta(plan, "Campaign CTA") == cta
+    assert plan.cta == cta  # resolution must not mutate the approved plan
+
+
+def test_unset_legacy_cta_still_uses_campaign_fallback():
+    from app.schemas.ai import SlidePlan
+    from app.services.orchestrator import _resolve_slide_cta
+    plan = SlidePlan(slide_number=1, purpose="hero", headline="Legacy", visual_brief="Legacy")
+    assert "cta" not in plan.model_fields_set
+    assert _resolve_slide_cta(plan, "Campaign CTA") == "Campaign CTA"
+    assert _resolve_slide_cta(SimpleNamespace(), "Campaign CTA") == "Campaign CTA"
+    assert _resolve_slide_cta(SimpleNamespace(cta=None), "Campaign CTA") == "Campaign CTA"
+    assert _resolve_slide_cta(SimpleNamespace(cta=""), "Campaign CTA") == ""
+
+
+def test_provenance_plan_owns_default_cta_and_typed_null_remains_invalid():
+    from app.schemas.ai import SlidePlan
+    from app.services.orchestrator import _resolve_slide_cta
+    from pydantic import ValidationError
+    fields = dict(slide_number=1, purpose="hero", headline="Prepared", visual_brief="Prepared")
+    plan = SlidePlan(**fields, slide_id="prepared:1")
+    assert _resolve_slide_cta(plan, "Campaign CTA") == ""
+    with pytest.raises(ValidationError):
+        SlidePlan(**fields, cta=None)
+
+
+def test_renderer_still_rejects_genuine_cta_substitution(tmp_path):
+    import hashlib
+    from PIL import Image
+    from app.schemas.ai import SlidePlan, SlideAssetReference
+    from app.services.orchestrator import _resolve_slide_cta
+    from app.services.creative.pipeline import SlideCreativeInput, validate_render_slide_contract
+    source = tmp_path / "source.png"
+    Image.new("RGB", (8, 8)).save(source)
+    asset = SlideAssetReference(asset_id="source", role="product", path=str(source),
+                                sha256=hashlib.sha256(source.read_bytes()).hexdigest())
+    plan = SlidePlan(slide_number=1, purpose="hero", headline="", visual_brief="Prepared", cta="",
+                     slide_id="prepared:1", product_asset=asset, selection_rationale="Prepared source")
+    creative = SlideCreativeInput(source_image_path=source, slide_plan=plan,
+                                   template_id="feature_showcase", platform_key="instagram_square",
+                                   headline="", body="", cta=_resolve_slide_cta(plan, "Campaign CTA"))
+    validate_render_slide_contract(creative)
+    creative.cta = "Campaign CTA"
+    with pytest.raises(ValueError, match="Slide copy substitution: cta"):
+        validate_render_slide_contract(creative)

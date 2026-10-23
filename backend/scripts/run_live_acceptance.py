@@ -106,7 +106,10 @@ from app.data.platform_creative_specs import (  # noqa: E402
     default_content_type_for_platform, resolve_platform_creative_spec,
 )
 from app.models import Brand, Campaign, PlatformCampaignVariant, Product, VerifiedProductFact  # noqa: E402
-from app.services.ai.openai_provider import HardBudgetExceededError, OpenAIProvider, openai_provider_from_effective_settings  # noqa: E402
+from app.services.ai.openai_provider import (  # noqa: E402
+    HardBudgetExceededError, OpenAIProvider, openai_provider_from_effective_settings,
+    _acceptance_text_reservation, _sunburst_reservation,
+)
 from app.services.benchmark_engine import build_creative_system_snapshot  # noqa: E402
 from app.services.creative.renderer import PlaywrightRenderer  # noqa: E402
 from app.services.orchestrator import get_platform_campaign_variants, run_copy_stage, run_strategy_stage, \
@@ -137,6 +140,96 @@ _ESTIMATED_STATIC_CASE_USD = 1.35
 _ESTIMATED_SCRIPT_ONLY_CASE_USD = 0.20
 
 _VERDICT_SEVERITY = {"PASS": 0, "NEEDS_REVIEW": 1, "INCOMPLETE_BUDGET_CEILING": 2, "FAIL": 3}
+
+PREPARED_ACCEPTANCE_CALL_LIMITS = {"image": 6, "text": 10, "vision": 2, "other": 0}
+
+
+def prepared_acceptance_reserved_costs() -> dict:
+    """Same reservation code as the provider; never substitute an estimate.
+
+    Currently raises before any paid work: Sunburst's maximum billable exposure
+    is unresolved. A missing maximum is not a zero-dollar maximum.
+    """
+    image = _sunburst_reservation()
+    text = _acceptance_text_reservation("gpt-5.1")
+    return {"image": 6 * image, "text": 10 * text, "vision": 2 * text,
+            "other": 0.0, "total": 6 * image + 12 * text}
+
+
+async def run_prepared_acceptance(session, *, campaign_id, config, renderer, provider):
+    """Guard the existing prepared Visuals -> QA path; never rerun copy/planning.
+
+    This callable is NOT live authorization. Bounded exposure is explicitly
+    distinct from the older exact-dollar mode, which still rejects Sunburst.
+    """
+    snapshot = provider.hard_budget_snapshot()
+    bounded = snapshot.get("bounded_exposure", False)
+    if (not (snapshot["enabled"] or bounded)
+            or snapshot["call_limits"] != PREPARED_ACCEPTANCE_CALL_LIMITS
+            or any(snapshot["call_counts"].values())
+            or snapshot["spent_usd"] or snapshot["reserved_usd"]
+            or snapshot["halted"]):
+        raise HardBudgetExceededError("PREPARED_ACCEPTANCE_REQUIRES_FRESH_SHARED_GUARD")
+    if (config.qa_max_retries != 0 or config.qa_best_of_n != 1
+            or config.recreate_with_ai or config.use_masked_scene_edit
+            or config.detect_product_zone or config.hero_only
+            or not config.use_ai_background or not config.require_ai_background_success
+            or not config.enable_qa_stage or config.quality_mode != "premium"):
+        raise HardBudgetExceededError("PREPARED_ACCEPTANCE_UNSUPPORTED_POLICY")
+    if not bounded:
+        costs = prepared_acceptance_reserved_costs()
+        if costs["total"] > snapshot["remaining_usd"]:
+            raise HardBudgetExceededError("PREPARED_ACCEPTANCE_INSUFFICIENT_TOTAL_BUDGET")
+    else:
+        from app.schemas.ai import SlidePlan
+        from app.services.orchestrator import _load_stage_json, _stage_language_variant, validate_slide_provenance
+        campaign = session.get(Campaign, campaign_id)
+        if (campaign is None or campaign.target_slide_count != 6
+                or list(campaign.target_platforms) != ["instagram"]
+                or list(campaign.languages) != ["pt-BR"]):
+            raise HardBudgetExceededError("PREPARED_ACCEPTANCE_REQUIRES_EXACT_SIX_SLIDE_SCOPE")
+        creative = _stage_language_variant(_load_stage_json(session, campaign_id, "creative"), "pt-BR")
+        plans = [SlidePlan.model_validate(s) for s in creative["carousel_plan"]["slides"]]
+        if len(plans) != 6:
+            raise HardBudgetExceededError("PREPARED_ACCEPTANCE_REQUIRES_SIX_FROZEN_PLANS")
+        for plan in plans:
+            validate_slide_provenance(session, campaign, plan)
+    await run_visuals_stage(session, campaign_id=campaign_id, renderer=renderer,
+                            config=config, image_provider=provider, ai_provider=provider)
+    if provider.hard_budget_snapshot()["halted"]:
+        raise HardBudgetExceededError("PREPARED_ACCEPTANCE_HALTED_AFTER_VISUALS")
+    result = await run_qa_stage(session, campaign_id=campaign_id, renderer=renderer,
+                                config=config, image_provider=provider, ai_provider=provider)
+    if provider.hard_budget_snapshot()["halted"]:
+        raise HardBudgetExceededError("PREPARED_ACCEPTANCE_HALTED_AFTER_QA")
+    return result
+
+
+async def verify_project_spend_backstop(project_id, *, read_only_get=None) -> dict:
+    """Optional Admin GET adapter; never create/update limits or assume access.
+
+    No Admin credential is looked up or requested. The operator may explicitly
+    supply an authorized read-only GET adapter; absence is reported honestly.
+    Documentation: /organization/projects/{project_id}/spend_limit. Enforcement
+    propagation is delayed, so this is never an exact per-run dollar cap.
+    """
+    import re
+    result = {"project_id_resolved": bool(project_id), "readable": False,
+              "limit_usd": None, "enforced": False, "exact_per_run_cap": False}
+    if read_only_get is None or not re.fullmatch(r"proj_[A-Za-z0-9_-]+", project_id or ""):
+        return result
+    try:
+        data = await read_only_get(f"/organization/projects/{project_id}/spend_limit", timeout=15, retries=0)
+        amount = data.get("threshold_amount")
+        if (data.get("object") != "project.spend_limit" or data.get("currency") != "USD"
+                or data.get("interval") != "month" or type(amount) not in (int, float)
+                or not __import__("math").isfinite(amount) or amount < 0):
+            return result
+        result.update(readable=True, limit_usd=amount/100,
+                      enforced=data.get("enforcement", {}).get("status") == "enforcing")
+    except Exception:
+        pass  # unavailable credentials/access remain unverified, never attested
+    return result
 
 
 def _combine_verdict(current: str, new: str) -> str:
@@ -689,13 +782,15 @@ async def main() -> int:
     parser.add_argument("--brand-slug", required=True)
     parser.add_argument("--product-slug", default=None)
     parser.add_argument("--quality-mode", default="standard", choices=["draft", "standard", "premium"])
+    parser.add_argument("--prepared-campaign-id", default=None,
+                        help="Use existing frozen six-slide inputs; never create/copy-plan a campaign.")
+    parser.add_argument("--bounded-exposure", action="store_true",
+                        help="Explicit 6 image / 10 text / 2 vision sequential attempt policy; NOT a guaranteed USD ceiling.")
     parser.add_argument(
         "--max-budget-usd", type=float, default=None,
         help=(
-            "Local USD ceiling for usage the application can price before a call. "
-            "GPT Image 2.5 image spend may be unpriced locally and is therefore protected "
-            "separately by the provider-project hard limit and explicit image-call ceiling. "
-            "Between platform groups, this runner stops if local dollar accounting becomes incomplete."
+            "Required pre-call USD ceiling. Unknown maximum billable exposure "
+            "is rejected before a paid request, including GPT Image 2.5 requests."
         ),
     )
     parser.add_argument(
@@ -798,6 +893,41 @@ async def main() -> int:
         print("LIVE_NETWORK_TEST_RUN=NO (--estimate-only: no API call was made)")
         return 0
 
+    if args.bounded_exposure or args.prepared_campaign_id:
+        if (not args.bounded_exposure or not args.prepared_campaign_id
+                or args.max_budget_usd is not None or args.quality_mode != "premium"
+                or args.smoke or args.premium_hero_only):
+            parser.error("Prepared bounded exposure requires both flags, premium quality, no exact-dollar ceiling, and no hero/smoke mode.")
+        # No init_db: no automatic schema changes in the prepared entrypoint.
+        session = db_module.SessionLocal()
+        try:
+            effective = get_effective_settings(session)
+            if not effective.get("openai_api_key"):
+                raise HardBudgetExceededError("PREPARED_ACCEPTANCE_API_KEY_NOT_CONFIGURED")
+            provider = openai_provider_from_effective_settings(
+                effective, bounded_acceptance=True, max_image_calls_override=6)
+            config = _build_autopilot_config(
+                effective, effective.get("output_root", "./data/output"),
+                use_ai_background=True, recreate_with_ai=False, detect_product_zone=False,
+                quality_mode="premium", render_platform_variants=True, enable_qa_stage=True,
+                qa_max_retries=0, qa_best_of_n=1)
+            config.max_slides = 6
+            config.require_ai_background_success = True
+            await run_prepared_acceptance(session, campaign_id=args.prepared_campaign_id,
+                                           config=config, renderer=PlaywrightRenderer(), provider=provider)
+            print(json.dumps({"bounded_exposure": provider.hard_budget_snapshot(),
+                              "live_acceptance_pass_claimed": False}, indent=2))
+            return 0
+        finally:
+            session.close()
+
+    if args.max_budget_usd is None:
+        parser.error("Live acceptance requires --max-budget-usd; no spending is authorized implicitly.")
+    # Run before init_db/session creation: even startup migrations must not run
+    # for an acceptance whose image cost ceiling cannot be proven.
+    if args.quality_mode in {"premium", "draft"}:
+        _sunburst_reservation()
+
     db_module.init_db()
     session = db_module.SessionLocal()
     brand, product = _find_product(session, brand_slug=args.brand_slug, product_slug=args.product_slug)
@@ -811,6 +941,7 @@ async def main() -> int:
     provider = openai_provider_from_effective_settings(
         effective,
         hard_budget_usd=args.max_budget_usd,
+        acceptance_call_limits=PREPARED_ACCEPTANCE_CALL_LIMITS,
         # Build 6R governed premium acceptance: one paid hero
         # authorizes at most one image-generation provider call,
         # regardless of the broader environment default.

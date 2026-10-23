@@ -1679,6 +1679,22 @@ def _save_stage_json(
     return path
 
 
+def _resolve_slide_cta(slide, campaign_cta: str) -> str:
+    """Keep intentional no-CTA copy; fallback only for an unset legacy field.
+
+    Current provenance-bearing plans also own their schema default: the renderer
+    compares against that exact contract. Legacy typed plans retain Pydantic's
+    omitted-field metadata, while older objects may omit the attribute/use None.
+    Typed SlidePlan itself rejects None.
+    """
+    if isinstance(slide, SlidePlan):
+        if "cta" in slide.model_fields_set or slide.slide_id:
+            return slide.cta
+        return campaign_cta
+    cta = getattr(slide, "cta", None)
+    return campaign_cta if cta is None else cta
+
+
 def _load_stage_json(db: Session, campaign_id: str, kind: str) -> dict | None:
     """Reads back a prior stage's output. Returns None (never raises) when nothing
     was persisted yet, or the file has since gone missing/corrupt — callers turn
@@ -4956,7 +4972,7 @@ async def run_visuals_stage(
         slide_eyebrow = getattr(slide, "eyebrow", "")
         slide_headline = slide.headline
         slide_body = getattr(slide, "body", "")
-        slide_cta = getattr(slide, "cta", "") or campaign_cta
+        slide_cta = _resolve_slide_cta(slide, campaign_cta)
 
         primary_fallback_direction = (
             _deterministic_creative_direction(
