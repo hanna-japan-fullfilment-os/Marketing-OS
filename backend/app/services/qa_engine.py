@@ -88,7 +88,21 @@ _IDENTICAL_TEXT_MIN_LENGTH = 8
 # Part A — Technical QA (deterministic, no AI).
 # ---------------------------------------------------------------------------
 
-def current_slide_attestations(db, campaign, variant, *, creative_data=None):
+def _qa_subset_plans(plans, campaign, *, qa_mode="FULL_CAMPAIGN", required_slide_numbers=None):
+    if qa_mode == "FULL_CAMPAIGN":
+        if required_slide_numbers is not None:
+            raise ValueError("Subset requires explicit CALIBRATION_SUBSET mode")
+        return plans
+    if (qa_mode != "CALIBRATION_SUBSET" or required_slide_numbers != [1]
+            or any(type(number) is not int for number in required_slide_numbers or [])
+            or len(plans) != 6 or campaign.target_slide_count != 6
+            or [plan.slide_number for plan in plans] != list(range(1, 7))):
+        raise ValueError("Calibration requires slide [1] of six canonical plans")
+    return plans[:1]
+
+
+def current_slide_attestations(db, campaign, variant, *, creative_data=None,
+                               qa_mode="FULL_CAMPAIGN", required_slide_numbers=None):
     """Bind current plan, canonical authority, copy, direction, and actual rendered bytes."""
     from .creative.pipeline import (build_render_context_path, slide_contract_digest,
         complete_slide_text_contract, structural_slide_text)
@@ -98,10 +112,13 @@ def current_slide_attestations(db, campaign, variant, *, creative_data=None):
     spec = resolve_platform_creative_spec(variant.target_platform, variant.content_type)
     if not spec.supports_carousel:
         plans = plans[:max(1, spec.recommended_slide_count)]
+    full_plan_count = len(plans)
+    plans = _qa_subset_plans(plans, campaign, qa_mode=qa_mode,
+                            required_slide_numbers=required_slide_numbers)
     paths = list(variant.slide_asset_paths or [])
     if not plans or len(paths) != len(plans) or len(set(paths)) != len(paths):
         raise ValueError("Missing or duplicate required slide output")
-    if campaign.target_slide_count and spec.supports_carousel and len(plans) != campaign.target_slide_count:
+    if campaign.target_slide_count and spec.supports_carousel and full_plan_count != campaign.target_slide_count:
         raise ValueError("Required campaign slide count differs from current plan")
     campaign_contract = {field: getattr(campaign, field, None) for field in
         ("id", "brand_id", "product_id", "category_id", "hook", "angle", "main_promise", "cta",
@@ -128,7 +145,7 @@ def current_slide_attestations(db, campaign, variant, *, creative_data=None):
                 or context.get("render_sha256") != digest
                 or context.get("complete_text_contract") != complete_slide_text_contract(plan)
                 or context.get("rendered_text_fields") != complete_slide_text_contract(plan)["fields"]
-                or context.get("structural_text") != structural_slide_text(plan.slide_number, len(plans))):
+                or context.get("structural_text") != structural_slide_text(plan.slide_number, full_plan_count)):
             raise ValueError("Render is stale relative to selected slide contract or bytes")
         result.append({"slide_id": plan.slide_id, "contract_sha256": slide_contract_digest(plan),
             "render_path": str(path.resolve()), "render_sha256": digest,
@@ -139,6 +156,10 @@ def current_slide_attestations(db, campaign, variant, *, creative_data=None):
             "variant_sha256": _provenance_hash({"platform": variant.target_platform, "language": variant.language,
                 "content_type": variant.content_type, "format": variant.render_format_key,
                 "direction": variant.creative_direction})})
+    if qa_mode == "CALIBRATION_SUBSET":
+        for attestation in result:
+            attestation["qa_mode"] = qa_mode
+            attestation["required_slide_numbers"] = list(required_slide_numbers)
     return result
 
 
@@ -152,6 +173,8 @@ def assert_campaign_creative_qa_current(db, campaign):
         raise ValueError("Creative QA missing for a required platform/language")
     for variant in variants:
         scores = variant.qa_scores or {}
+        if scores.get("qa_mode") == "CALIBRATION_SUBSET":
+            raise ValueError("Calibration subset QA cannot approve a campaign")
         if (variant.status != "RENDERED" or variant.qa_status != "PASS" or variant.qa_hard_fails
                 or not scores.get("creative") or not scores.get("technical", {}).get("passed")):
             raise ValueError("Every required variant needs current passing creative QA")
@@ -1483,6 +1506,7 @@ async def _qa_one_static_variant(
     creative_data_raw: dict | None, discovery_products: list, is_discovery: bool, brand_colors, logo_path,
     brand_style, sibling_headlines: dict[str, str], sibling_bodies: dict[str, str], sibling_ctas: dict[str, str],
     now: datetime, product: Product | None = None,
+    qa_mode: str = "FULL_CAMPAIGN", required_slide_numbers=None,
 ) -> None:
     """Carry-forward requirement 2: every field written below lands on THIS
     variant row, never only aggregated onto the parent Campaign — "Instagram/
@@ -1508,7 +1532,8 @@ async def _qa_one_static_variant(
     provider can ever produce.
     """
     try:
-        slide_attestations = current_slide_attestations(db, campaign, variant, creative_data=creative_data_raw)
+        slide_attestations = current_slide_attestations(db, campaign, variant, creative_data=creative_data_raw,
+            qa_mode=qa_mode, required_slide_numbers=required_slide_numbers)
     except (ValueError, OSError, KeyError, TypeError) as exc:
         variant.qa_status = "NEEDS_REVIEW"
         variant.qa_hard_fails = ["Slide provenance: " + str(exc)]
@@ -1522,6 +1547,11 @@ async def _qa_one_static_variant(
     headline = copy_data.get("headline", "")
     body = copy_data.get("body", "")
     cta = copy_data.get("cta", "") or campaign.cta or ""
+    if qa_mode == "CALIBRATION_SUBSET":
+        selected_plan = _qa_subset_plans(
+            _planned_slides_for_variant(creative_data_raw, language, spec), campaign,
+            qa_mode=qa_mode, required_slide_numbers=required_slide_numbers)[0]
+        headline, body, cta = selected_plan.headline, selected_plan.body, selected_plan.cta
 
     creative_direction: CreativeDirection | None = None
     if variant.creative_direction:
@@ -1659,7 +1689,9 @@ async def _qa_one_static_variant(
         # paths. Layer 1 (deterministic) always runs; layer 2 (AI candidate
         # extraction) only adds recall and is skipped for free with no
         # `ai_provider`, but the gate itself is never weaker without one.
-        planned_slides = _planned_slides_for_variant(creative_data_raw, language, spec)
+        planned_slides = _qa_subset_plans(
+            _planned_slides_for_variant(creative_data_raw, language, spec), campaign,
+            qa_mode=qa_mode, required_slide_numbers=required_slide_numbers)
         claims_fields = {
             **collect_campaign_copy_fields(copy_data),
             **collect_carousel_slide_fields(planned_slides),
@@ -1683,7 +1715,8 @@ async def _qa_one_static_variant(
         hard_fails = hard_fails + claims_hard_fails
         # Fail closed (REQUIREMENT 5): an unsupported claim can never receive
         # PASS regardless of how high `overall` scores otherwise.
-        if current_slide_attestations(db, campaign, variant, creative_data=creative_data_raw) != slide_attestations:
+        if current_slide_attestations(db, campaign, variant, creative_data=creative_data_raw,
+            qa_mode=qa_mode, required_slide_numbers=required_slide_numbers) != slide_attestations:
             hard_fails.append("Slide contract changed during creative QA")
         passed = creative is not None and not hard_fails and overall >= config.qa_pass_threshold
 
@@ -1695,6 +1728,9 @@ async def _qa_one_static_variant(
             "language": language_qa.model_dump() if language_qa is not None else None,
             "claims_audit": claims_result.model_dump(),
         }
+        if qa_mode == "CALIBRATION_SUBSET":
+            payload.update(qa_mode=qa_mode, required_slide_numbers=required_slide_numbers,
+                           full_carousel_accepted=False)
         evidence_path = _write_qa_evidence(config, campaign=campaign, variant=variant, attempt=attempt, payload=payload)
 
         variant.qa_scores = {
@@ -1705,6 +1741,9 @@ async def _qa_one_static_variant(
             "language": language_qa.model_dump() if language_qa is not None else None,
             "claims_audit": claims_result.model_dump(),
         }
+        if qa_mode == "CALIBRATION_SUBSET":
+            variant.qa_scores = {**variant.qa_scores, "qa_mode": qa_mode,
+                                 "required_slide_numbers": list(required_slide_numbers)}
         variant.qa_hard_fails = hard_fails
         variant.qa_attempts = attempt
         variant.qa_evidence_paths = list(variant.qa_evidence_paths or []) + [str(evidence_path)]
@@ -2070,6 +2109,7 @@ async def _qa_one_video_variant(
 async def run_qa_stage(
     db: Session, *, campaign_id: str, renderer: PlaywrightRenderer, config: AutopilotConfig,
     image_provider: ImageProvider | None = None, ai_provider: AIProvider | None = None,
+    qa_mode: str = "FULL_CAMPAIGN", required_slide_numbers=None,
 ) -> Campaign:
     """Build 3's top-level QA stage — an independently callable stage
     (mirrors Build 1's Strategy/Copy/Visuals split; `AutopilotConfig.
@@ -2090,6 +2130,15 @@ async def run_qa_stage(
     `PlatformCampaignVariant` row exists) — same "run the prior stage first"
     discipline as every other stage's own guard.
     """
+    if qa_mode != "FULL_CAMPAIGN":
+        if (qa_mode != "CALIBRATION_SUBSET" or required_slide_numbers != [1]
+                or any(type(number) is not int for number in required_slide_numbers or [])
+                or db.bind.dialect.name != "sqlite"
+                or any(row[2] for row in db.connection().exec_driver_sql("PRAGMA database_list").all())
+                or config.qa_max_retries != 0 or config.qa_best_of_n != 1):
+            raise ValueError("Calibration QA requires isolated memory SQLite and zero retries")
+    elif required_slide_numbers is not None:
+        raise ValueError("Subset requires explicit CALIBRATION_SUBSET mode")
     campaign, brand, category, product = _load_campaign_context(db, campaign_id)
     variants = get_platform_campaign_variants(db, campaign.id)
     if not variants:
@@ -2155,6 +2204,7 @@ async def run_qa_stage(
                 discovery_products=discovery_products, is_discovery=is_discovery, brand_colors=brand_colors,
                 logo_path=logo_path, brand_style=brand_style, sibling_headlines=sibling_headlines,
                 sibling_bodies=sibling_bodies, sibling_ctas=sibling_ctas, now=now, product=product,
+                qa_mode=qa_mode, required_slide_numbers=required_slide_numbers,
             )
         evaluated += 1
 

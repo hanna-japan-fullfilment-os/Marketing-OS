@@ -4638,6 +4638,7 @@ async def run_visuals_stage(
     progress: ProgressReporter | None = None,
     image_provider: ImageProvider | None = None,
     ai_provider: AIProvider | None = None,
+    calibration_slide1: bool = False,
 ) -> Campaign:
     """Advanced-mode stage 3 of 3 (brief section 18 steps 13-15): render every
     planned slide from the Copy stage's persisted carousel plan through the
@@ -4775,6 +4776,13 @@ async def run_visuals_stage(
     is_discovery = campaign.product_id is None and len(discovery_products) > 0
 
     slides = planned_slides
+    if calibration_slide1:
+        databases = db.connection().exec_driver_sql("PRAGMA database_list").all()
+        if (db.bind.dialect.name != "sqlite" or any(row[2] for row in databases)
+                or len(slides) != 6 or campaign.target_slide_count != 6
+                or [plan.slide_number for plan in slides] != list(range(1, 7))
+                or config.qa_max_retries != 0 or config.qa_best_of_n != 1):
+            raise ValueError("Slide1 calibration requires isolated memory SQLite and six frozen plans")
     slide_assets = [validate_slide_provenance(db, campaign, plan) for plan in slides]
     asset_product_pairs = [(asset, db.get(Product, asset.product_id)) for asset in slide_assets]
 
@@ -4944,7 +4952,7 @@ async def run_visuals_stage(
     primary_generated_backgrounds: dict[int, Image.Image] = {}
     primary_creative_directions: dict[int, CreativeDirection] = {}
 
-    for i, slide in enumerate(slides, start=1):
+    for i, slide in enumerate(slides[:1] if calibration_slide1 else slides, start=1):
         asset = validate_slide_provenance(db, campaign, slide)
         source_path = Path(asset.absolute_path)
         if not source_path.exists():

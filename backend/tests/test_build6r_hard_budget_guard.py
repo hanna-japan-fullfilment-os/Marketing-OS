@@ -1400,3 +1400,225 @@ def test_renderer_still_rejects_genuine_cta_substitution(tmp_path):
     creative.cta = "Campaign CTA"
     with pytest.raises(ValueError, match="Slide copy substitution: cta"):
         validate_render_slide_contract(creative)
+
+
+@pytest.fixture
+def calibration_attestation_case(tmp_path, monkeypatch):
+    import json
+    from app.schemas.ai import SlidePlan
+    from app.services import qa_engine as qa
+    from app.services.creative.pipeline import (build_render_context_path, slide_contract_digest,
+        complete_slide_text_contract, structural_slide_text)
+
+    plans = [SlidePlan(slide_number=i, slide_id=f"frozen:{i}", purpose="prepared",
+                       headline=f"Canonical {i}", body="", cta="",
+                       visual_brief="Frozen direction",
+                       verified_claim_ids=[f"claim:{i}"],
+                       evidence_references=[{"claim_id": f"claim:{i}", "source_ids": ["source"],
+                                             "evidence_sha256": "a" * 64, "claim_text": f"Canonical {i}"}],
+                       claim_bindings=[{"field_path": "headline", "claim_id": f"claim:{i}",
+                                        "assertion_text": f"Canonical {i}"}]) for i in range(1, 7)]
+    campaign = SimpleNamespace(id="prepared", target_slide_count=6,
+                               target_platforms=["instagram"], languages=["pt-BR"])
+    image = tmp_path / "slide1.png"
+    image.write_bytes(b"existing-rendered-bytes")
+    report = tmp_path / "technical.json"
+    report.write_text(json.dumps({"passed": True}))
+    context = {"slide_contract": plans[0].model_dump(),
+               "slide_contract_sha256": slide_contract_digest(plans[0]),
+               "render_sha256": __import__("hashlib").sha256(image.read_bytes()).hexdigest(),
+               "complete_text_contract": complete_slide_text_contract(plans[0]),
+               "rendered_text_fields": complete_slide_text_contract(plans[0])["fields"],
+               "structural_text": structural_slide_text(1, 6)}
+    context_path = build_render_context_path(image)
+    context_path.write_text(json.dumps(context))
+    variant = SimpleNamespace(language="pt-BR", target_platform="instagram", content_type="carousel",
+        slide_asset_paths=[str(image)], qa_report_paths=[str(report)], render_format_key="instagram_portrait",
+        creative_direction={}, status="RENDERED", qa_status="PASS", qa_hard_fails=[],
+        qa_scores={"qa_mode": "CALIBRATION_SUBSET"})
+    class Query:
+        def filter(self, *args): return self
+        def order_by(self, *args): return self
+        def all(self): return []
+    db = SimpleNamespace(query=lambda *args: Query())
+    creative = {"carousel_plan": {"slides": [plan.model_dump() for plan in plans]}}
+    monkeypatch.setattr(qa, "_stage_language_variant", lambda data, language: data)
+    monkeypatch.setattr(qa, "_load_stage_json", lambda *args: {"headline": "Canonical"})
+    seen = []
+    monkeypatch.setattr(qa, "validate_slide_provenance", lambda db, campaign, plan: seen.append(plan))
+    return SimpleNamespace(qa=qa, db=db, campaign=campaign, variant=variant, creative=creative,
+                           plans=plans, context=context, context_path=context_path, seen=seen)
+
+
+def _calibration_attest(case, **options):
+    return case.qa.current_slide_attestations(case.db, case.campaign, case.variant,
+        creative_data=case.creative, qa_mode="CALIBRATION_SUBSET", required_slide_numbers=[1], **options)
+
+
+def test_calibration_scope_is_explicit_and_does_not_shrink_plans(calibration_attestation_case):
+    import copy
+    c = calibration_attestation_case
+    before = copy.deepcopy(c.creative)
+    result = _calibration_attest(c)
+    assert len(result) == 1 and result[0]["slide_id"] == "frozen:1"
+    assert result[0]["qa_mode"] == "CALIBRATION_SUBSET"
+    assert c.creative == before and c.campaign.target_slide_count == 6
+    assert len(c.seen) == 1
+    with pytest.raises(ValueError, match="Missing or duplicate"):
+        c.qa.current_slide_attestations(c.db, c.campaign, c.variant, creative_data=c.creative)
+
+
+@pytest.mark.parametrize("change", ["wrong_slide", "duplicate", "missing", "copy", "claims", "reference", "product", "direction", "structural"])
+def test_calibration_subset_rejects_substitutions(calibration_attestation_case, change):
+    import json
+    c = calibration_attestation_case
+    if change == "duplicate": c.variant.slide_asset_paths *= 2
+    elif change == "missing": c.variant.slide_asset_paths = []
+    else:
+        if change == "wrong_slide": c.context["slide_contract"] = c.plans[1].model_dump()
+        elif change == "structural": c.context["structural_text"] = {}
+        else:
+            field = {"copy": "headline", "claims": "verified_claim_ids", "reference": "reference_asset_ids",
+                     "product": "product_asset", "direction": "visual_brief"}[change]
+            c.context["slide_contract"][field] = ["substituted"] if field.endswith("ids") else "substituted"
+        c.context_path.write_text(json.dumps(c.context))
+    with pytest.raises(ValueError): _calibration_attest(c)
+
+
+@pytest.mark.parametrize("mode,numbers", [("FULL_CAMPAIGN", [1]), ("unknown", [1]),
+    ("CALIBRATION_SUBSET", [2]), ("CALIBRATION_SUBSET", [1, 1]), ("CALIBRATION_SUBSET", []),
+    ("CALIBRATION_SUBSET", None), ("CALIBRATION_SUBSET", [True])])
+def test_calibration_rejects_invalid_scope(calibration_attestation_case, mode, numbers):
+    c = calibration_attestation_case
+    with pytest.raises(ValueError):
+        c.qa.current_slide_attestations(c.db, c.campaign, c.variant, creative_data=c.creative,
+                                      qa_mode=mode, required_slide_numbers=numbers)
+
+
+def test_full_campaign_still_rejects_plan_count_mismatch(calibration_attestation_case):
+    c = calibration_attestation_case
+    c.creative["carousel_plan"]["slides"] = c.creative["carousel_plan"]["slides"][:1]
+    with pytest.raises(ValueError, match="campaign slide count"):
+        c.qa.current_slide_attestations(c.db, c.campaign, c.variant, creative_data=c.creative)
+    with pytest.raises(ValueError, match="six canonical"):
+        _calibration_attest(c)
+
+
+def test_subset_never_approves_full_campaign(calibration_attestation_case):
+    c = calibration_attestation_case
+    class Query:
+        def filter(self, *args): return self
+        def all(self): return [c.variant]
+    c.db.query = lambda *args: Query()
+    with pytest.raises(ValueError, match="cannot approve"):
+        c.qa.assert_campaign_creative_qa_current(c.db, c.campaign)
+
+
+def test_calibration_and_qa_defaults_remain_full_campaign():
+    import inspect
+    from scripts import run_live_acceptance as runner
+    from app.services import qa_engine as qa
+    from app.services.orchestrator import run_visuals_stage
+    assert inspect.signature(runner.run_prepared_acceptance).parameters["calibration_slide1"].default is False
+    assert inspect.signature(run_visuals_stage).parameters["calibration_slide1"].default is False
+    assert inspect.signature(qa.run_qa_stage).parameters["qa_mode"].default == "FULL_CAMPAIGN"
+    assert inspect.signature(qa.current_slide_attestations).parameters["qa_mode"].default == "FULL_CAMPAIGN"
+
+
+def test_isolated_calibration_session_does_not_write_source(tmp_path):
+    import sqlite3
+    import hashlib
+    from scripts.run_live_acceptance import isolated_calibration_session
+    path = tmp_path / "prepared.db"
+    with sqlite3.connect(path) as db:
+        db.execute("create table frozen (value text)")
+        db.execute("insert into frozen values ('six-slide-plan')")
+    before = hashlib.sha256(path.read_bytes()).digest()
+    session = isolated_calibration_session(path)
+    engine = session.bind
+    try:
+        session.connection().exec_driver_sql("update frozen set value='isolated-only'")
+        session.commit()
+        assert all(not row[2] for row in session.connection().exec_driver_sql("pragma database_list").all())
+    finally:
+        session.close()
+        engine.dispose()
+    assert hashlib.sha256(path.read_bytes()).digest() == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail_stage", [None, "visuals", "qa"])
+async def test_prepared_calibration_routes_subset_and_stops(monkeypatch, tmp_path, fail_stage):
+    import copy
+    import json
+    from sqlalchemy import create_engine
+    from app.models import PlatformCampaignVariant
+    from app.schemas.ai import SlidePlan
+    from app.services import orchestrator
+    from scripts import run_live_acceptance as runner
+
+    plans = [SlidePlan(slide_number=i, slide_id=f"prepared:{i}", purpose="hero", headline="Prepared",
+                       visual_brief="Frozen", cta="").model_dump() for i in range(1, 7)]
+    before = copy.deepcopy(plans)
+    campaign = SimpleNamespace(target_slide_count=6, target_platforms=["instagram"], languages=["pt-BR"],
+                               status="COPY_READY")
+    variant = SimpleNamespace(slide_asset_paths=[], qa_status="PENDING", qa_scores={}, qa_hard_fails=[],
+                              qa_evidence_paths=[])
+    engine = create_engine("sqlite:///:memory:")
+    connection = engine.connect()
+    class Session:
+        bind = engine
+        def connection(self): return connection
+        def get(self, *args): return campaign
+        def query(self, model):
+            class Query:
+                def filter_by(self, **kwargs): return self
+                def all(self): return [variant] if model is PlatformCampaignVariant else []
+            return Query()
+        def commit(self): pass
+    monkeypatch.setattr(orchestrator, "_load_stage_json", lambda *args: {"carousel_plan": {"slides": plans}})
+    monkeypatch.setattr(orchestrator, "_stage_language_variant", lambda data, language: data)
+    monkeypatch.setattr(orchestrator, "validate_slide_provenance", lambda *args: None)
+    stages = []
+    async def visuals(session, **kwargs):
+        stages.append("visuals")
+        assert kwargs["calibration_slide1"] is True
+        if fail_stage == "visuals": raise RuntimeError("mock failure")
+        output = tmp_path / "slide1.png"
+        output.write_bytes(b"mock output")
+        variant.slide_asset_paths = [str(output)]
+    async def qa(session, **kwargs):
+        stages.append("qa")
+        assert kwargs["qa_mode"] == "CALIBRATION_SUBSET" and kwargs["required_slide_numbers"] == [1]
+        if fail_stage == "qa": raise RuntimeError("mock failure")
+        variant.qa_status = "PASS"
+        return campaign
+    monkeypatch.setattr(runner, "run_visuals_stage", visuals)
+    monkeypatch.setattr(runner, "run_qa_stage", qa)
+    ledger = provider_module._BoundedExposureLedger()
+    provider = SimpleNamespace(hard_budget_snapshot=ledger.snapshot)
+    config = SimpleNamespace(qa_max_retries=0, qa_best_of_n=1, recreate_with_ai=False,
+        use_masked_scene_edit=False, detect_product_zone=False, hero_only=False,
+        use_ai_background=True, require_ai_background_success=True, enable_qa_stage=True,
+        quality_mode="premium", output_root=tmp_path)
+    try:
+        if fail_stage:
+            with pytest.raises(RuntimeError, match="mock failure"):
+                await runner.run_prepared_acceptance(Session(), campaign_id="prepared", config=config,
+                    renderer=None, provider=provider, calibration_slide1=True)
+            assert stages == (["visuals"] if fail_stage == "visuals" else ["visuals", "qa"])
+            failure = json.loads((tmp_path / "calibration-failure.json").read_text())
+            assert failure["status"] == "SLIDE1_CALIBRATION_FAILED"
+            assert failure["campaign_approval_created"] is False
+        else:
+            result = await runner.run_prepared_acceptance(Session(), campaign_id="prepared", config=config,
+                renderer=None, provider=provider, calibration_slide1=True)
+            assert stages == ["visuals", "qa"]
+            assert result["stop_reason"] == "SLIDE1_CALIBRATION_COMPLETE"
+            assert result["full_carousel_completed"] is False and result["campaign_approval_created"] is False
+            assert result["slide1_operator_decision"] == "PENDING"
+            assert campaign.status == "COPY_READY"
+        assert plans == before and len(plans) == campaign.target_slide_count == 6
+    finally:
+        connection.close()
+        engine.dispose()

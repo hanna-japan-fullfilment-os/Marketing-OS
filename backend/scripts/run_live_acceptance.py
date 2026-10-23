@@ -156,7 +156,8 @@ def prepared_acceptance_reserved_costs() -> dict:
             "other": 0.0, "total": 6 * image + 12 * text}
 
 
-async def run_prepared_acceptance(session, *, campaign_id, config, renderer, provider):
+async def run_prepared_acceptance(session, *, campaign_id, config, renderer, provider,
+                                  calibration_slide1=False):
     """Guard the existing prepared Visuals -> QA path; never rerun copy/planning.
 
     This callable is NOT live authorization. Bounded exposure is explicitly
@@ -194,15 +195,79 @@ async def run_prepared_acceptance(session, *, campaign_id, config, renderer, pro
             raise HardBudgetExceededError("PREPARED_ACCEPTANCE_REQUIRES_SIX_FROZEN_PLANS")
         for plan in plans:
             validate_slide_provenance(session, campaign, plan)
-    await run_visuals_stage(session, campaign_id=campaign_id, renderer=renderer,
-                            config=config, image_provider=provider, ai_provider=provider)
-    if provider.hard_budget_snapshot()["halted"]:
-        raise HardBudgetExceededError("PREPARED_ACCEPTANCE_HALTED_AFTER_VISUALS")
-    result = await run_qa_stage(session, campaign_id=campaign_id, renderer=renderer,
-                                config=config, image_provider=provider, ai_provider=provider)
-    if provider.hard_budget_snapshot()["halted"]:
-        raise HardBudgetExceededError("PREPARED_ACCEPTANCE_HALTED_AFTER_QA")
-    return result
+    if calibration_slide1:
+        if (not bounded or session.bind.dialect.name != "sqlite"
+                or any(row[2] for row in session.connection().exec_driver_sql("PRAGMA database_list").all())):
+            raise ValueError("Calibration requires an isolated in-memory database")
+        output = Path(config.output_root)
+        if not output.is_dir() or any(output.iterdir()):
+            raise ValueError("Calibration requires a new empty output directory")
+        original_status = campaign.status
+        visuals_options = {"calibration_slide1": True}
+        qa_options = {"qa_mode": "CALIBRATION_SUBSET", "required_slide_numbers": [1]}
+    else:
+        visuals_options, qa_options = {}, {}
+    try:
+        await run_visuals_stage(session, campaign_id=campaign_id, renderer=renderer,
+                                config=config, image_provider=provider, ai_provider=provider, **visuals_options)
+        if provider.hard_budget_snapshot()["halted"]:
+            raise HardBudgetExceededError("PREPARED_ACCEPTANCE_HALTED_AFTER_VISUALS")
+        result = await run_qa_stage(session, campaign_id=campaign_id, renderer=renderer,
+                                    config=config, image_provider=provider, ai_provider=provider, **qa_options)
+        if provider.hard_budget_snapshot()["halted"]:
+            raise HardBudgetExceededError("PREPARED_ACCEPTANCE_HALTED_AFTER_QA")
+        if calibration_slide1:
+            import hashlib
+            from app.models import PlatformCampaignVariant, AIUsage
+            variants = session.query(PlatformCampaignVariant).filter_by(campaign_id=campaign_id).all()
+            if len(variants) != 1 or len(variants[0].slide_asset_paths or []) != 1:
+                raise ValueError("Calibration must produce exactly one slide")
+            variant = variants[0]
+            path = Path(variant.slide_asset_paths[0])
+            report = {
+                "status": "SLIDE1_CALIBRATION_COMPLETE",
+                "stop_reason": "SLIDE1_CALIBRATION_COMPLETE",
+                "full_carousel_completed": False, "calibration_slide_completed": True,
+                "campaign_approval_created": False, "full_carousel_accepted": False,
+                "slide1_machine_qa_result": variant.qa_status,
+                "calibration_result": "PASS" if variant.qa_status == "PASS" else "FAIL",
+                "slide1_operator_decision": "PENDING",
+                "slide1_output_path": str(path),
+                "slide1_output_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "machine_qa": variant.qa_scores,
+                "machine_qa_hard_fails": variant.qa_hard_fails,
+                "qa_evidence_paths": variant.qa_evidence_paths,
+                "provider_usage": provider.hard_budget_snapshot(),
+                "accounting": [{c.name: getattr(row, c.name) for c in row.__table__.columns}
+                    for row in session.query(AIUsage).filter_by(campaign_id=campaign_id).all()],
+            }
+            campaign.status = original_status
+            session.commit()
+            (output / "calibration-result.json").write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
+            return report
+        return result
+    except BaseException as exc:
+        if calibration_slide1:
+            failure = {"status": "SLIDE1_CALIBRATION_FAILED", "error": type(exc).__name__,
+                       "full_carousel_completed": False, "campaign_approval_created": False,
+                       "provider_usage": provider.hard_budget_snapshot(),
+                       "preserved_artifacts": [str(path) for path in output.rglob("*") if path.is_file()]}
+            (output / "calibration-failure.json").write_text(json.dumps(failure, indent=2, default=str), encoding="utf-8")
+        raise
+
+
+def isolated_calibration_session(database_path):
+    """Read canonical bytes into memory; never migrate or write the source SQLite."""
+    import sqlite3
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from sqlalchemy.pool import StaticPool
+    with sqlite3.connect(Path(database_path).resolve().as_uri() + "?mode=ro&immutable=1", uri=True) as source:
+        snapshot = source.serialize()
+    memory = sqlite3.connect(":memory:", check_same_thread=False)
+    memory.deserialize(snapshot)
+    engine = create_engine("sqlite://", creator=lambda: memory, poolclass=StaticPool)
+    return Session(engine, autoflush=False, expire_on_commit=False)
 
 
 async def verify_project_spend_backstop(project_id, *, read_only_get=None) -> dict:
@@ -784,6 +849,8 @@ async def main() -> int:
     parser.add_argument("--quality-mode", default="standard", choices=["draft", "standard", "premium"])
     parser.add_argument("--prepared-campaign-id", default=None,
                         help="Use existing frozen six-slide inputs; never create/copy-plan a campaign.")
+    parser.add_argument("--calibration-slide1", action="store_true",
+                        help="Explicit isolated slide1 render and subset QA; never approve the six-slide campaign.")
     parser.add_argument("--bounded-exposure", action="store_true",
                         help="Explicit 6 image / 10 text / 2 vision sequential attempt policy; NOT a guaranteed USD ceiling.")
     parser.add_argument(
@@ -893,13 +960,16 @@ async def main() -> int:
         print("LIVE_NETWORK_TEST_RUN=NO (--estimate-only: no API call was made)")
         return 0
 
+    if args.calibration_slide1 and not (args.bounded_exposure and args.prepared_campaign_id):
+        parser.error("Slide1 calibration requires prepared bounded exposure")
     if args.bounded_exposure or args.prepared_campaign_id:
         if (not args.bounded_exposure or not args.prepared_campaign_id
                 or args.max_budget_usd is not None or args.quality_mode != "premium"
                 or args.smoke or args.premium_hero_only):
             parser.error("Prepared bounded exposure requires both flags, premium quality, no exact-dollar ceiling, and no hero/smoke mode.")
         # No init_db: no automatic schema changes in the prepared entrypoint.
-        session = db_module.SessionLocal()
+        session = (isolated_calibration_session(db_module.engine.url.database)
+                   if args.calibration_slide1 else db_module.SessionLocal())
         try:
             effective = get_effective_settings(session)
             if not effective.get("openai_api_key"):
@@ -911,15 +981,24 @@ async def main() -> int:
                 use_ai_background=True, recreate_with_ai=False, detect_product_zone=False,
                 quality_mode="premium", render_platform_variants=True, enable_qa_stage=True,
                 qa_max_retries=0, qa_best_of_n=1)
+            if args.calibration_slide1:
+                import tempfile
+                config.output_root = Path(tempfile.mkdtemp(prefix="marketing-os-slide1-calibration-"))
             config.max_slides = 6
             config.require_ai_background_success = True
-            await run_prepared_acceptance(session, campaign_id=args.prepared_campaign_id,
-                                           config=config, renderer=PlaywrightRenderer(), provider=provider)
+            calibration_result = await run_prepared_acceptance(session, campaign_id=args.prepared_campaign_id,
+                                           config=config, renderer=PlaywrightRenderer(), provider=provider,
+                                           calibration_slide1=args.calibration_slide1)
+            if args.calibration_slide1:
+                print(json.dumps(calibration_result, indent=2, default=str))
             print(json.dumps({"bounded_exposure": provider.hard_budget_snapshot(),
                               "live_acceptance_pass_claimed": False}, indent=2))
-            return 0
+            return (0 if calibration_result["calibration_result"] == "PASS" else 1) if args.calibration_slide1 else 0
         finally:
+            engine = session.bind
             session.close()
+            if args.calibration_slide1:
+                engine.dispose()
 
     if args.max_budget_usd is None:
         parser.error("Live acceptance requires --max-budget-usd; no spending is authorized implicitly.")
