@@ -637,3 +637,81 @@ def test_paint_style_cannot_bypass_factual_icon_binding(owner_target):
     plan = SlidePlan(slide_number=1, purpose="hook", headline="Discover", visual_brief="",
                      features=[dict(icon="cure", title="Discover")])
     with pytest.raises(ValueError): canonical_slide_claim_bindings(plan)
+
+
+@pytest.mark.parametrize("variation", [
+    "same", "angle", "icon_scale", "unprepared_angle", "unprepared_icon_scale",
+    "palette", "stops", "headline_stroke", "headline_stroke_color", "shadow_color",
+    "shadow_blur", "shadow_offset", "glow_color", "glow_radius", "glow_opacity",
+    "icon_stroke", "icon_tint", "icon_ring", "material", "identity", "paint_presence",
+])
+def test_paint_variation_preserves_shared_language_and_exact_prepared_values(owner_target, tmp_path, variation):
+    import copy
+    import json
+    from app.schemas.ai import SlidePlan
+    from app.schemas.creative_director import ReferenceTarget
+    from app.services.qa_engine import reference_qa_inputs, reference_qa_manifest
+    from app.services.creative.pipeline import build_render_context_path
+    target, _, ref = owner_target
+    data = target.model_dump()
+    data["grammar"].update(
+        headline_paint=dict(kind="linear_gradient", angle_degrees=90,
+            stops=[dict(offset=0, color="#704394"), dict(offset=1, color="#E3C3F8")],
+            stroke_width_px=.5, stroke_color="#2F133F", shadow_color="#14051F",
+            shadow_blur_px=5, shadow_offset_y_px=2),
+        icon_paint=dict(kind="luminous_vector", tint="#F3D9FF", glow_color="#A845FF",
+            glow_radius_px=8, glow_opacity=.85, stroke_width_px=1.2, ring_width_px=1, size_scale=1.25))
+    images, prepared = [], []
+    shared_changes = {
+        "palette": ("headline_paint", "stops", [dict(offset=0, color="#00FF00"), dict(offset=1, color="#E3C3F8")]),
+        "stops": ("headline_paint", "stops", [dict(offset=0, color="#704394"), dict(offset=.5, color="#E3C3F8"), dict(offset=1, color="#E3C3F8")]),
+        "headline_stroke": ("headline_paint", "stroke_width_px", 1),
+        "headline_stroke_color": ("headline_paint", "stroke_color", "#FFFFFF"),
+        "shadow_color": ("headline_paint", "shadow_color", "#FFFFFF"),
+        "shadow_blur": ("headline_paint", "shadow_blur_px", 2),
+        "shadow_offset": ("headline_paint", "shadow_offset_y_px", 3),
+        "glow_color": ("icon_paint", "glow_color", "#00FF00"),
+        "glow_radius": ("icon_paint", "glow_radius_px", 4),
+        "glow_opacity": ("icon_paint", "glow_opacity", .3),
+        "icon_stroke": ("icon_paint", "stroke_width_px", 2),
+        "icon_tint": ("icon_paint", "tint", "#00FF00"),
+        "icon_ring": ("icon_paint", "ring_width_px", 0),
+    }
+    for number in (1, 2):
+        current = copy.deepcopy(data)
+        if number == 2:
+            if variation in {"angle", "unprepared_angle"}: current["grammar"]["headline_paint"]["angle_degrees"] = 85
+            if variation in {"icon_scale", "unprepared_icon_scale"}: current["grammar"]["icon_paint"]["size_scale"] = 1.1
+            if variation in shared_changes:
+                paint, field, value = shared_changes[variation]
+                current["grammar"][paint][field] = value
+            if variation == "material": current["grammar"]["material"] = "stone"
+            if variation == "identity": current["reference_id"] = "different-owner"
+            if variation == "paint_presence": current["grammar"].pop("headline_paint")
+        typed = ReferenceTarget.model_validate(current)
+        plan = SlidePlan(slide_number=number, slide_id=f"paint-{number}", purpose="hook", headline="Discover",
+            visual_brief=json.dumps({"REFERENCE_TARGET": typed.model_dump()}),
+            reference_asset_ids=[typed.reference_id], reference_assets=[{**vars(ref), "asset_id": typed.reference_id}])
+        image = tmp_path / f"final-{number}.png"
+        background = tmp_path / f"background-{number}.png"
+        Image.new("RGB", (60, 80)).save(background)
+        build_render_context_path(image).write_text(json.dumps(dict(slide_contract=plan.model_dump(),
+            reference_target=typed.model_dump(), visual_base_path=str(background),
+            visual_base_kind="generated_background", visual_base_sha256=_sha256(background))))
+        images.append(image)
+        if number == 2 and variation.startswith("unprepared_"):
+            plan = plan.model_copy(update={"visual_brief": json.dumps({"REFERENCE_TARGET": ReferenceTarget.model_validate(data).model_dump()})})
+        prepared.append(plan)
+    if variation.startswith("unprepared_"):
+        with pytest.raises(ValueError, match="Unprepared"):
+            reference_qa_manifest(images, prepared)
+    elif variation in {"same", "angle", "icon_scale"}:
+        manifest = reference_qa_manifest(images, prepared)
+        assert len(manifest) == 2
+        assert reference_qa_inputs(images)[0].reference_id == target.reference_id
+        if variation != "same": assert manifest[0]["contract_sha256"] != manifest[1]["contract_sha256"]
+    else:
+        # Even explicitly prepared shared-language differences cannot pass campaign QA.
+        assert len(reference_qa_manifest(images, prepared)) == 2
+        with pytest.raises(ValueError, match="QA target differs"):
+            reference_qa_inputs(images)

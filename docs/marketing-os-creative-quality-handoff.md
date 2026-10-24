@@ -380,3 +380,25 @@ background-only generation, reference/duplicate/coherence QA and call guards sta
 unchanged. The preserved 52-field proposal does not activate these controls;
 later explicit direction deltas, owner trust approval and product-artwork policy
 remain separately governed before any paid calibration.
+
+### Prepared paint variation in campaign QA
+
+Campaign reference identity and paint language remain shared. Only
+`headline_paint.angle_degrees` and `icon_paint.size_scale` are slide-variable,
+and each must equal the exact prepared slide contract. Their existing typed
+bounds remain enforced. Campaign comparison retains effect presence/kind,
+all gradient stops (colors and offsets), headline stroke/color and shadow
+color/blur/offset, icon tint, glow color/radius/opacity, stroke and ring width.
+Material, lighting and the rest of the shared reference grammar remain enforced.
+Unknown properties fail schema validation; no other paint freedom is inferred.
+
+The ordered manifest and contract digest bind every slide; unprepared values,
+different target identities, low individual fidelity or incoherent paint language
+fail regardless of generic scores. The existing final-QA request assesses these
+rules without additional calls. Absent paint controls preserve legacy behavior.
+
+This QA-only repair does not activate candidate values or grant reference trust.
+The preserved 52-entry direction proposal remains immutable; prospective paint
+objects fit inside its already-counted visual_brief updates. Reference approval,
+direction mutation, product-artwork decisions and paid visual acceptance remain
+separately governed. Structural/mock QA does not establish live visual acceptance.

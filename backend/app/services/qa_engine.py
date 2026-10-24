@@ -425,6 +425,12 @@ def campaign_reference_language(target):
     value = target.model_dump()
     for field in ("headline_scale", "headline_position", "supporting_copy_position", "negative_space"):
         value["grammar"].pop(field)
+    # Only these audited paint geometry controls may vary. Every other paint
+    # property (including effect presence) remains campaign-shared. Exact
+    # prepared-plan equality in reference_qa_manifest still binds both values.
+    for paint, variable in (("headline_paint", "angle_degrees"), ("icon_paint", "size_scale")):
+        if paint in value["grammar"]:
+            value["grammar"][paint].pop(variable)
     for field in ("premium_signals", "prohibited_elements"):
         value["grammar"][field] = sorted(value["grammar"][field])
     return value

@@ -598,3 +598,23 @@ def test_prepared_reference_results_require_every_slide_and_coherence(fault):
     if fault == "unknown_coherence": values["campaign_reference_coherent"] = None
     creative = CreativeCritiqueResult(**values, slide_reference_results=results)
     assert bool(reference_qa_hard_fails(creative, target, manifest)) == (fault is not None)
+
+
+@pytest.mark.parametrize("failure", ["paint_coherence", "individual_fidelity", "reference_identity", "unprepared_paint"])
+def test_high_generic_score_cannot_override_paint_campaign_contract(failure):
+    from types import SimpleNamespace
+    from app.schemas.qa import CreativeCritiqueResult
+    from app.services.qa_engine import reference_qa_hard_fails
+    target = SimpleNamespace(reference_id="owner", sha256="a" * 64, minimum_fidelity=85)
+    manifest = [dict(slide_id="paint-slide", contract_sha256="b" * 64,
+        reference_target=dict(reference_id="owner", sha256="a" * 64, minimum_fidelity=85))]
+    result = dict(slide_id="paint-slide", contract_sha256="b" * 64, reference_id="owner",
+        reference_sha256="a" * 64, reference_fidelity=99, background_has_product=False,
+        unintended_duplicate_product=False)
+    if failure == "individual_fidelity": result["reference_fidelity"] = 84
+    if failure == "reference_identity": result["reference_id"] = "other"
+    if failure == "unprepared_paint": result["contract_sha256"] = "c" * 64
+    values = dict(overall_quality=100, reference_id="owner", reference_sha256="a" * 64,
+        reference_fidelity=99, background_has_product=False, unintended_duplicate_product=False,
+        campaign_reference_coherent=failure != "paint_coherence", slide_reference_results=[result])
+    assert reference_qa_hard_fails(CreativeCritiqueResult(**values), target, manifest)
