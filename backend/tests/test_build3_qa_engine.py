@@ -540,3 +540,31 @@ async def test_retry_limit_and_needs_review_and_evidence_persist_per_variant(tem
     assert reloaded.qa_status == "NEEDS_REVIEW"
     assert reloaded.qa_attempts == attempts_at_stop
     session2.close()
+
+
+@pytest.mark.parametrize("change", [
+    {"reference_fidelity": 60}, {"unintended_duplicate_product": True},
+    {"background_has_product": True}, {"reference_id": "wrong"},
+    {"reference_sha256": "changed"}, {"reference_fidelity": None},
+    {"background_has_product": None}, {"unintended_duplicate_product": None},
+])
+def test_high_generic_score_cannot_mask_reference_failure(change):
+    from app.schemas.qa import CreativeCritiqueResult
+    from app.services.qa_engine import reference_qa_hard_fails
+    from types import SimpleNamespace
+    target = SimpleNamespace(reference_id="owner", sha256="a" * 64, minimum_fidelity=85)
+    values = dict(overall_quality=99, reference_id="owner", reference_sha256="a" * 64,
+                  reference_fidelity=95, background_has_product=False, unintended_duplicate_product=False)
+    values.update(change)
+    assert reference_qa_hard_fails(CreativeCritiqueResult(**values), target)
+
+
+def test_correct_target_and_background_only_are_structurally_acceptable():
+    from app.schemas.qa import CreativeCritiqueResult
+    from app.services.qa_engine import reference_qa_hard_fails
+    from types import SimpleNamespace
+    target = SimpleNamespace(reference_id="owner", sha256="a" * 64, minimum_fidelity=85)
+    result = CreativeCritiqueResult(overall_quality=95, reference_id="owner", reference_sha256="a" * 64,
+        reference_fidelity=90, background_has_product=False, unintended_duplicate_product=False)
+    assert reference_qa_hard_fails(result, target) == []
+    assert reference_qa_hard_fails(None, target)

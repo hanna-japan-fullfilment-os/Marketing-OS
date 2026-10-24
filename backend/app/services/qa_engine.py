@@ -64,6 +64,7 @@ from .usage_tracking import record_stage_usage
 from ..data.platform_creative_specs import PlatformCreativeSpec, resolve_platform_creative_spec
 from ..models import Campaign, CampaignSlide, PlatformCampaignVariant, Product
 from ..schemas.creative_director import CreativeDirection, MasterCampaignConcept, PlatformAdaptation, VideoConcept
+from ..schemas.creative_director import reference_target_from_brief, validate_reference_target
 from ..schemas.ai import SlidePlan
 from ..schemas.qa import CreativeCritiqueResult, LanguageQAResult, RevisedCopy, TechnicalQAResult, VideoQAResult
 from .orchestrator import (
@@ -419,9 +420,51 @@ def _build_creative_context(
     return "\n".join(lines)
 
 
+def reference_qa_inputs(image_paths):
+    target = None
+    references, backgrounds = [], []
+    for image in image_paths:
+        ctx = json.loads(build_render_context_path(image).read_text(encoding="utf-8"))
+        plan = SlidePlan.model_validate(ctx["slide_contract"])
+        current = reference_target_from_brief(plan.visual_brief)
+        if current is None:
+            if target is not None:
+                raise ValueError("Mixed target and non-target QA outputs")
+            continue
+        if target is not None and current != target:
+            raise ValueError("QA target differs across output slides")
+        if ctx.get("reference_target") != current.model_dump():
+            raise ValueError("Rendered target identity changed")
+        path = validate_reference_target(current, plan.reference_assets)
+        background = Path(ctx["visual_base_path"])
+        if ctx.get("visual_base_kind") != "generated_background" or hashlib.sha256(background.read_bytes()).hexdigest() != ctx.get("visual_base_sha256"):
+            raise ValueError("Native background unavailable or changed")
+        target = current
+        references = [path]
+        backgrounds.append(background)
+    if target is not None and len(backgrounds) != len(image_paths):
+        raise ValueError("Missing native background for target QA")
+    return target, references, backgrounds
+
+
+def reference_qa_hard_fails(creative, target):
+    fails = []
+    if creative is not None and (creative.background_has_product is True or creative.unintended_duplicate_product is True):
+        fails.append("reference_hard_fail: generated background product/package or unintended duplicate")
+    if target is not None:
+        if (creative is None or creative.reference_id != target.reference_id
+                or creative.reference_sha256 != target.sha256):
+            fails.append("reference_hard_fail: missing or substituted target identity")
+        if creative is None or creative.reference_fidelity is None or creative.reference_fidelity < target.minimum_fidelity:
+            fails.append("reference_hard_fail: target resemblance below required fidelity")
+        if creative is None or creative.background_has_product is not False or creative.unintended_duplicate_product is not False:
+            fails.append("reference_hard_fail: background-only/one-product checks missing or failed")
+    return fails
+
+
 async def run_creative_qa(
     ai_provider: AIProvider | None, *, image_paths: list[Path], source_image_path: Path | None, context: str,
-    model: str,
+    model: str, reference_target=None, reference_paths=None, background_paths=None,
 ) -> CreativeCritiqueResult | None:
     """AI-optional wrapper around `AIProvider.critique_creative` — `None`
     (never a fabricated scorecard) with no provider or on a failed call.
@@ -429,8 +472,10 @@ async def run_creative_qa(
     if ai_provider is None or not image_paths:
         return None
     try:
+        options = {} if reference_target is None else dict(reference_target=reference_target,
+                    reference_paths=reference_paths, background_paths=background_paths)
         return await ai_provider.critique_creative(
-            image_paths=image_paths, source_image_path=source_image_path, context=context, model=model,
+            image_paths=image_paths, source_image_path=source_image_path, context=context, model=model, **options,
         )
     except Exception:  # noqa: BLE001 - best-effort, mirrors every other AI hook in this codebase
         return None
@@ -1668,9 +1713,18 @@ async def _qa_one_static_variant(
         scoring_context += "\nCOMPLETE RENDERED TEXT CONTRACTS (ALL ROLES, INCLUDING FOOTERS): " + json.dumps([
             json.loads(build_render_context_path(path).read_text(encoding="utf-8"))["complete_text_contract"]
             for path in image_paths], sort_keys=True)
+        target_options = {}
+        has_target = any(reference_target_from_brief(SlidePlan.model_validate(
+            json.loads(build_render_context_path(path).read_text(encoding="utf-8"))["slide_contract"]).visual_brief) is not None
+            for path in image_paths)
+        active_target = None
+        if has_target:
+            active_target, target_pixels, background_pixels = reference_qa_inputs(image_paths)
+            target_options = dict(reference_target=active_target, reference_paths=target_pixels,
+                                  background_paths=background_pixels)
         creative = await run_creative_qa(
             ai_provider, image_paths=image_paths, source_image_path=source_product_image_path, context=scoring_context,
-            model=config.creative_qa_model,
+            model=config.creative_qa_model, **target_options,
         )
         record_prompt_usage(
             db, campaign_id=campaign.id, purpose="creative_qa_critique", language=language, platform=platform,
@@ -1712,7 +1766,7 @@ async def _qa_one_static_variant(
         claims_hard_fails = format_claims_hard_fails(claims_result)
 
         overall, hard_fails = _creative_overall_and_fails(technical, platform_fails, language_fails, creative)
-        hard_fails = hard_fails + claims_hard_fails
+        hard_fails = hard_fails + claims_hard_fails + reference_qa_hard_fails(creative, active_target)
         # Fail closed (REQUIREMENT 5): an unsupported claim can never receive
         # PASS regardless of how high `overall` scores otherwise.
         if current_slide_attestations(db, campaign, variant, creative_data=creative_data_raw,

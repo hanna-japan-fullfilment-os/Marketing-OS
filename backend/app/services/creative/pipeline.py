@@ -29,6 +29,7 @@ from pathlib import Path
 
 from PIL import Image
 
+from ...schemas.creative_director import ReferenceTarget, reference_target_from_brief, validate_reference_target
 from ...schemas.ai import ProductZoneDetection
 from ...schemas.ai import SlidePlan, SlideClaimBinding
 from .background import BackgroundIsolator, get_isolator
@@ -197,7 +198,7 @@ def _validate_template_control_inventory(creative_input) -> None:
     nontext_fields = {"width", "height", "composited_image_data_uri", "logo_data_uri", "accent_color",
         "text_color", "font_family", "slide_number", "total_slides", "layout_variant", "campaign_archetype",
         "slide_role", "direction_palette", "secondary_font_family", "typography_direction", "headline_emphasis",
-        "cta_treatment", "hero_treatment", "visual_style", "mood", "negative_space", "masked_scene_background"}
+        "cta_treatment", "hero_treatment", "visual_style", "mood", "negative_space", "masked_scene_background", "reference_target"}
     if {field.name for field in dataclass_fields(TemplateContext)} != text_fields | nontext_fields:
         raise ValueError("Unexamined template context field")
     controls = [creative_input.accent_color, creative_input.text_color, creative_input.font_family,
@@ -208,6 +209,11 @@ def _validate_template_control_inventory(creative_input) -> None:
 
 def validate_render_slide_contract(creative_input):
     plan = creative_input.slide_plan
+    target = reference_target_from_brief(plan.visual_brief) if plan is not None else None
+    if creative_input.reference_target != target:
+        raise ValueError("Render target contract substitution")
+    if target is not None:
+        validate_reference_target(target, plan.reference_assets)
     if plan is None:
         return  # Historical/local renders remain valid, but cannot obtain approval.
     if not isinstance(plan, SlidePlan) or not plan.slide_id or not plan.selection_rationale or plan.product_asset is None:
@@ -275,6 +281,7 @@ class SlideCreativeInput:
     # `logo_path` below, per the brief's "no AI-generated logos" rule.
     recreated_image: Image.Image | None = None
     locked_product_composite: TrustedProductComposite | None = None
+    reference_target: ReferenceTarget | None = None
     slide_plan: SlidePlan | None = None
     # Round 17 fields for the `feature_showcase` template — passed straight
     # through to TemplateContext (see templates.py::_build_feature_showcase).
@@ -945,6 +952,7 @@ async def render_slide(
 
     logo_data_uri = _file_to_data_uri(creative_input.logo_path) if creative_input.logo_path else None
     ctx = TemplateContext(
+        reference_target=creative_input.reference_target,
         width=fmt.width,
         height=fmt.height,
         composited_image_data_uri=_image_to_data_uri(composited),
@@ -1023,6 +1031,7 @@ async def render_slide(
     if creative_input.slide_plan is not None:
         context_path = build_render_context_path(output_path)
         context_path.write_text(json.dumps({
+            "reference_target": creative_input.reference_target.model_dump() if creative_input.reference_target else None,
             "slide_contract": creative_input.slide_plan.model_dump(),
             "slide_contract_sha256": slide_contract_digest(creative_input.slide_plan),
             "render_sha256": hashlib.sha256(png_bytes).hexdigest(),
@@ -1195,7 +1204,7 @@ def persist_render_context(
     }
     if context_path.exists():
         previous = json.loads(context_path.read_text(encoding="utf-8"))
-        for key in ("slide_contract", "slide_contract_sha256", "render_sha256", "composite_sha256", "complete_text_contract", "rendered_text_fields", "structural_text"):
+        for key in ("reference_target", "slide_contract", "slide_contract_sha256", "render_sha256", "composite_sha256", "complete_text_contract", "rendered_text_fields", "structural_text"):
             if key in previous:
                 payload[key] = previous[key]
 

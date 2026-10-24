@@ -51,6 +51,8 @@ from __future__ import annotations
 
 from app.services.locked_product_pipeline import prepared_product_placement
 
+from app.schemas.creative_director import reference_target_from_brief, validate_reference_target
+
 import io
 import hashlib
 import json
@@ -727,6 +729,7 @@ async def generate_ai_background(
     otherwise have succeeded. Callers fall back to `make_background(...)` when this
     returns `None`.
     """
+    target = getattr(creative_direction, "reference_target", None)
     try:
         if selected_references is not None:
             reference_art_direction_only = True
@@ -778,21 +781,34 @@ async def generate_ai_background(
                 f"Texture: {creative_direction.texture}. "
                 f"{creative_direction.scene_generation_prompt}"
             ).strip()
+        target = creative_direction.reference_target if creative_direction is not None else None
+        if target is not None:
+            if len(reference_paths) != 1 or hashlib.sha256(Path(reference_paths[0]).read_bytes()).hexdigest() != target.sha256:
+                raise ValueError("Generation target reference pixels mismatch")
+            environment = target.grammar.model_dump(include={"background", "material", "lighting", "depth", "color_behavior", "premium_signals"})
+            target_note = "OWNER TARGET " + target.reference_id + " SHA256 " + target.sha256 + ": " + json.dumps(environment)
+        else:
+            target_note = "Reference images guide environment, lighting, palette, material and finish only."
         prompt = (
-            f"A premium product-marketing background scene for the brand '{brand.name}'. "
-            f"{style_notes} {visual_brief}{direction_note} "
-            "No text of any kind, no exact product label or packaging text, no brand logo, no "
-            "headline/body/CTA copy, no price or discount graphic, no legal or disclaimer text, no "
-            "people, no product in frame — just an evocative background scene (surface, atmosphere, "
-            "environment, lighting); the real product photo and all copy/logo/legal text are added "
-            "separately afterward as real, unaltered elements."
-        ).strip()
+            "BACKGROUND ONLY. QUALITY_AND_COMPOSITION_REFERENCE_NOT_PRODUCT_FACT_EVIDENCE. "
+            "Never copy reference claims or product facts. Create an empty premium environment/surface with depth and coherent light. "
+            + target_note +
+            " References may depict products: exclude every product/package, printed label, logo and "
+            "advertising element from the generation target. Reserve clear space for later deterministic "
+            "product and typography. NO PRODUCT OBJECTS; NO PRODUCT PACKAGING; NO PRODUCT DUPLICATES; "
+            "NO BRAND MARKS; NO GENERATED LABELS; NO GENERATED TEXT; NO FAKE AWARDS; NO FAKE BADGES. "
+            "Do not reproduce any object or packaging from the target. Never generate a pouch, bottle, "
+            "box, ghost product, synthetic secondary branded product or human. "
+            "The approved product is added once afterward by the deterministic compositor."
+        )
         size = _nearest_ai_image_size(width, height, model=model)
         image_bytes = await image_provider.generate(
             prompt=prompt, size=size, model=model, reference_images=reference_paths or None, quality=quality,
         )
         return Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    except Exception:  # noqa: BLE001 - best-effort; caller falls back to the gradient
+    except Exception:  # noqa: BLE001
+        if target is not None:
+            raise  # Owner target cannot silently degrade to a generic background.
         return None
 
 
@@ -1847,6 +1863,12 @@ def validate_slide_provenance(db, campaign, plan: SlidePlan):
         raise ValueError("Reference selection substitution")
     if len(set(plan.reference_asset_ids)) != len(plan.reference_asset_ids):
         raise ValueError("Duplicate selected references")
+    target = reference_target_from_brief(plan.visual_brief)
+    if target is not None:
+        validate_reference_target(target, plan.reference_assets)
+        registered = db.get(BrandAsset, target.reference_id)
+        if registered is None or registered.label not in {"owner-approved-target", "approved-custom-gpt-quality-benchmark"}:
+            raise ValueError("Unapproved target reference")
     for selected_ref in plan.reference_assets:
         ref = db.get(BrandAsset, selected_ref.asset_id)
         if (ref is None or ref.brand_id != campaign.brand_id or ref.kind != "visual_reference"
@@ -1928,7 +1950,18 @@ def _bind_slide_provenance(db, campaign, slides, *, language, cta, select_claims
             plan = plan.model_copy(update={"verified_claim_ids": selected_ids})
         # Caller-supplied snapshots cannot replace the host's canonical identities.
         product_ref = _asset_reference(asset)
-        reference_refs = [_asset_reference(ref, reference=True) for ref in refs]
+        target = reference_target_from_brief(plan.visual_brief)
+        selected_refs = refs
+        if target is not None:
+            selected = db.get(BrandAsset, target.reference_id)
+            if (selected is None or selected.brand_id != campaign.brand_id
+                    or selected.kind != "visual_reference"
+                    or selected.label not in {"owner-approved-target", "approved-custom-gpt-quality-benchmark"}):
+                raise ValueError("Owner-approved target is not registered")
+            selected_refs = [selected]
+        reference_refs = [_asset_reference(ref, reference=True) for ref in selected_refs]
+        if target is not None:
+            validate_reference_target(target, reference_refs)
         evidence = [_claim_reference(db, key, asset.product_id) for key in plan.verified_claim_ids]
         if plan.evidence_references and plan.evidence_references != evidence:
             raise ValueError("Planner supplied inconsistent evidence references")
@@ -5024,7 +5057,7 @@ async def run_visuals_stage(
             structures={"creative_direction": {
                 key: item
                 for key, item in primary_creative_direction.model_dump().items()
-                if key not in {"prohibited_elements", "negative_constraints"}
+                if key not in {"prohibited_elements", "negative_constraints", "reference_target"}
             }},
         )
 
@@ -5188,6 +5221,7 @@ async def run_visuals_stage(
             generated_background=generated_background, product_zone_detection=zone_detection,
             recreated_image=recreated_image,
             locked_product_composite=locked_result,
+            reference_target=primary_creative_direction.reference_target,
             slide_plan=slide,
             # Round 17 feature_showcase fields — also suppressed when the AI baked
             # its own text into a recreated image, same reasoning as eyebrow/etc
@@ -5549,11 +5583,15 @@ async def _generate_creative_direction(
 verified_facts_note: str = "") -> CreativeDirection:
     """Resolve one concrete product-aware slide direction."""
 
+    target = reference_target_from_brief(getattr(slide, "visual_brief", ""))
+    if target is not None:
+        validate_reference_target(target, slide.reference_assets)
+        feedback_note += "\nOWNER TARGET ACTIVE CONSTRAINT: " + target.model_dump_json()
     if ai_provider is None or master_concept is None:
-        return fallback
+        return fallback.model_copy(update={"reference_target": target})
 
     try:
-        return await ai_provider.generate_structured(
+        direction = await ai_provider.generate_structured(
             system=(
                 (("You are a senior advertising creative director defining one "
                 "concrete marketing slide. Ground every decision in the supplied "
@@ -5606,7 +5644,12 @@ verified_facts_note: str = "") -> CreativeDirection:
             model=model,
         )
 
+        if direction.reference_target is not None and direction.reference_target != target:
+            raise ValueError("Creative direction substituted owner target")
+        return direction.model_copy(update={"reference_target": target})
     except Exception:  # noqa: BLE001
+        if target is not None:
+            raise  # Explicit target cannot silently degrade to generic direction.
         return fallback
 
 
@@ -6074,7 +6117,7 @@ product=None, verified_facts_note: str = "") -> int:
                         structures={"creative_direction": {
                             key: item
                             for key, item in creative_direction.model_dump().items()
-                            if key not in {"prohibited_elements", "negative_constraints"}
+                            if key not in {"prohibited_elements", "negative_constraints", "reference_target"}
                         }},
                     )
                     if ai_provider is not None:
@@ -6183,6 +6226,7 @@ product=None, verified_facts_note: str = "") -> int:
                         font_family=brand_style.primary_font,
                         generated_background=generated_background, recreated_image=recreated_image,
                         locked_product_composite=locked_result, slide_plan=slide,
+                        reference_target=creative_direction.reference_target,
                         badge_text="" if text_baked_in else getattr(slide, "badge_text", ""),
                         intro="" if text_baked_in else getattr(slide, "intro", ""),
                         features=[] if text_baked_in else slide_features,

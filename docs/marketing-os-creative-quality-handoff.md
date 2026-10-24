@@ -277,3 +277,56 @@ The slide-1 calibration's package-label clutter finding remains a failed visual
 acceptance. Geometry verification alone does not establish creative QA PASS or
 operator publishability. Preserve that failed artifact and its original report;
 any future paid calibration requires separate authorization and canonical QA.
+
+
+## Owner target reference contract (count-preserving)
+
+A governed prepared `visual_brief` may contain `REFERENCE_TARGET`, a typed
+`ReferenceTarget`: exact `reference_id`, lowercase SHA256, `role: TARGET`,
+`source: OWNER_APPROVED_TARGET`, minimum fidelity (85-100), and `ReferenceGrammar`.
+The selected BrandAsset must be a visual_reference in the same brand with an
+owner-managed `owner-approved-target` or existing `approved-custom-gpt-quality-benchmark`
+label. Explicit target selection overrides latest/generic benchmark lookup. Target
+snapshots must be the single selected reference and resolve to matching real bytes.
+Role INSPIRATION does not activate or satisfy this target contract.
+
+The grammar uses controlled style values for typeface, headline scale/position,
+supporting-copy position, density, callout treatment, environment/materials,
+lighting/depth, negative space, color/hierarchy and production-finish signals.
+It contains no new campaign copy, product facts or factual badges. Text creative
+direction receives this grammar and exact identity, never image pixels. Image
+generation receives the exact target pixels but only a scene-only specification:
+NO PRODUCT OBJECTS, PACKAGING, DUPLICATES, BRAND MARKS, GENERATED LABELS/TEXT,
+FAKE AWARDS or BADGES. A reference's product is explicitly excluded. Positive
+product/pouch instructions and arbitrary full-scene prose are not concatenated
+into this background request. Prompt obedience alone is not acceptance.
+
+Deterministic rendering consumes the same typed grammar rather than imposing a
+pale editorial panel. All visible text retains existing claim/evidence binding;
+no extra promotional wording is injected through CSS or grammar. Existing product
+placement, aspect ratio and native/final dimensions remain unchanged.
+
+The existing final vision call receives labeled owner-target pixels, native
+backgrounds, the factual source photo and final output(s). Missing target images,
+identity substitution, missing native backgrounds, low reference fidelity, or
+unknown/positive generated-product/duplicate-product findings cannot PASS, even
+with a high generic score. Reference checks compare composition, hierarchy, type,
+placement, density, callouts, negative space, environment, light/depth/materials,
+color and production finish. Operator publishability remains a human decision.
+Legacy campaigns without a target retain their existing renderer and QA contracts.
+Background generation now consistently uses the background-only instruction.
+
+No extra calls: calibration stays 1 image / 5 text / 2 vision; full mode stays
+6 / 10 / 2. Added reference/native images change payload exposure, not call class
+or count. Before a future paid run disclose the new image/token payload; retain
+all pre-call caps, image-payload limits, zero retries and no automatic regeneration.
+
+LuLuLun direction data and artwork are NOT changed by this system capability.
+A later governed direction update must bind the exact owner target, attach its
+approved structured grammar, replace restrained-serif/sparse/quiet directives
+and populate only approved supported claim/callout text. Keep 46% lower-right and
+1088x1360 native -> 1080x1350 final. The @cosme artwork conflict remains unresolved:
+(A) acquire/approve a genuine exact-variant label-free asset, or (B) explicitly
+permit depiction of the authentic label under owner policy, or (C) submit another
+evidence-backed exact-product asset strategy. No automatic selection, label
+retouching, 28-sheet substitution, or next paid run is authorized.

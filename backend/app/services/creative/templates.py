@@ -15,6 +15,7 @@ import html
 from dataclasses import dataclass, field
 from typing import Callable
 
+from ...schemas.creative_director import ReferenceTarget
 from .compositor import ProductZone
 
 # Build 5 repair (Part 3): a version identity for the TEMPLATE/LAYOUT SYSTEM as a
@@ -79,6 +80,7 @@ class TemplateContext:
     width: int
     height: int
     composited_image_data_uri: str
+    reference_target: ReferenceTarget | None = None
     eyebrow: str = ""
     headline: str = ""
     body: str = ""
@@ -277,6 +279,7 @@ def _build_premium_product_hero(ctx: TemplateContext) -> str:
     max-width: 92%;
   }}
   {_slide_marker_css(ctx)}
+{_reference_css(ctx)}
 </style>
 </head>
 <body>
@@ -673,6 +676,36 @@ def _resolve_commercial_style(
         "cta_text": cta_text,
         "cta_border": cta_border,
     }
+
+
+def _reference_css(ctx: TemplateContext) -> str:
+    if ctx.reference_target is None:
+        return ""
+    target = ReferenceTarget.model_validate(ctx.reference_target.model_dump())
+    g = target.grammar
+    font = {"condensed": "Impact, 'Arial Narrow', sans-serif", "serif": "Georgia, serif", "sans": "Arial, sans-serif"}[g.typography]
+    dark = g.background == "dark_cinematic"
+    color = "#fff" if dark else "#17131d"
+    panel = "transparent" if dark else "rgba(255,255,255,.75)"
+    side = "left" if g.headline_position == "upper_left" else "right"
+    density = {"dense": "1.05", "balanced": "1.2", "sparse": "1.4"}[g.density]
+    accent = "#e5bd60" if g.callout_treatment == "gold" else color
+    width = 44 if g.negative_space == "modular" else 36
+    border = "0" if g.callout_treatment == "minimal" else "1px solid " + accent
+    size = round(ctx.width * g.headline_scale * (1 if g.hierarchy == "headline_hero_callouts" else .9))
+    # Values are enums/numeric ranges: none can inject CSS or extra factual text.
+    return f"""
+    .canvas .art-overlay {{background:none!important}}
+    .canvas .text-block {{background:{panel}!important;color:{color}!important;
+      backdrop-filter:none!important;left:auto!important;right:auto!important;{side}:4%!important;
+      width:{width}%!important;max-height:83%!important;top:8%!important}}
+    .canvas .headline {{font-family:{font}!important;font-size:{size}px!important;
+      line-height:1!important;text-transform:uppercase!important;color:{color}!important}}
+    .canvas .body,.canvas .intro,.canvas .feature-copy {{color:{color}!important;line-height:{density}!important}}
+    .canvas .feature-card,.canvas .callout {{border:{border}!important;
+      background:{panel}!important;box-shadow:none!important}}
+    .canvas .feature-title,.canvas .callout-value {{color:{accent}!important;font-weight:800!important}}
+    """
 
 
 def _build_feature_showcase(ctx: TemplateContext) -> str:
@@ -2053,6 +2086,7 @@ def _build_feature_showcase(ctx: TemplateContext) -> str:
   }}
 
   {_slide_marker_css(ctx)}
+{_reference_css(ctx)}
 </style>
 </head>
 

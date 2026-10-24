@@ -5,7 +5,72 @@ against one of these, never parsed from free-form text.
 """
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict, model_validator
+from typing import Literal
+import json
+import hashlib
+from pathlib import Path
+
+
+class ReferenceGrammar(BaseModel):
+    """Owner-authored style controls, never product facts or additional copy."""
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    product_treatment: Literal["immutable_layer"] = "immutable_layer"
+    typography: Literal["condensed", "sans", "serif"]
+    headline_scale: float = Field(ge=0.04, le=0.14)
+    headline_position: Literal["upper_left", "upper_right"]
+    supporting_copy_position: Literal["left_column", "right_column"]
+    callout_treatment: Literal["outlined", "gold", "minimal"]
+    density: Literal["dense", "balanced", "sparse"]
+    background: Literal["dark_cinematic", "light_editorial", "neutral_studio"]
+    material: Literal["glossy", "stone", "matte"]
+    lighting: Literal["dramatic_rim", "soft_key", "high_key"]
+    depth: Literal["layered", "shallow"]
+    negative_space: Literal["modular", "broad"]
+    color_behavior: Literal["high_contrast", "tonal"]
+    hierarchy: Literal["headline_hero_callouts", "hero_headline_body"]
+    premium_signals: list[Literal["specular_highlights", "metallic_accents", "coherent_shadows"]] = []
+    prohibited_elements: list[Literal["generated_products", "generated_text", "unverified_badges"]] = []
+
+    @model_validator(mode="after")
+    def aligned_text_columns(self):
+        side = "left" if self.headline_position == "upper_left" else "right"
+        if self.supporting_copy_position != side + "_column":
+            raise ValueError("Unsupported split headline/copy columns")
+        return self
+
+
+class ReferenceTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    reference_id: str = Field(min_length=1)
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    role: Literal["TARGET"]
+    source: Literal["OWNER_APPROVED_TARGET"]
+    minimum_fidelity: int = Field(default=85, ge=85, le=100)
+    grammar: ReferenceGrammar
+
+
+def reference_target_from_brief(brief: str) -> ReferenceTarget | None:
+    if not brief or not brief.lstrip().startswith("{"):
+        return None
+    value = json.loads(brief)
+    if not isinstance(value, dict):
+        raise ValueError("Reference brief must be an object")
+    if "REFERENCE_TARGET" not in value:
+        return None
+    return ReferenceTarget.model_validate(value["REFERENCE_TARGET"])
+
+
+def validate_reference_target(target: ReferenceTarget, references) -> Path:
+    matches = [r for r in references if r.asset_id == target.reference_id]
+    if len(matches) != 1 or len(references) != 1:
+        raise ValueError("Owner target must be the single selected reference")
+    ref = matches[0]
+    path = Path(ref.path)
+    if (ref.role != "visual_reference" or ref.sha256 != target.sha256
+            or hashlib.sha256(path.read_bytes()).hexdigest() != target.sha256):
+        raise ValueError("Owner target identity/pixels mismatch")
+    return path
 
 
 class MasterCampaignConcept(BaseModel):
@@ -78,6 +143,7 @@ class CreativeDirection(BaseModel):
     module's docstring and Part H).
     """
 
+    reference_target: ReferenceTarget | None = None
     concept_name: str = ""
     platform: str = ""
     content_type: str = ""

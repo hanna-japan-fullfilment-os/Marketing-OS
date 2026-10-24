@@ -1770,3 +1770,17 @@ def test_failed_session_setup_closes_unchecked_out_memory(wal_isolation_source, 
     with pytest.raises(RuntimeError, match="session unavailable"):
         isolated_calibration_session(path)
     with pytest.raises(sqlite3.ProgrammingError): memories[0].execute("select 1")
+
+
+@pytest.mark.asyncio
+async def test_owner_grammar_stays_text_and_pixel_qa_stays_within_two_vision_calls():
+    ledger = provider_module._HardBudgetLedger(10, call_limits=LIMITS)
+    responses = provider_module._BudgetedResponsesProxy(FakeResponses(), ledger)
+    grammar = {"reference_id": "owner", "role": "TARGET", "grammar": {"typography": "condensed"}}
+    await responses.create(model="gpt-5.1", input=[{"role": "user", "content": str(grammar)}])
+    assert ledger.call_counts["text"] == 1 and ledger.call_counts["vision"] == 0
+    for _ in range(2):
+        await responses.create(model="gpt-5.1", input=[{"type": "input_image", "image_url": "fixture"}])
+    with pytest.raises(provider_module.HardBudgetExceededError, match="HARD_CALL_CAP"):
+        await responses.create(model="gpt-5.1", input=[{"type": "input_image", "image_url": "fixture"}])
+    assert ledger.call_counts["vision"] == 2

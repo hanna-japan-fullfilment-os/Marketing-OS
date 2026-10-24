@@ -68,7 +68,8 @@ class AIProvider(Protocol):
         ...
 
     async def critique_creative(
-        self, *, image_paths: list[Path], source_image_path: Path | None, context: str, model: str
+        self, *, image_paths: list[Path], source_image_path: Path | None, context: str, model: str,
+        reference_target=None, reference_paths: list[Path] | None = None, background_paths: list[Path] | None = None
     ) -> CreativeCritiqueResult:
         """Build 3, Part B: the multimodal structured critic behind `services/
         qa_engine.py::run_creative_qa` — shows the model the real finished

@@ -35,7 +35,7 @@ as "passed") rather than crashing.
 """
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, StrictBool
 
 
 class TechnicalQAResult(BaseModel):
@@ -73,6 +73,13 @@ class CreativeCritiqueResult(BaseModel):
     (rewrite just this variant's visual direction and regenerate its scene) —
     an unrecognized value is simply not actioned, never causing a crash.
     """
+
+    reference_id: str | None = None
+    reference_sha256: str | None = None
+    reference_fidelity: int | None = Field(default=None, ge=0, le=100, strict=True)
+    reference_findings: list[str] = []
+    background_has_product: StrictBool | None = None
+    unintended_duplicate_product: StrictBool | None = None
 
     overall_quality: int = 0
     brand_alignment: int = 0

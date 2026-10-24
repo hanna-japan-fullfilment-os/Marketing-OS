@@ -1763,12 +1763,19 @@ class OpenAIProvider:
 
 
     async def critique_creative(
-        self, *, image_paths: list[Path], source_image_path: Path | None, context: str, model: str
+        self, *, image_paths: list[Path], source_image_path: Path | None, context: str, model: str,
+        reference_target=None, reference_paths: list[Path] | None = None, background_paths: list[Path] | None = None
     ) -> CreativeCritiqueResult:
         """Build 3, Part B — see `AIProvider.critique_creative`'s docstring for
         the contract. Mirrors `check_product_fidelity`/`analyze_visual_style`'s
         own pattern: real image bytes only, never a description.
         """
+        if reference_target is not None:
+            if not reference_paths or len(reference_paths) != 1 or not background_paths:
+                raise ValueError("Target QA requires actual target and native background pixels")
+            import hashlib
+            if hashlib.sha256(reference_paths[0].read_bytes()).hexdigest() != reference_target.sha256:
+                raise ValueError("QA target pixels changed")
         client = self._require_client()
 
         def _data_uri(path: Path) -> str:
@@ -1799,6 +1806,25 @@ class OpenAIProvider:
                 ),
             }
         ]
+        if reference_target is not None:
+            content.append({"type": "input_text", "text":
+                "STRICT TARGET CONTRACT: " + reference_target.model_dump_json() +
+                " Compare composition, hierarchy, headline treatment/placement, density, callouts, "
+                "negative space, background, lighting, depth, materials, color and premium character. "
+                "Return reference_id/sha256 and reference_fidelity 0-100. Reference content is style "
+                "authority ONLY, never permission to copy claims, awards or product pixels. "
+                "The following image is the OWNER TARGET, not an output or factual source."})
+            content.append({"type": "input_image", "image_url": _data_uri(reference_paths[0])})
+            content.append({"type": "input_text", "text":
+                "Next images are NATIVE BACKGROUNDS. They must contain NO product objects, packaging, "
+                "brand marks, labels, generated text, awards or badges. Set background_has_product "
+                "true for any such violation; false only after inspecting all. The reference's product "
+                "is NOT permitted in backgrounds. Finished outputs must have exactly one authentic "
+                "product; set unintended_duplicate_product true for duplicate/ghost/synthetic packages. "
+                "Both violations are hard failures. Missing checks fail closed."})
+            for path in background_paths:
+                content.append({"type": "input_image", "image_url": _data_uri(path)})
+            content.append({"type": "input_text", "text": "Next: real SOURCE photo, then FINAL output(s)."})
         if source_image_path is not None:
             content.append({"type": "input_image", "image_url": _data_uri(source_image_path)})
         for image_path in image_paths:

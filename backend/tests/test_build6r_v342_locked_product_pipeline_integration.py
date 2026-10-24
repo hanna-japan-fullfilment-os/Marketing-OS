@@ -381,3 +381,154 @@ def test_two_stage_dimensions_remain_explicit():
     from app.services.ai import openai_provider
     source = inspect.getsource(openai_provider)
     assert "1088x1360" in source
+
+
+@pytest.fixture
+def owner_target(tmp_path):
+    from app.schemas.creative_director import ReferenceTarget
+    path = tmp_path / "owner-target.png"
+    Image.new("RGB", (60, 80), "purple").save(path)
+    target = ReferenceTarget.model_validate({
+        "reference_id": "owner-target", "sha256": _sha256(path), "role": "TARGET",
+        "source": "OWNER_APPROVED_TARGET", "grammar": {
+            "typography": "condensed", "headline_scale": .09, "headline_position": "upper_left",
+            "supporting_copy_position": "left_column", "callout_treatment": "gold", "density": "dense",
+            "background": "dark_cinematic", "material": "glossy", "lighting": "dramatic_rim",
+            "depth": "layered", "negative_space": "modular", "color_behavior": "high_contrast",
+            "hierarchy": "headline_hero_callouts"}})
+    ref = SimpleNamespace(asset_id=target.reference_id, path=str(path), sha256=target.sha256, role="visual_reference")
+    return target, path, ref
+
+
+def test_target_identity_rejects_wrong_or_missing_pixels(owner_target):
+    from app.schemas.creative_director import validate_reference_target
+    target, path, ref = owner_target
+    assert validate_reference_target(target, [ref]) == path
+    with pytest.raises(ValueError):
+        validate_reference_target(target, [])
+    with pytest.raises(ValueError):
+        validate_reference_target(target.model_copy(update={"reference_id": "generic"}), [ref])
+    path.write_bytes(b"changed")
+    with pytest.raises(ValueError):
+        validate_reference_target(target, [ref])
+
+
+def test_target_role_cannot_be_inspiration(owner_target):
+    from app.schemas.creative_director import ReferenceTarget
+    target, _, _ = owner_target
+    with pytest.raises(ValueError):
+        ReferenceTarget.model_validate({**target.model_dump(), "role": "INSPIRATION"})
+
+
+@pytest.mark.asyncio
+async def test_target_grammar_direction_is_text_only(owner_target):
+    import json
+    from app.schemas.creative_director import CreativeDirection
+    from app.services.ai.openai_provider import _response_has_image
+    target, _, ref = owner_target
+    calls = []
+    class Provider:
+        async def generate_structured(self, **kwargs):
+            calls.append(kwargs)
+            return CreativeDirection()
+    slide = SimpleNamespace(visual_brief=json.dumps({"REFERENCE_TARGET": target.model_dump()}),
+                            reference_assets=[ref], headline="Discover", purpose="hook")
+    result = await orchestrator._generate_creative_direction(Provider(),
+        master_concept=SimpleNamespace(concept_name="Test", campaign_promise="", product_category_context="",
+            campaign_archetype="premium_discovery", archetype_reasoning="", visual_story_system="",
+            hero_treatment="", proof_or_demo_strategy="", visual_identity=""),
+        adaptation=SimpleNamespace(adaptation_strategy="", narrative_shape=""), platform="instagram",
+        language="pt-BR", content_type="carousel", slide=slide, model="fake", fallback=CreativeDirection())
+    assert result.reference_target == target
+    assert target.reference_id in calls[0]["user"]
+    assert '"typography":"condensed"' in calls[0]["user"]
+    assert not _response_has_image(calls[0])
+
+
+@pytest.mark.asyncio
+async def test_target_background_excludes_conflicting_product_prose(owner_target, monkeypatch):
+    from app.schemas.creative_director import CreativeDirection
+    target, path, _ = owner_target
+    monkeypatch.setattr(orchestrator, "_brand_style_prompt_notes", lambda brand: "Please generate a pouch")
+    calls = []
+    class Images:
+        async def generate(self, **kwargs):
+            calls.append(kwargs)
+            return _png_bytes((1088, 1360))
+    direction = CreativeDirection(reference_target=target, scene_generation_prompt="Show a giant branded bottle")
+    result = await orchestrator.generate_ai_background(SimpleNamespace(), image_provider=Images(),
+        brand=SimpleNamespace(name="Test"), model="fake", width=1080, height=1350,
+        creative_direction=direction, visual_brief="Generate a pouch with label", selected_references=[path])
+    assert result is not None
+    assert calls[0]["reference_images"] == [path]
+    assert "BACKGROUND ONLY" in calls[0]["prompt"] and "NO PRODUCT PACKAGING" in calls[0]["prompt"]
+    assert "Show a giant" not in calls[0]["prompt"] and "Generate a pouch with" not in calls[0]["prompt"]
+    assert target.reference_id in calls[0]["prompt"]
+
+
+@pytest.mark.parametrize("template", ["feature_showcase", "premium_product_hero"])
+def test_reference_renderer_grammar_overrides_generic_panel(owner_target, template):
+    from app.services.creative.templates import TemplateContext, get_template
+    target, _, _ = owner_target
+    html = get_template(template).build_html(TemplateContext(width=1080, height=1350,
+        composited_image_data_uri="data:image/png;base64,fixture", reference_target=target,
+        headline="Discover", body="Details", layout_variant="hero_editorial"))
+    assert "Impact" in html and "font-size:97px!important" in html
+    assert "background:transparent!important" in html
+    assert "border:1px solid #e5bd60!important" in html
+    assert "left:4%!important" in html
+
+
+def test_target_grammar_cannot_inject_copy_or_css(owner_target):
+    from app.schemas.creative_director import ReferenceTarget
+    target, _, _ = owner_target
+    data = target.model_dump(); data["grammar"]["typography"] = "serif; content: 'fake claim'"
+    with pytest.raises(ValueError):
+        ReferenceTarget.model_validate(data)
+
+
+@pytest.mark.parametrize("failure", ["missing_target", "metadata_only", "changed_background", "wrong_renderer_target"])
+def test_final_qa_requires_same_target_pixels_and_native_background(owner_target, tmp_path, failure):
+    import json
+    from app.schemas.ai import SlidePlan
+    from app.services.qa_engine import reference_qa_inputs
+    from app.services.creative.pipeline import build_render_context_path
+    target, path, ref = owner_target
+    image = tmp_path / "final.png"; Image.new("RGB", (1080, 1350)).save(image)
+    background = tmp_path / "background.png"; Image.new("RGB", (1088, 1360)).save(background)
+    plan = SlidePlan(slide_number=1, purpose="hook", headline="Discover",
+        visual_brief=json.dumps({"REFERENCE_TARGET": target.model_dump()}),
+        reference_asset_ids=[target.reference_id], reference_assets=[vars(ref)])
+    context = dict(slide_contract=plan.model_dump(), reference_target=target.model_dump(),
+                   visual_base_path=str(background), visual_base_kind="generated_background",
+                   visual_base_sha256=_sha256(background))
+    ctx_path = build_render_context_path(image)
+    ctx_path.write_text(json.dumps(context))
+    resolved, refs, backgrounds = reference_qa_inputs([image])
+    assert resolved == target and refs == [path] and backgrounds == [background]
+    if failure == "missing_target":
+        path.unlink()
+    elif failure == "metadata_only":
+        context.pop("reference_target")
+    elif failure == "changed_background":
+        background.write_bytes(b"changed")
+    else:
+        context["reference_target"]["reference_id"] = "generic-benchmark"
+    ctx_path.write_text(json.dumps(context))
+    with pytest.raises((ValueError, OSError, KeyError)):
+        reference_qa_inputs([image])
+
+
+@pytest.mark.asyncio
+async def test_background_target_pixel_substitution_cannot_fallback(owner_target, monkeypatch):
+    from app.schemas.creative_director import CreativeDirection
+    target, path, _ = owner_target
+    monkeypatch.setattr(orchestrator, "_brand_style_prompt_notes", lambda brand: "")
+    class Images:
+        async def generate(self, **kwargs):
+            raise AssertionError("Provider must not be invoked")
+    path.write_bytes(b"substituted")
+    with pytest.raises(ValueError, match="target reference pixels mismatch"):
+        await orchestrator.generate_ai_background(SimpleNamespace(), image_provider=Images(),
+            brand=SimpleNamespace(name="Test"), model="fake", width=1080, height=1350,
+            creative_direction=CreativeDirection(reference_target=target), selected_references=[path])
