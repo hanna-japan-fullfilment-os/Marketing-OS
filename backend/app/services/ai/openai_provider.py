@@ -1800,15 +1800,27 @@ class OpenAIProvider:
                     "CTA, unnatural language) or `\"creative_direction\"` when the main problem is the visual "
                     "scene/composition itself.\n\n"
                     f"Context:\n{context}\n\n"
-                    "The FIRST image below (if present) is the real, verified source product photo. The "
-                    "remaining image(s) are the finished creative — a single slide, or an ordered carousel "
+                    "Images are explicitly labeled below: target, native backgrounds, source, then finals. "
+                    "Without a target, the first image (if present) is the source, followed by finals. "
                     "(judge `carousel_consistency` only when more than one finished-creative image is given)."
                 ),
             }
         ]
         if reference_target is not None:
             content.append({"type": "input_text", "text":
-                "STRICT TARGET CONTRACT: " + reference_target.model_dump_json() +
+                "SHARED TARGET IDENTITY AND VISUAL LANGUAGE (first slide geometry is NOT universal): " + reference_target.model_dump_json() +
+                " Use PREPARED_REFERENCE_SLIDE_MANIFEST in context for each ordered final's exact "
+                "slide_id, contract_sha256, reference_target grammar and product placement/scale. "
+                "Shared typography, material, lighting, color, density, callout language, hierarchy, "
+                "premium signals and prohibitions must remain coherent. Headline scale/side, supporting "
+                "copy side, negative space and product geometry may vary ONLY as prepared. "
+                "Return slide_reference_results for EVERY supplied final, with exact slide_id and "
+                "contract_sha256, reference_id/sha256, reference_fidelity, background_has_product and "
+                "unintended_duplicate_product. Judge its corresponding native background too. "
+                "Missing, duplicate or foreign slide results fail. Do not average away a weak slide. "
+                "Return campaign_reference_coherent true only when all supplied finals share the "
+                "approved visual language; unrelated aesthetics fail even with high individual scores. "
+                "For a one-slide calibration assess only the supplied slide; do not invent other results. "
                 " Compare composition, hierarchy, headline treatment/placement, density, callouts, "
                 "negative space, background, lighting, depth, materials, color and premium character. "
                 "Return reference_id/sha256 and reference_fidelity 0-100. Reference content is style "

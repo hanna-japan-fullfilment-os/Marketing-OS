@@ -57,6 +57,19 @@ class TechnicalQAResult(BaseModel):
         return {"passed": self.passed, "issues": self.issues, "checks": self.checks}
 
 
+class SlideReferenceQA(BaseModel):
+    """One final image assessed against its exact prepared contract."""
+    model_config = {"extra": "forbid"}
+    slide_id: str
+    contract_sha256: str
+    reference_id: str
+    reference_sha256: str
+    reference_fidelity: int = Field(ge=0, le=100, strict=True)
+    background_has_product: StrictBool
+    unintended_duplicate_product: StrictBool
+    findings: list[str] = []
+
+
 class CreativeCritiqueResult(BaseModel):
     """Part B: the multimodal structured critic's full scorecard — every
     dimension the spec named by name. `hard_fails` here are the CREATIVE
@@ -80,6 +93,8 @@ class CreativeCritiqueResult(BaseModel):
     reference_findings: list[str] = []
     background_has_product: StrictBool | None = None
     unintended_duplicate_product: StrictBool | None = None
+    slide_reference_results: list[SlideReferenceQA] = []
+    campaign_reference_coherent: StrictBool | None = None
 
     overall_quality: int = 0
     brand_alignment: int = 0

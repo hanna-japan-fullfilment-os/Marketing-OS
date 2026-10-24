@@ -330,3 +330,25 @@ and populate only approved supported claim/callout text. Keep 46% lower-right an
 permit depiction of the authentic label under owner policy, or (C) submit another
 evidence-backed exact-product asset strategy. No automatic selection, label
 retouching, 28-sheet substitution, or next paid run is authorized.
+
+## Campaign reference variation QA
+
+Target campaigns share exact owner identity/hash/role/source/threshold and the
+same typography, callout design, density, background/material/lighting/depth,
+color behavior, hierarchy, premium signals and prohibited elements. Headline
+scale/side, supporting-copy side and negative-space enum may vary only according
+to each prepared slide. Product position/scale remain the separate prepared
+placement contract. A rendered sidecar cannot authorize its own variation.
+
+The existing final vision call receives an ordered prepared-slide manifest with
+slide IDs, contract digests, individual grammar and product geometry. It must
+return exact per-slide coverage and explicit campaign-reference coherence.
+Missing, repeated, foreign or stale results fail closed; every slide must meet
+its own fidelity threshold and background-only/one-product checks. High aggregate
+scores cannot hide a weak slide or unrelated aesthetics. Calibration requires
+only the supplied slide's result, while full mode requires all six. Call counts
+remain 1/5/2 and 6/10/2; no extra vision request is introduced.
+
+This QA capability does not approve blank registry labels, mutate the preserved
+52-field direction proposal, resolve product artwork policy, or add renderer
+finishes/icons/circular text. Those remain separate governed steps.

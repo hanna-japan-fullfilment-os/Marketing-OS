@@ -532,3 +532,52 @@ async def test_background_target_pixel_substitution_cannot_fallback(owner_target
         await orchestrator.generate_ai_background(SimpleNamespace(), image_provider=Images(),
             brand=SimpleNamespace(name="Test"), model="fake", width=1080, height=1350,
             creative_direction=CreativeDirection(reference_target=target), selected_references=[path])
+
+
+@pytest.mark.parametrize("variation", ["headline", "scale", "negative_space", "product_position", "product_scale",
+                                      "identity", "typography", "lighting", "material", "unprepared"])
+def test_campaign_reference_variation_requires_shared_language_and_prepared_contract(owner_target, tmp_path, variation):
+    import json
+    from app.schemas.ai import SlidePlan
+    from app.schemas.creative_director import ReferenceTarget
+    from app.services.qa_engine import reference_qa_inputs, reference_qa_manifest
+    from app.services.creative.pipeline import build_render_context_path
+    target, _, ref = owner_target
+    images, plans = [], []
+    for number in (1, 2):
+        data = target.model_dump()
+        brief = {"PRODUCT_PLACEMENT": "right lower half", "PRODUCT_SCALE": "46% canvas width"}
+        if number == 2:
+            if variation == "headline": data["grammar"].update(headline_position="upper_right", supporting_copy_position="right_column")
+            if variation in {"scale", "unprepared"}: data["grammar"]["headline_scale"] = .08
+            if variation == "negative_space": data["grammar"]["negative_space"] = "broad"
+            if variation == "product_position": brief["PRODUCT_PLACEMENT"] = "left lower half"
+            if variation == "product_scale": brief["PRODUCT_SCALE"] = "38% canvas width"
+            if variation == "identity": data["reference_id"] = "other-owner"
+            if variation == "typography": data["grammar"]["typography"] = "serif"
+            if variation == "lighting": data["grammar"]["lighting"] = "high_key"
+            if variation == "material": data["grammar"]["material"] = "stone"
+        current = ReferenceTarget.model_validate(data)
+        brief["REFERENCE_TARGET"] = current.model_dump()
+        plan = SlidePlan(slide_number=number, slide_id=f"slide-{number}", purpose="hook", headline="Discover",
+                         visual_brief=json.dumps(brief), reference_asset_ids=[current.reference_id],
+                         reference_assets=[{**vars(ref), "asset_id": current.reference_id}])
+        image = tmp_path / f"final-{number}.png"
+        background = tmp_path / f"background-{number}.png"
+        Image.new("RGB", (60, 80)).save(background)
+        build_render_context_path(image).write_text(json.dumps(dict(slide_contract=plan.model_dump(),
+            reference_target=current.model_dump(), visual_base_path=str(background),
+            visual_base_kind="generated_background", visual_base_sha256=_sha256(background))))
+        images.append(image); plans.append(plan)
+    if variation == "unprepared":
+        original = json.loads(plans[1].visual_brief)
+        original["REFERENCE_TARGET"] = target.model_dump()
+        plans[1] = plans[1].model_copy(update={"visual_brief": json.dumps(original)})
+        with pytest.raises(ValueError, match="Unprepared"):
+            reference_qa_manifest(images, plans)
+    elif variation in {"identity", "typography", "lighting", "material"}:
+        with pytest.raises(ValueError, match="QA target differs"):
+            reference_qa_inputs(images)
+    else:
+        assert len(reference_qa_manifest(images, plans)) == 2
+        assert reference_qa_inputs(images)[0].reference_id == target.reference_id

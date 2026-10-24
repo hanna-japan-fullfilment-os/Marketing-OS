@@ -420,6 +420,36 @@ def _build_creative_context(
     return "\n".join(lines)
 
 
+def campaign_reference_language(target):
+    """Shared identity/style; prepared slide geometry is checked separately."""
+    value = target.model_dump()
+    for field in ("headline_scale", "headline_position", "supporting_copy_position", "negative_space"):
+        value["grammar"].pop(field)
+    for field in ("premium_signals", "prohibited_elements"):
+        value["grammar"][field] = sorted(value["grammar"][field])
+    return value
+
+
+def reference_qa_manifest(image_paths, prepared_plans):
+    from .creative.pipeline import slide_contract_digest
+    expected = [SlidePlan.model_validate(p) for p in prepared_plans]
+    if len(expected) != len(image_paths) or not expected or len({p.slide_id for p in expected}) != len(expected):
+        raise ValueError("Reference QA requires exact prepared slide coverage")
+    result = []
+    for image, plan in zip(image_paths, expected):
+        ctx = json.loads(build_render_context_path(image).read_text(encoding="utf-8"))
+        rendered = SlidePlan.model_validate(ctx["slide_contract"])
+        target = reference_target_from_brief(plan.visual_brief)
+        if not plan.slide_id or rendered != plan or target is None:
+            raise ValueError("Unprepared reference slide variation")
+        brief = json.loads(plan.visual_brief)
+        result.append({"slide_id": plan.slide_id, "contract_sha256": slide_contract_digest(plan),
+                       "reference_target": target.model_dump(),
+                       "product_placement": brief.get("PRODUCT_PLACEMENT"),
+                       "product_scale": brief.get("PRODUCT_SCALE")})
+    return result
+
+
 def reference_qa_inputs(image_paths):
     target = None
     references, backgrounds = [], []
@@ -431,7 +461,7 @@ def reference_qa_inputs(image_paths):
             if target is not None:
                 raise ValueError("Mixed target and non-target QA outputs")
             continue
-        if target is not None and current != target:
+        if target is not None and campaign_reference_language(current) != campaign_reference_language(target):
             raise ValueError("QA target differs across output slides")
         if ctx.get("reference_target") != current.model_dump():
             raise ValueError("Rendered target identity changed")
@@ -447,7 +477,7 @@ def reference_qa_inputs(image_paths):
     return target, references, backgrounds
 
 
-def reference_qa_hard_fails(creative, target):
+def reference_qa_hard_fails(creative, target, manifest=None):
     fails = []
     if creative is not None and (creative.background_has_product is True or creative.unintended_duplicate_product is True):
         fails.append("reference_hard_fail: generated background product/package or unintended duplicate")
@@ -459,6 +489,26 @@ def reference_qa_hard_fails(creative, target):
             fails.append("reference_hard_fail: target resemblance below required fidelity")
         if creative is None or creative.background_has_product is not False or creative.unintended_duplicate_product is not False:
             fails.append("reference_hard_fail: background-only/one-product checks missing or failed")
+        if manifest is not None:
+            results = creative.slide_reference_results if creative is not None else []
+            expected = {item["slide_id"]: item for item in manifest}
+            if (not expected or len(results) != len(expected)
+                    or len({r.slide_id for r in results}) != len(results)
+                    or {r.slide_id for r in results} != set(expected)):
+                fails.append("reference_hard_fail: missing/duplicate/foreign per-slide QA coverage")
+            for result in results:
+                item = expected.get(result.slide_id)
+                if item is None:
+                    continue
+                required = item["reference_target"]
+                if (result.contract_sha256 != item["contract_sha256"]
+                        or result.reference_id != required["reference_id"]
+                        or result.reference_sha256 != required["sha256"]
+                        or result.reference_fidelity < required["minimum_fidelity"]
+                        or result.background_has_product or result.unintended_duplicate_product):
+                    fails.append("reference_hard_fail: prepared slide fidelity failed: " + result.slide_id)
+            if creative is None or creative.campaign_reference_coherent is not True:
+                fails.append("reference_hard_fail: campaign visual coherence missing or failed")
     return fails
 
 
@@ -1718,8 +1768,14 @@ async def _qa_one_static_variant(
             json.loads(build_render_context_path(path).read_text(encoding="utf-8"))["slide_contract"]).visual_brief) is not None
             for path in image_paths)
         active_target = None
+        reference_manifest = None
         if has_target:
+            prepared_reference_plans = _qa_subset_plans(
+                _planned_slides_for_variant(creative_data_raw, language, spec), campaign,
+                qa_mode=qa_mode, required_slide_numbers=required_slide_numbers)
+            reference_manifest = reference_qa_manifest(image_paths, prepared_reference_plans)
             active_target, target_pixels, background_pixels = reference_qa_inputs(image_paths)
+            scoring_context += "\nPREPARED_REFERENCE_SLIDE_MANIFEST: " + json.dumps(reference_manifest, sort_keys=True)
             target_options = dict(reference_target=active_target, reference_paths=target_pixels,
                                   background_paths=background_pixels)
         creative = await run_creative_qa(
@@ -1766,7 +1822,7 @@ async def _qa_one_static_variant(
         claims_hard_fails = format_claims_hard_fails(claims_result)
 
         overall, hard_fails = _creative_overall_and_fails(technical, platform_fails, language_fails, creative)
-        hard_fails = hard_fails + claims_hard_fails + reference_qa_hard_fails(creative, active_target)
+        hard_fails = hard_fails + claims_hard_fails + reference_qa_hard_fails(creative, active_target, reference_manifest)
         # Fail closed (REQUIREMENT 5): an unsupported claim can never receive
         # PASS regardless of how high `overall` scores otherwise.
         if current_slide_attestations(db, campaign, variant, creative_data=creative_data_raw,

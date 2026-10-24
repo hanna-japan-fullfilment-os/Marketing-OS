@@ -568,3 +568,33 @@ def test_correct_target_and_background_only_are_structurally_acceptable():
         reference_fidelity=90, background_has_product=False, unintended_duplicate_product=False)
     assert reference_qa_hard_fails(result, target) == []
     assert reference_qa_hard_fails(None, target)
+
+
+@pytest.mark.parametrize("fault", [None, "low_slide", "missing", "duplicate", "foreign", "stale",
+                                  "wrong_target", "background", "second_product", "incoherent", "unknown_coherence"])
+def test_prepared_reference_results_require_every_slide_and_coherence(fault):
+    from types import SimpleNamespace
+    from app.schemas.qa import CreativeCritiqueResult
+    from app.services.qa_engine import reference_qa_hard_fails
+    target = SimpleNamespace(reference_id="owner", sha256="a" * 64, minimum_fidelity=85)
+    manifest = [{"slide_id": str(i), "contract_sha256": str(i) * 64,
+                 "reference_target": dict(reference_id="owner", sha256="a" * 64, minimum_fidelity=85)}
+                for i in (1, 2)]
+    results = [dict(slide_id=m["slide_id"], contract_sha256=m["contract_sha256"],
+                   reference_id="owner", reference_sha256="a" * 64, reference_fidelity=95,
+                   background_has_product=False, unintended_duplicate_product=False) for m in manifest]
+    values = dict(overall_quality=99, reference_id="owner", reference_sha256="a" * 64,
+                  reference_fidelity=99, background_has_product=False, unintended_duplicate_product=False,
+                  campaign_reference_coherent=True)
+    if fault == "low_slide": results[1]["reference_fidelity"] = 84
+    if fault == "missing": results.pop()
+    if fault == "duplicate": results[1] = dict(results[0])
+    if fault == "foreign": results[1]["slide_id"] = "foreign"
+    if fault == "stale": results[1]["contract_sha256"] = "changed"
+    if fault == "wrong_target": results[1]["reference_id"] = "other"
+    if fault == "background": results[1]["background_has_product"] = True
+    if fault == "second_product": results[1]["unintended_duplicate_product"] = True
+    if fault == "incoherent": values["campaign_reference_coherent"] = False
+    if fault == "unknown_coherence": values["campaign_reference_coherent"] = None
+    creative = CreativeCritiqueResult(**values, slide_reference_results=results)
+    assert bool(reference_qa_hard_fails(creative, target, manifest)) == (fault is not None)
