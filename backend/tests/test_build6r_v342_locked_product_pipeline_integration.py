@@ -581,3 +581,59 @@ def test_campaign_reference_variation_requires_shared_language_and_prepared_cont
     else:
         assert len(reference_qa_manifest(images, plans)) == 2
         assert reference_qa_inputs(images)[0].reference_id == target.reference_id
+
+
+@pytest.mark.parametrize("field,value", [
+    ("angle_degrees", -1), ("angle_degrees", 361), ("angle_degrees", float("nan")),
+    ("angle_degrees", "90"), ("stroke_width_px", 3), ("shadow_blur_px", 13),
+    ("shadow_offset_y_px", 5), ("stroke_color", "url(file:///secret)"),
+    ("stops", []), ("stops", [{"offset": 0, "color": "#ffffff"}] * 9),
+    ("stops", [{"offset": .1, "color": "#ffffff"}, {"offset": 1, "color": "#000000"}]),
+    ("stops", [{"offset": 0, "color": "#ffffff"}, {"offset": 0, "color": "#000000"}, {"offset": 1, "color": "#ffffff"}]),
+    ("stops", [{"offset": 0, "color": "#fff;xx"}, {"offset": 1, "color": "#ffffff"}]),
+    ("kind", "radial_gradient"), ("extra_css", "content:fake"),
+])
+def test_headline_paint_rejects_invalid_values(field, value):
+    from app.schemas.creative_director import HeadlinePaint
+    data = dict(kind="linear_gradient", angle_degrees=90,
+                stops=[dict(offset=0, color="#ff0000"), dict(offset=1, color="#0000ff")])
+    data[field] = value
+    with pytest.raises(ValueError): HeadlinePaint.model_validate(data)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("glow_radius_px", 13), ("glow_radius_px", -1), ("glow_opacity", 1.1),
+    ("glow_opacity", float("inf")), ("stroke_width_px", .4), ("ring_width_px", 3),
+    ("size_scale", 1.6), ("size_scale", True), ("tint", "#ffffff\n"),
+    ("glow_color", "red"), ("kind", "raw_svg"), ("path", "/secret.svg"),
+])
+def test_icon_paint_rejects_invalid_values(field, value):
+    from app.schemas.creative_director import IconPaint
+    data = dict(kind="luminous_vector", tint="#ffffff", glow_color="#8888ff", glow_radius_px=8,
+                glow_opacity=.8, stroke_width_px=1, ring_width_px=1, size_scale=1)
+    data[field] = value
+    with pytest.raises(ValueError): IconPaint.model_validate(data)
+
+
+def test_paint_absence_preserves_legacy_serialization_and_shared_language(owner_target):
+    import json
+    from app.schemas.creative_director import ReferenceTarget
+    from app.services.qa_engine import campaign_reference_language
+    target, _, _ = owner_target
+    old = target.model_dump()
+    assert "headline_paint" not in old["grammar"] and "icon_paint" not in old["grammar"]
+    explicit = json.loads(target.model_dump_json())
+    explicit["grammar"].update(headline_paint=None, icon_paint=None)
+    assert ReferenceTarget.model_validate(explicit).model_dump() == old
+    painted = json.loads(target.model_dump_json())
+    painted["grammar"]["headline_paint"] = dict(kind="linear_gradient", angle_degrees=90,
+        stops=[dict(offset=0, color="#ff0000"), dict(offset=1, color="#0000ff")])
+    assert campaign_reference_language(ReferenceTarget.model_validate(painted)) != campaign_reference_language(target)
+
+
+def test_paint_style_cannot_bypass_factual_icon_binding(owner_target):
+    from app.schemas.ai import SlidePlan
+    from app.services.creative.pipeline import canonical_slide_claim_bindings
+    plan = SlidePlan(slide_number=1, purpose="hook", headline="Discover", visual_brief="",
+                     features=[dict(icon="cure", title="Discover")])
+    with pytest.raises(ValueError): canonical_slide_claim_bindings(plan)

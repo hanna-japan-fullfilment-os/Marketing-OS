@@ -28,7 +28,7 @@ from .compositor import ProductZone
 # benchmark baseline's layout not directly comparable to a new run's (a new
 # section type, a changed text-block/scrim contract) — never when adding an
 # unrelated new template or tweaking one template's own CSS.
-TEMPLATE_REGISTRY_VERSION = '1.2.0'
+TEMPLATE_REGISTRY_VERSION = '1.3.0'
 
 
 @dataclass(frozen=True)
@@ -705,7 +705,62 @@ def _reference_css(ctx: TemplateContext) -> str:
     .canvas .feature-card,.canvas .callout {{border:{border}!important;
       background:{panel}!important;box-shadow:none!important}}
     .canvas .feature-title,.canvas .callout-value {{color:{accent}!important;font-weight:800!important}}
-    """
+    """ + _reference_paint_css(ctx, target)
+
+
+def _reference_paint_css(ctx: TemplateContext, target: ReferenceTarget) -> str:
+    scale = ctx.width / 1080
+    css = ""
+    paint = target.grammar.headline_paint
+    if paint is not None:
+        stops = ",".join(f"{s.color} {s.offset * 100:g}%" for s in paint.stops)
+        css += f"""
+        .canvas .headline {{background-image:linear-gradient({paint.angle_degrees:g}deg,{stops})!important;
+          background-clip:text!important;-webkit-background-clip:text!important;
+          -webkit-text-fill-color:transparent!important;
+          -webkit-text-stroke:{paint.stroke_width_px * scale:g}px {paint.stroke_color}!important;
+          text-shadow:none!important;
+          filter:drop-shadow(0 {paint.shadow_offset_y_px * scale:g}px {paint.shadow_blur_px * scale:g}px {paint.shadow_color})!important}}
+        """
+    icon = target.grammar.icon_paint
+    if icon is not None:
+        icon_size = max(ctx.width * .039, 24) * icon.size_scale
+        css += f"""
+        .canvas .feature-icon {{background:transparent!important;border:0!important;overflow:visible!important;
+          width:{icon_size:g}px!important;height:{icon_size:g}px!important}}
+        .canvas .feature-icon svg {{width:100%;height:100%;
+          flex:none;overflow:visible}}
+        """
+    return css
+
+
+# Code-owned decorative paths only. Original glyphs stay in the copy/evidence inventory.
+_ICON_PATHS = {
+    "star": "M16 5L19 12L27 13L21 19L23 27L16 23L9 27L11 19L5 13L13 12Z",
+    "sparkle": "M16 5L19 13L27 16L19 19L16 27L13 19L5 16L13 13Z",
+    "droplet": "M16 5C14 10 8 15 8 20A8 8 0 0 0 24 20C24 15 18 10 16 5Z",
+    "leaf": "M7 25C3 14 12 6 26 6C26 20 18 28 7 25ZM7 25L21 11",
+    "check": "M7 16L13 22L25 9",
+}
+_ICON_GLYPHS = {"": "star", "★": "star", "☆": "star", "⭐": "star",
+                "✦": "sparkle", "✧": "sparkle", "✨": "sparkle", "💧": "droplet",
+                "🌿": "leaf", "✓": "check", "✔": "check"}
+
+
+def _feature_icon(ctx: TemplateContext, glyph: str) -> str:
+    if ctx.reference_target is None or ctx.reference_target.grammar.icon_paint is None:
+        return _esc(glyph) or "&#10022;"
+    target = ReferenceTarget.model_validate(ctx.reference_target.model_dump())
+    paint = target.grammar.icon_paint
+    if glyph not in _ICON_GLYPHS:
+        raise ValueError("Unsupported luminous decorative icon")
+    color = tuple(int(paint.glow_color[i:i + 2], 16) for i in (1, 3, 5))
+    glow = f"rgba({color[0]},{color[1]},{color[2]},{paint.glow_opacity:g})"
+    radius = paint.glow_radius_px * ctx.width / 1080
+    return (f'<svg aria-hidden="true" viewBox="0 0 32 32" fill="none" stroke="{paint.tint}" '
+            f'stroke-linecap="round" stroke-linejoin="round" style="filter:drop-shadow(0 0 {radius:g}px {glow})">'
+            f'<circle cx="16" cy="16" r="14" stroke-width="{paint.ring_width_px:g}"/>'
+            f'<path d="{_ICON_PATHS[_ICON_GLYPHS[glyph]]}" stroke-width="{paint.stroke_width_px:g}"/></svg>')
 
 
 def _build_feature_showcase(ctx: TemplateContext) -> str:
@@ -903,7 +958,7 @@ def _build_feature_showcase(ctx: TemplateContext) -> str:
     if features:
         rows = "".join(
             f"""<div class="feature-card">
-        <div class="feature-icon">{_esc(feature.icon) or "&#10022;"}</div>
+        <div class="feature-icon">{_feature_icon(ctx, feature.icon)}</div>
         <div class="feature-copy">
           <div class="feature-title">{_esc(feature.title)}</div>
           {

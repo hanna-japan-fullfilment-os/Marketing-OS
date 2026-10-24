@@ -352,3 +352,31 @@ remain 1/5/2 and 6/10/2; no extra vision request is introduced.
 This QA capability does not approve blank registry labels, mutate the preserved
 52-field direction proposal, resolve product artwork policy, or add renderer
 finishes/icons/circular text. Those remain separate governed steps.
+
+## Optional deterministic reference paint
+
+`ReferenceGrammar.headline_paint` optionally selects `linear_gradient`: 2–8
+strictly ordered `{offset, color}` stops from 0 to 1, exact six-digit hex colors,
+and a finite angle from 0–360 degrees. Metallic bands are ordinary explicit
+gradient stops, not a brand preset. Stroke width is 0–2 px; shadow blur 0–12 px
+and vertical offset -2–4 px at the 1080 px baseline, scaled by canvas width.
+The existing escaped headline is clipped to the fill; no additional text exists.
+
+`ReferenceGrammar.icon_paint` optionally selects `luminous_vector`, with hex tint
+and glow color, glow radius 0–12 baseline px, opacity 0–1, vector stroke .5–3,
+ring width 0–2 and size scale 1–1.5. Only existing decorative star/sparkle,
+droplet, leaf and check glyphs map to fixed code-owned paths. Unknown luminous
+glyphs fail closed. No raw SVG, scripts, URLs or asset paths are accepted.
+The original glyph and all factual card text retain their existing evidence
+inventory; paint cannot add a claim or authorize a benefit/award symbol.
+
+Both controls default off and are omitted from serialized grammar when absent,
+preserving old targets and contract digests. No-target and unpainted HTML remain
+unchanged. Present paint controls are part of the shared campaign visual language.
+Determinism assumes the same local Chromium/fonts; no cross-platform pixel
+identity is promised. No network, extra provider call, new font or external icon
+asset is needed. Circular text is excluded. Product placement and dimensions,
+background-only generation, reference/duplicate/coherence QA and call guards stay
+unchanged. The preserved 52-field proposal does not activate these controls;
+later explicit direction deltas, owner trust approval and product-artwork policy
+remain separately governed before any paid calibration.

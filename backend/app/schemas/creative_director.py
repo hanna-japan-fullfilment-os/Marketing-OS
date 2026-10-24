@@ -5,11 +5,52 @@ against one of these, never parsed from free-form text.
 """
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, ConfigDict, model_validator
+from pydantic import BaseModel, Field, ConfigDict, model_validator, model_serializer
 from typing import Literal
 import json
 import hashlib
 from pathlib import Path
+from typing import Annotated
+
+
+HexColor = Annotated[str, Field(pattern=r"^#[0-9a-fA-F]{6}$", min_length=7, max_length=7)]
+
+
+class GradientStop(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    offset: float = Field(strict=True, ge=0, le=1, allow_inf_nan=False)
+    color: HexColor
+
+
+class HeadlinePaint(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: Literal["linear_gradient"]
+    stops: list[GradientStop] = Field(min_length=2, max_length=8)
+    angle_degrees: float = Field(strict=True, ge=0, le=360, allow_inf_nan=False)
+    stroke_width_px: float = Field(default=0, strict=True, ge=0, le=2, allow_inf_nan=False)
+    stroke_color: HexColor = "#000000"
+    shadow_color: HexColor = "#000000"
+    shadow_blur_px: float = Field(default=0, strict=True, ge=0, le=12, allow_inf_nan=False)
+    shadow_offset_y_px: float = Field(default=0, strict=True, ge=-2, le=4, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def ordered_stops(self):
+        offsets = [stop.offset for stop in self.stops]
+        if offsets[0] != 0 or offsets[-1] != 1 or any(a >= b for a, b in zip(offsets, offsets[1:])):
+            raise ValueError("Gradient stops must increase strictly from 0 to 1")
+        return self
+
+
+class IconPaint(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: Literal["luminous_vector"]
+    tint: HexColor
+    glow_color: HexColor
+    glow_radius_px: float = Field(strict=True, ge=0, le=12, allow_inf_nan=False)
+    glow_opacity: float = Field(strict=True, ge=0, le=1, allow_inf_nan=False)
+    stroke_width_px: float = Field(strict=True, ge=.5, le=3, allow_inf_nan=False)
+    ring_width_px: float = Field(strict=True, ge=0, le=2, allow_inf_nan=False)
+    size_scale: float = Field(strict=True, ge=1, le=1.5, allow_inf_nan=False)
 
 
 class ReferenceGrammar(BaseModel):
@@ -31,6 +72,16 @@ class ReferenceGrammar(BaseModel):
     hierarchy: Literal["headline_hero_callouts", "hero_headline_body"]
     premium_signals: list[Literal["specular_highlights", "metallic_accents", "coherent_shadows"]] = []
     prohibited_elements: list[Literal["generated_products", "generated_text", "unverified_badges"]] = []
+    headline_paint: HeadlinePaint | None = None
+    icon_paint: IconPaint | None = None
+
+    @model_serializer(mode="wrap")
+    def legacy_paint_serialization(self, handler):
+        value = handler(self)
+        for field in ("headline_paint", "icon_paint"):
+            if getattr(self, field) is None:
+                value.pop(field, None)
+        return value
 
     @model_validator(mode="after")
     def aligned_text_columns(self):

@@ -32,6 +32,85 @@ from app.services.creative.templates import Feature, TemplateContext, get_templa
 from app.schemas.ai import ProductZoneDetection
 
 
+def _paint_test_target(**controls):
+    from app.schemas.creative_director import ReferenceTarget
+    return ReferenceTarget.model_validate(dict(reference_id="generic-paint-fixture", sha256="a" * 64,
+        role="TARGET", source="OWNER_APPROVED_TARGET", grammar=dict(
+            typography="condensed", headline_scale=.1, headline_position="upper_left",
+            supporting_copy_position="left_column", callout_treatment="gold", density="dense",
+            background="dark_cinematic", material="glossy", lighting="dramatic_rim", depth="layered",
+            negative_space="modular", color_behavior="high_contrast", hierarchy="headline_hero_callouts", **controls)))
+
+
+def _paint_test_html(target, template="feature_showcase", glyph="✦"):
+    data = io.BytesIO(); Image.new("RGB", (1080, 1350), "black").save(data, format="PNG")
+    import base64
+    return get_template(template).build_html(TemplateContext(width=1080, height=1350,
+        composited_image_data_uri="data:image/png;base64," + base64.b64encode(data.getvalue()).decode(),
+        reference_target=target, headline="MMMM", features=[Feature(icon=glyph, title="Discover")]))
+
+
+def _gradient_test_paint(angle=90):
+    return dict(kind="linear_gradient", angle_degrees=angle,
+        stops=[dict(offset=0, color="#ff0000"), dict(offset=.45, color="#ffffff"),
+               dict(offset=.55, color="#222222"), dict(offset=1, color="#0000ff")],
+        stroke_width_px=1, stroke_color="#dddddd", shadow_color="#000000",
+        shadow_blur_px=3, shadow_offset_y_px=2)
+
+
+def _icon_test_paint(**changes):
+    return dict(kind="luminous_vector", tint="#22ff88", glow_color="#4444ff", glow_radius_px=8,
+                glow_opacity=.8, stroke_width_px=1.5, ring_width_px=1, size_scale=1.2, **changes)
+
+
+@pytest.mark.parametrize("template", ["feature_showcase", "premium_product_hero"])
+def test_reference_headline_paint_and_legacy_css(template):
+    old = _paint_test_html(_paint_test_target(), template)
+    assert "-webkit-text-fill-color:transparent" not in old
+    new = _paint_test_html(_paint_test_target(headline_paint=_gradient_test_paint()), template)
+    assert "linear-gradient(90deg,#ff0000 0%,#ffffff 45%,#222222 55%,#0000ff 100%)" in new
+    assert "-webkit-text-stroke:1px #dddddd" in new and "drop-shadow(0 2px 3px #000000)" in new
+    assert new.count('class="headline"') == 1
+
+
+def test_luminous_icon_markup_and_identifier_boundary():
+    target = _paint_test_target(icon_paint=_icon_test_paint())
+    result = _paint_test_html(target)
+    assert 'stroke="#22ff88"' in result and 'stroke-width="1.5"' in result
+    assert 'r="14" stroke-width="1"' in result and 'width:50.544px!important' in result
+    assert 'drop-shadow(0 0 8px rgba(68,68,255,0.8))' in result
+    assert 'aria-hidden="true"' in result and '<text' not in result and 'href=' not in result
+    for glyph in ("/tmp/icon.svg", "https://example.test/icon", "<svg", "cure"):
+        with pytest.raises(ValueError, match="Unsupported luminous"):
+            _paint_test_html(target, glyph=glyph)
+
+
+@pytest.mark.asyncio
+async def test_reference_paint_pixels_repeat_and_angle_changes():
+    renderer = PlaywrightRenderer()
+    try:
+        paint = _gradient_test_paint()
+        # Broad end bands intersect glyph interiors even when a short headline
+        # occupies only part of its block; narrow metallic bands are tested above.
+        paint["stops"] = [dict(offset=0, color="#ff0000"), dict(offset=.3, color="#ff0000"),
+                          dict(offset=.7, color="#0000ff"), dict(offset=1, color="#0000ff")]
+        html = _paint_test_html(_paint_test_target(headline_paint=paint, icon_paint=_icon_test_paint()))
+        first = await renderer.render_png(html=html, width=1080, height=1350)
+        again = await renderer.render_png(html=html, width=1080, height=1350)
+        assert first == again
+        other = await renderer.render_png(html=_paint_test_html(_paint_test_target(
+            headline_paint={**paint, "angle_degrees": 0}, icon_paint=_icon_test_paint())), width=1080, height=1350)
+        assert first != other
+        image = Image.open(io.BytesIO(first)).convert("RGB")
+        # Both extreme gradient colors occur inside the headline region, not just CSS metadata.
+        pixels = list(image.crop((43, 108, 519, 280)).getdata())
+        assert sum(r > b * 1.5 and r > 80 for r, g, b in pixels) > 100
+        assert sum(b > r * 1.5 and b > 80 for r, g, b in pixels) > 100
+        assert sum(g > r * 1.5 and g > b * 1.5 for r, g, b in image.crop((43, 200, 519, 600)).getdata()) > 10
+    finally:
+        await renderer.close()
+
+
 # --------------------------------------------------------------------------------
 # compositor
 # --------------------------------------------------------------------------------
