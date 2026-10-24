@@ -77,7 +77,7 @@ def _image_digest(image: Image.Image) -> str:
 
 
 def build_trusted_product_composite(*, background, master_path, expected_sha256, canvas_size,
-                                    approved_asset, source_lookup):
+                                    approved_asset, source_lookup, placement=None):
     from ..locked_product_pipeline import build_locked_product_composite
     from ..product_asset_selection import choose_approved_product_master
     if (choose_approved_product_master([approved_asset], source_lookup=source_lookup) is None
@@ -89,7 +89,7 @@ def build_trusted_product_composite(*, background, master_path, expected_sha256,
         raise ValueError("Canonical source product bytes changed")
     result = build_locked_product_composite(
         background=background, master_path=master_path,
-        expected_sha256=expected_sha256, canvas_size=canvas_size,
+        expected_sha256=expected_sha256, canvas_size=canvas_size, placement=placement,
     )
     return TrustedProductComposite(result.image, result.metadata, expected_sha256.lower(),
                                    _image_digest(result.image), approved_asset.id, _COMPOSITE_SEAL)

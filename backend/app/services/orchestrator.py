@@ -49,6 +49,8 @@ awaits a `Session` and reports progress through the `ProgressReporter` it's give
 """
 from __future__ import annotations
 
+from app.services.locked_product_pipeline import prepared_product_placement
+
 import io
 import hashlib
 import json
@@ -4964,6 +4966,7 @@ async def run_visuals_stage(
                 expected_sha256=str(asset.sha256 or ""),
             )
         )
+        prepared_placement = prepared_product_placement(getattr(slide, "visual_brief", ""))
         locked_product_composite = None
         locked_product_metadata = None
         locked_result = None
@@ -5137,6 +5140,7 @@ async def run_visuals_stage(
                     expected_sha256=str(asset.sha256 or ""),
                     canvas_size=(fmt.width, fmt.height),
                     approved_asset=asset, source_lookup=lambda key: db.get(Asset, key),
+                    placement=prepared_placement,
                 )
                 locked_product_composite = locked_result.image
                 locked_product_metadata = locked_result.metadata
@@ -6045,6 +6049,7 @@ product=None, verified_facts_note: str = "") -> int:
                             expected_sha256=str(asset.sha256 or ""),
                         )
                     )
+                    prepared_placement = prepared_product_placement(getattr(slide, "visual_brief", ""))
                     locked_product_composite = None
                     locked_product_metadata = None
                     locked_result = None
@@ -6122,6 +6127,7 @@ product=None, verified_facts_note: str = "") -> int:
                             expected_sha256=str(asset.sha256 or ""),
                             canvas_size=(fmt.width, fmt.height),
                             approved_asset=asset, source_lookup=lambda key: db.get(Asset, key),
+                            placement=prepared_placement,
                         )
                         locked_product_composite = locked_result.image
                         locked_product_metadata = locked_result.metadata

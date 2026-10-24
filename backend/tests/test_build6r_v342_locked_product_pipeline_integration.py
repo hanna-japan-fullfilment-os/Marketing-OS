@@ -293,3 +293,91 @@ def test_repair_background_consumes_exact_selected_reference_set(tmp_path, monke
     assert calls[0]["reference_images"] == (selected or None)
     if selected:
         assert "QUALITY_AND_COMPOSITION_REFERENCE_NOT_PRODUCT_FACT_EVIDENCE" in calls[0]["prompt"]
+
+
+@pytest.mark.parametrize("width,anchor", [(46, "right lower half"), (38, "left lower half"),
+                                          (44, "center lower half"), (30, "upper-right")])
+def test_prepared_geometry_controls_locked_compositor(tmp_path, width, anchor):
+    import json
+    master = tmp_path / "approved_product_masters" / "product" / "master.png"
+    expected = _write_transparent_master(master)
+    before = master.read_bytes()
+    placement = locked.prepared_product_placement(json.dumps({
+        "PRODUCT_SCALE": f"{width}% canvas width", "PRODUCT_PLACEMENT": anchor}))
+    result = locked.build_locked_product_composite(
+        background=Image.new("RGB", (1088, 1360), "navy"), master_path=master,
+        expected_sha256=expected, canvas_size=(1080, 1350), placement=placement)
+    geometry = result.metadata["placement"]
+    assert abs(geometry["rendered_width"] - 1080 * width / 100) <= 0.5
+    assert geometry["horizontal_anchor"] == placement.horizontal
+    assert geometry["vertical_anchor"] == placement.vertical
+    x, y = geometry["product_x"], geometry["product_y"]
+    if placement.horizontal == "right":
+        assert x > (1080 - geometry["rendered_width"]) / 2
+    elif placement.horizontal == "left":
+        assert x < (1080 - geometry["rendered_width"]) / 2
+    else:
+        assert abs(x + geometry["rendered_width"] / 2 - 540) <= 0.5
+    if placement.vertical == "lower":
+        assert y + geometry["rendered_height"] == geometry["product_bottom_y"]
+    else:
+        assert y == geometry["product_safe_top"]
+    assert master.read_bytes() == before
+    # The layer is exactly the authentic alpha-cropped master after one resize.
+    with Image.open(master) as image:
+        crop = image.convert("RGBA").crop(tuple(geometry["source_alpha_bbox"]))
+    resized = crop.resize((geometry["rendered_width"], geometry["rendered_height"]), Image.Resampling.LANCZOS)
+    assert result.locked_product_layer.crop((x, y, x + resized.width, y + resized.height)).tobytes() == resized.tobytes()
+    assert result.image.size == (1080, 1350)
+    assert result.metadata["product_pixel_mutation_count"] == 0
+
+
+@pytest.mark.parametrize("brief", [
+    '{', '{"PRODUCT_SCALE": "46% canvas width"}',
+    '{"PRODUCT_SCALE": "NaN% canvas width", "PRODUCT_PLACEMENT": "lower-right"}',
+    '{"PRODUCT_SCALE": "0% canvas width", "PRODUCT_PLACEMENT": "lower-right"}',
+    '{"PRODUCT_SCALE": "101% canvas width", "PRODUCT_PLACEMENT": "lower-right"}',
+    '{"PRODUCT_SCALE": "46% canvas width", "PRODUCT_PLACEMENT": "somewhere"}',
+    '{"PRODUCT_SCALE": 46, "PRODUCT_PLACEMENT": "lower-right"}',
+])
+def test_malformed_prepared_geometry_fails_closed(brief):
+    with pytest.raises(ValueError):
+        locked.prepared_product_placement(brief)
+
+
+def test_legacy_brief_keeps_existing_geometry():
+    assert locked.prepared_product_placement("Hero product") is None
+    assert locked.prepared_product_placement('{"BACKGROUND": "navy"}') is None
+
+
+def test_prepared_geometry_that_cannot_fit_is_rejected(tmp_path):
+    master = tmp_path / "approved_product_masters" / "p" / "m.png"
+    sha = _write_transparent_master(master)
+    with pytest.raises((ValueError, RuntimeError)):
+        locked.build_locked_product_composite(
+            background=Image.new("RGB", (1088, 1360)), master_path=master,
+            expected_sha256=sha, canvas_size=(1080, 1350),
+            placement=locked.ProductPlacement(0.95, "right", "lower"))
+
+
+def test_adapter_and_both_orchestrator_paths_forward_placement():
+    import ast
+    from app.services.creative.pipeline import build_trusted_product_composite
+    tree = ast.parse(inspect.getsource(orchestrator))
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+             and isinstance(n.func, ast.Name) and n.func.id == "build_trusted_product_composite"]
+    assert len(calls) == 2
+    assert all(any(k.arg == "placement" and isinstance(k.value, ast.Name)
+                   and k.value.id == "prepared_placement" for k in n.keywords) for n in calls)
+    assert "placement=placement" in inspect.getsource(build_trusted_product_composite)
+
+
+def test_two_stage_dimensions_remain_explicit():
+    from app.services.creative.templates import get_platform_format
+    fmt = get_platform_format("instagram_portrait")
+    assert (fmt.width, fmt.height) == (1080, 1350)
+    # Native background is fitted to the final platform canvas (covered above);
+    # neither the final platform format nor the Sunburst request is changed.
+    from app.services.ai import openai_provider
+    source = inspect.getsource(openai_provider)
+    assert "1088x1360" in source

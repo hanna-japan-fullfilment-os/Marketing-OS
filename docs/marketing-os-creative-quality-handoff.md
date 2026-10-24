@@ -253,3 +253,27 @@ and the full creative-system snapshot — written to
    OpenAI key, no network path to the OpenAI API) — every "LIVE_ACCEPTANCE"
    figure in the Build 6 completion packet reflects this honestly rather
    than fabricating a pass.
+
+
+## Prepared product geometry and two-stage image dimensions
+
+The locked product compositor consumes explicit JSON `PRODUCT_SCALE` (for example,
+`46% canvas width`) and `PRODUCT_PLACEMENT` (`right lower half` or `lower-right`).
+Widths are percentages of the final canvas, preserving package aspect ratio and
+all authentic artwork. Left/center/right and upper/lower anchors use the existing
+safe top and bottom margins; no rotation, label removal, or synthetic packaging is
+permitted. Unsupported/partial geometry or a product that cannot fit the safe
+canvas fails closed. Briefs without explicit geometry retain legacy placement.
+No offsets or arbitrary free-form positioning are inferred from generated prose.
+
+Sunburst native generation remains **1088x1360**, xhigh, one image. Instagram
+portrait final export remains **1080x1350**. These are intentionally distinct
+stages: the background is fitted to the platform canvas before deterministic
+product placement and HTML typography. A final 1080x1350 PNG is the expected QA
+size, not a dimension failure; never resize it back to 1088x1360. Native generation
+size, model, quality, call limits and retry policy remain unchanged.
+
+The slide-1 calibration's package-label clutter finding remains a failed visual
+acceptance. Geometry verification alone does not establish creative QA PASS or
+operator publishability. Preserve that failed artifact and its original report;
+any future paid calibration requires separate authorization and canonical QA.

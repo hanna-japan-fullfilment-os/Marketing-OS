@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
+import re
+import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -17,6 +20,58 @@ PRODUCT_MAX_HEIGHT_RATIO = 1100 / V338_BASE_HEIGHT
 PRODUCT_CENTER_X_RATIO = 512 / V338_BASE_WIDTH
 PRODUCT_BOTTOM_Y_RATIO = 1490 / V338_BASE_HEIGHT
 PRODUCT_SAFE_TOP_RATIO = 340 / V338_BASE_HEIGHT
+
+
+@dataclass(frozen=True)
+class ProductPlacement:
+    """Validated geometry; package artwork is never edited or cropped."""
+    width_fraction: float
+    horizontal: str
+    vertical: str
+
+    def __post_init__(self):
+        if (isinstance(self.width_fraction, bool)
+                or not isinstance(self.width_fraction, (int, float))
+                or not math.isfinite(self.width_fraction)
+                or not 0 < self.width_fraction <= 1
+                or self.horizontal not in ("left", "center", "right")
+                or self.vertical not in ("upper", "center", "lower")):
+            raise ValueError("Invalid prepared product placement")
+
+
+def prepared_product_placement(visual_brief: str) -> ProductPlacement | None:
+    """Read explicit prepared JSON geometry, never infer it from AI prose.
+
+    Legacy briefs without geometry retain their existing layout. A partial or
+    malformed explicit contract fails closed rather than silently reverting.
+    """
+    if not visual_brief or not visual_brief.lstrip().startswith("{"):
+        return None
+    try:
+        brief = json.loads(visual_brief)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Malformed prepared placement JSON") from exc
+    if not isinstance(brief, dict):
+        raise ValueError("Prepared visual brief must be an object")
+    if not ({"PRODUCT_SCALE", "PRODUCT_PLACEMENT"} & brief.keys()):
+        return None
+    scale, position = brief.get("PRODUCT_SCALE"), brief.get("PRODUCT_PLACEMENT")
+    if not isinstance(scale, str) or not isinstance(position, str):
+        raise ValueError("Prepared width and placement are both required")
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)% canvas width", scale.strip())
+    anchors = {
+        f"{horizontal} {vertical} half": (horizontal, vertical)
+        for horizontal in ("left", "center", "right")
+        for vertical in ("upper", "lower")
+    }
+    anchors.update({f"{vertical}-{horizontal}": (horizontal, vertical)
+                    for horizontal in ("left", "center", "right")
+                    for vertical in ("upper", "lower")})
+    anchors["center"] = ("center", "center")
+    if match is None or position.strip() not in anchors:
+        raise ValueError("Unsupported prepared product placement")
+    horizontal, vertical = anchors[position.strip()]
+    return ProductPlacement(float(match.group(1)) / 100, horizontal, vertical)
 
 
 @dataclass(frozen=True)
@@ -150,6 +205,7 @@ def _build_locked_product_layer(
     master_path: Path,
     validation: dict[str, Any],
     canvas_size: tuple[int, int],
+    placement: ProductPlacement | None = None,
 ) -> tuple[Image.Image, dict[str, Any]]:
     canvas_width, canvas_height = canvas_size
     if canvas_width <= 0 or canvas_height <= 0:
@@ -177,6 +233,11 @@ def _build_locked_product_layer(
     if scale <= 0:
         raise RuntimeError("Invalid locked-product scale.")
 
+    if placement is not None:
+        if not isinstance(placement, ProductPlacement):
+            raise ValueError("Validated product placement required")
+        scale = canvas_width * placement.width_fraction / crop_width
+
     rendered_width = max(1, int(round(crop_width * scale)))
     rendered_height = max(1, int(round(crop_height * scale)))
     resized = cropped.resize(
@@ -186,6 +247,17 @@ def _build_locked_product_layer(
 
     x = int(round(product_center_x - (rendered_width / 2)))
     y = product_bottom_y - rendered_height
+
+    if placement is not None:
+        margin_x = int(round(canvas_width * (1 - PRODUCT_BOTTOM_Y_RATIO)))
+        x = {"left": margin_x, "center": (canvas_width - rendered_width) // 2,
+             "right": canvas_width - margin_x - rendered_width}[placement.horizontal]
+        y = {"upper": product_safe_top,
+             "center": (product_safe_top + product_bottom_y - rendered_height) // 2,
+             "lower": product_bottom_y - rendered_height}[placement.vertical]
+        if y + rendered_height > product_bottom_y:
+            raise ValueError("Prepared product placement exceeds safe bounds")
+        product_center_x = x + rendered_width / 2
 
     if x < 0 or y < 0:
         raise RuntimeError("Locked-product placement exceeds canvas.")
@@ -203,6 +275,9 @@ def _build_locked_product_layer(
 
     return layer, {
         "source_alpha_bbox": list(alpha_bbox),
+        **({"prepared_width_fraction": placement.width_fraction,
+            "horizontal_anchor": placement.horizontal, "vertical_anchor": placement.vertical}
+           if placement is not None else {}),
         "crop_width": crop_width,
         "crop_height": crop_height,
         "rendered_width": rendered_width,
@@ -288,6 +363,7 @@ def build_locked_product_composite(
     expected_sha256: str,
     canvas_size: tuple[int, int],
     shadow_profile: ShadowProfile = V339_STRONG_SHADOW_PROFILE,
+    placement: ProductPlacement | None = None,
 ) -> LockedProductCompositeResult:
     validation = inspect_locked_product_master_candidate(
         master_path,
@@ -310,6 +386,7 @@ def build_locked_product_composite(
         master_path=master_path,
         validation=validation,
         canvas_size=canvas_size,
+        placement=placement,
     )
     shadow_layer, shadow = _build_contact_shadow(
         locked_product_layer=locked_product_layer,
