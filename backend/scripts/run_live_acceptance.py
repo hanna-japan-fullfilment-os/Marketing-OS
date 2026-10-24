@@ -256,18 +256,54 @@ async def run_prepared_acceptance(session, *, campaign_id, config, renderer, pro
         raise
 
 
-def isolated_calibration_session(database_path):
-    """Read canonical bytes into memory; never migrate or write the source SQLite."""
+def isolated_calibration_session(database_path, *, expected_sha256=None):
+    """Copy a quiescent read-only SQLite source into one shared writable memory DB.
+
+    Use SQLite's backup API, not deserialize(): a serialized WAL-format image
+    can otherwise make a memory database attempt to open a nonexistent WAL.
+    The source is never opened writable, checkpointed, or migrated. Any setup
+    failure closes the destination and propagates; there is no canonical fallback.
+    """
+    import hashlib
     import sqlite3
+    from contextlib import closing
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session
     from sqlalchemy.pool import StaticPool
-    with sqlite3.connect(Path(database_path).resolve().as_uri() + "?mode=ro&immutable=1", uri=True) as source:
-        snapshot = source.serialize()
-    memory = sqlite3.connect(":memory:", check_same_thread=False)
-    memory.deserialize(snapshot)
-    engine = create_engine("sqlite://", creator=lambda: memory, poolclass=StaticPool)
-    return Session(engine, autoflush=False, expire_on_commit=False)
+
+    path = Path(database_path).resolve(strict=True)
+    if not path.is_file():
+        raise ValueError("Isolation source must be an existing SQLite file")
+    wal = Path(str(path) + "-wal")
+    if wal.exists() and wal.stat().st_size:
+        raise ValueError("Isolation requires a quiescent source without pending WAL bytes")
+    before = hashlib.sha256(path.read_bytes()).hexdigest().upper()
+    if expected_sha256 is not None and before != expected_sha256.upper():
+        raise ValueError("Isolation source SHA256 differs from approved snapshot")
+    memory = None
+    engine = None
+    try:
+        memory = sqlite3.connect(":memory:", check_same_thread=False)
+        with closing(sqlite3.connect(path.as_uri() + "?mode=ro&immutable=1", uri=True)) as source:
+            source.backup(memory)
+        if (hashlib.sha256(path.read_bytes()).hexdigest().upper() != before
+                or (wal.exists() and wal.stat().st_size)):
+            raise ValueError("Isolation source changed while copying")
+        memory.execute("PRAGMA temp_store=MEMORY")
+        if memory.execute("PRAGMA quick_check").fetchall() != [("ok",)]:
+            raise ValueError("Isolated SQLite quick_check failed")
+        engine = create_engine("sqlite://", creator=lambda: memory, poolclass=StaticPool)
+        session = Session(engine, autoflush=False, expire_on_commit=False)
+        session.info["calibration_isolation"] = {
+            "mode": "shared_memory", "source_path": str(path), "source_sha256": before,
+            "source_open_mode": "ro&immutable=1", "copy_method": "sqlite_backup_api"}
+        return session
+    except BaseException:
+        if engine is not None:
+            engine.dispose()
+        if memory is not None:
+            memory.close()
+        raise
 
 
 async def verify_project_spend_backstop(project_id, *, read_only_get=None) -> dict:

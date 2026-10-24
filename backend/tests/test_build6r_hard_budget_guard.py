@@ -1622,3 +1622,151 @@ async def test_prepared_calibration_routes_subset_and_stops(monkeypatch, tmp_pat
     finally:
         connection.close()
         engine.dispose()
+
+
+@pytest.fixture
+def wal_isolation_source(tmp_path):
+    import sqlite3
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from app.db import Base
+    from app.models import Brand, Campaign
+    path = tmp_path / "prepared-wal.db"
+    engine = create_engine("sqlite:///" + str(path))
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        brand = Brand(name="Hanna", slug="hanna-japan")
+        session.add(brand)
+        session.flush()
+        campaign = Campaign(display_id="ISOLATION-TEST", brand_id=brand.id, target_slide_count=6,
+                            target_platforms=["instagram"], languages=["pt-BR"], status="COPY_READY")
+        session.add(campaign)
+        session.commit()
+        campaign_id = campaign.id
+    engine.dispose()
+    # Close the final WAL writer before copying: this leaves the WAL-format
+    # header that triggered the real deserialize failure, without pending WAL.
+    with sqlite3.connect(path) as writer:
+        assert writer.execute("pragma journal_mode=WAL").fetchone()[0] == "wal"
+    writer.close()
+    assert path.read_bytes()[18:20] == bytes([2, 2])
+    return path, campaign_id
+
+
+def test_wal_snapshot_supports_real_application_sessions_and_isolated_writes(wal_isolation_source):
+    import hashlib
+    from sqlalchemy.orm import Session
+    from app.models import Campaign
+    from app.services.orchestrator import _load_campaign_context
+    from app.services.qa_engine import get_platform_campaign_variants
+    from scripts.run_live_acceptance import isolated_calibration_session
+    path, campaign_id = wal_isolation_source
+    before = hashlib.sha256(path.read_bytes()).hexdigest().upper()
+    session = isolated_calibration_session(path, expected_sha256=before)
+    engine = session.bind
+    try:
+        assert session.get(Campaign, campaign_id).target_slide_count == 6
+        assert _load_campaign_context(session, campaign_id)[0].display_id == "ISOLATION-TEST"
+        assert get_platform_campaign_variants(session, campaign_id) == []
+        assert session.connection().exec_driver_sql("pragma quick_check").all() == [("ok",)]
+        assert all(not row[2] for row in session.connection().exec_driver_sql("pragma database_list").all())
+        campaign = session.get(Campaign, campaign_id)
+        campaign.status = "GENERATING"
+        session.commit()
+        # The actual pool intentionally shares one memory connection. Separate
+        # sequential sessions and engine checkouts must see the same snapshot.
+        with Session(engine) as other:
+            assert other.get(Campaign, campaign_id).status == "GENERATING"
+        with engine.connect() as connection:
+            assert connection.exec_driver_sql("select count(*) from campaigns").scalar_one() == 1
+        assert session.info["calibration_isolation"]["copy_method"] == "sqlite_backup_api"
+    finally:
+        session.close()
+        engine.dispose()
+    assert hashlib.sha256(path.read_bytes()).hexdigest().upper() == before
+    unchanged = isolated_calibration_session(path)
+    try: assert unchanged.get(Campaign, campaign_id).status == "COPY_READY"
+    finally:
+        isolated_engine = unchanged.bind
+        unchanged.close()
+        isolated_engine.dispose()
+
+
+@pytest.mark.parametrize("invalid", ["missing", "directory", "corrupt", "pending_wal", "wrong_hash"])
+def test_isolation_invalid_setup_never_falls_back(wal_isolation_source, tmp_path, invalid):
+    from scripts.run_live_acceptance import isolated_calibration_session
+    import sqlite3
+    path, _ = wal_isolation_source
+    options = {}
+    if invalid == "missing": path = tmp_path / "missing.db"
+    elif invalid == "directory": path = tmp_path
+    elif invalid == "corrupt":
+        path = tmp_path / "corrupt.db"
+        path.write_bytes(b"not a SQLite database")
+    elif invalid == "pending_wal": path.with_name(path.name + "-wal").write_bytes(b"uncheckpointed")
+    else: options["expected_sha256"] = "0" * 64
+    with pytest.raises((ValueError, FileNotFoundError, sqlite3.DatabaseError)):
+        isolated_calibration_session(path, **options)
+
+
+@pytest.mark.parametrize("failure", ["source_open", "backup"])
+def test_partial_isolation_closes_memory_and_never_falls_back(wal_isolation_source, monkeypatch, failure):
+    import sqlite3
+    from scripts.run_live_acceptance import isolated_calibration_session
+    path, _ = wal_isolation_source
+    connect = sqlite3.connect
+    memories = []
+    opened = []
+    class FailingSource:
+        def __init__(self, connection): self.connection = connection
+        def backup(self, destination): raise sqlite3.OperationalError("mock copy failure")
+        def close(self): self.connection.close()
+    def wrapped(database, **kwargs):
+        opened.append(str(database))
+        if str(database) == ":memory:":
+            connection = connect(database, **kwargs)
+            memories.append(connection)
+            return connection
+        assert "mode=ro&immutable=1" in str(database)
+        if failure == "source_open": raise sqlite3.OperationalError("mock source unavailable")
+        return FailingSource(connect(database, **kwargs))
+    monkeypatch.setattr(sqlite3, "connect", wrapped)
+    with pytest.raises(sqlite3.OperationalError): isolated_calibration_session(path)
+    assert len(opened) == 2 and len(memories) == 1
+    with pytest.raises(sqlite3.ProgrammingError): memories[0].execute("select 1")
+
+
+
+def test_unavailable_memory_destination_fails_before_source_open(wal_isolation_source, monkeypatch):
+    import sqlite3
+    from scripts.run_live_acceptance import isolated_calibration_session
+    path, _ = wal_isolation_source
+    attempts = []
+    def unavailable(database, **kwargs):
+        attempts.append(database)
+        assert database == ":memory:"
+        raise sqlite3.OperationalError("mock destination unavailable")
+    monkeypatch.setattr(sqlite3, "connect", unavailable)
+    with pytest.raises(sqlite3.OperationalError, match="destination unavailable"):
+        isolated_calibration_session(path)
+    assert attempts == [":memory:"]
+
+
+
+def test_failed_session_setup_closes_unchecked_out_memory(wal_isolation_source, monkeypatch):
+    import sqlite3
+    import sqlalchemy.orm
+    from scripts.run_live_acceptance import isolated_calibration_session
+    path, _ = wal_isolation_source
+    connect = sqlite3.connect
+    memories = []
+    def wrapped(database, **kwargs):
+        connection = connect(database, **kwargs)
+        if database == ":memory:": memories.append(connection)
+        return connection
+    def unavailable(*args, **kwargs): raise RuntimeError("mock session unavailable")
+    monkeypatch.setattr(sqlite3, "connect", wrapped)
+    monkeypatch.setattr(sqlalchemy.orm, "Session", unavailable)
+    with pytest.raises(RuntimeError, match="session unavailable"):
+        isolated_calibration_session(path)
+    with pytest.raises(sqlite3.ProgrammingError): memories[0].execute("select 1")
