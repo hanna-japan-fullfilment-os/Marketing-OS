@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "backend": "LOCAL_COMFY_SDXL",
+  "status": "UNAPPROVED",
+  "owner_approval": null,
+  "runtime_root": null,
+  "workflow_sha256": null,
+  "runtime_identity_verified": false,
+  "artifacts": {
+    "checkpoint": {
+      "path": null,
+      "sha256": null,
+      "license_approved": false
+    },
+    "clip_vision": {
+      "path": null,
+      "sha256": null,
+      "license_approved": false
+    },
+    "ip_adapter": {
+      "path": null,
+      "sha256": null,
+      "license_approved": false
+    },
+    "custom_node_code": {
+      "path": null,
+      "sha256": null,
+      "license_approved": false
+    },
+    "runtime_lock": {
+      "path": null,
+      "sha256": null,
+      "license_approved": false
+    }
+  },
+  "note": "Contract template only. No runtime, model, encoder, custom node or workflow execution approved. Fill and verify in a separately governed host activation; never auto-download.",
+  "dedicated_single_job_runtime": false
+}

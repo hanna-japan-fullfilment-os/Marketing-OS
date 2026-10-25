@@ -314,6 +314,10 @@ def _nearest_ai_image_size(
     model: str = "",
 ) -> str:
     """Select an image API size while preserving legacy-model compatibility."""
+    if model == "local-sdxl-background-v1":
+        if abs(width / height - 0.8) > 0.02:
+            raise ValueError("Local SDXL background requires the approved 4:5 contract")
+        return "1024x1280"
     ratio = (
         width
         / height

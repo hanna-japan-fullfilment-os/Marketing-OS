@@ -836,3 +836,26 @@ def test_package_mark_context_validates_actual_render_handoff(tmp_path, monkeypa
     else:
         resolved=qa.package_mark_context(db,campaign,[image],[plan])
         assert len(resolved)==1 and resolved[0].render_asset_id==render.id and resolved[0].permission.render_asset_id==render.id
+
+
+# V6 local background dispatch must not change canonical product/QA mechanics.
+def test_v6_local_background_size_dispatch_preserves_paid_models():
+    from app.services.orchestrator import _nearest_ai_image_size
+    assert _nearest_ai_image_size(1080,1350,model="local-sdxl-background-v1")=="1024x1280"
+    assert _nearest_ai_image_size(1080,1350,model="gpt-image-2.5-sunburst-2026-09-08")=="1088x1360"
+    assert _nearest_ai_image_size(1080,1350,model="legacy")=="1024x1536"
+    with pytest.raises(ValueError,match="4:5"):
+        _nearest_ai_image_size(1080,1080,model="local-sdxl-background-v1")
+
+
+def test_v6_local_adapter_does_not_replace_trusted_product_or_qa():
+    from app.services.ai import local_background_provider
+    import inspect
+    source=inspect.getsource(local_background_provider)
+    assert '"product_provenance": False' in source
+    assert '"claim_evidence": False' in source
+    assert '"campaign_approval": False' in source
+    assert "OpenAIProvider" not in source and "resolve_authentic_package_mark_permission" not in source
+    from app.services.ai.openai_provider import _sunburst_reservation,HardBudgetExceededError
+    with pytest.raises(HardBudgetExceededError,match="UNKNOWN_IMAGE_MAXIMUM"):
+        _sunburst_reservation()

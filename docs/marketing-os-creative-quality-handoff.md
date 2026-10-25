@@ -466,3 +466,78 @@ to reject execution before client construction. This repair does **not** make V5
 paid-ready. Historical ~$0.19 costs, operator estimates and project spend-limit
 attestations cannot replace an authoritative maximum. A separately authorized
 post-repair zero-cost preflight and separate paid authorization remain required.
+
+
+### V6 local background source contract (inactive)
+
+V6 adds an explicit `LOCAL_COMFY_SDXL` adapter implementing the existing image
+provider contract and a separate local slide-1 preview entrypoint. It never
+falls back to Sunburst or a paid provider. The existing Sunburst monetary guard
+is unchanged; V5 remains closed for external billing-authority reasons.
+
+This source build installs/starts no ComfyUI runtime, approves/downloads no model
+or custom node, and activates no URL or production backend. The repository
+manifest deliberately has `UNAPPROVED` status and null artifact/workflow hashes.
+It must fail before HTTP client construction until a separate governed host
+activation approves and hashes the exact checkpoint, image encoder, IP-Adapter,
+custom-node code, runtime lock, workflow and dedicated single-job runtime identity.
+The graph is a contract template; custom-node schema compatibility is untested.
+No auto-download or arbitrary/cloud workflow nodes are supported.
+
+Only an explicitly supplied 127.0.0.1 HTTP endpoint is accepted. Redirects and
+proxy environment inheritance are disabled. The adapter allows one attempt,
+one reference with exact hash, a bounded prompt, fixed 1024x1280 latent and PNG
+output, fixed sampling bounds and explicit seed. Errors/timeouts/missing output
+fail closed; a submitted failed job gets a bounded interrupt on the dedicated
+runtime, never a retry. No package/model installation is part of the adapter.
+
+The reference remains style authority only. A negative prompt forbids products,
+packages, text, logos, awards and ranking graphics; prompting is not a semantic
+absence guarantee. Strict existing duplicate/product/reference/claim/package-mark
+QA and owner review remain mandatory. Local generation never creates product
+provenance or claim evidence. Workflow/model/reference/output hashes and seed are
+recorded as LOCAL_GENERATED_BACKGROUND sidecar provenance. The original product
+compositor, claims, owner reference, 52-field direction and permission stay intact.
+Final deterministic output remains 1080x1350 with locked product placement.
+
+A later separately authorized preview copies SQLite into shared writable memory,
+uses frozen plans and deterministic direction, disables paid text/vision clients,
+and reports PREVIEW_ONLY with semantic QA NOT_RUN and owner acceptance PENDING.
+It cannot approve the campaign. Local image generation has zero provider cost,
+but electricity/runtime work is not free and provider-backed text/vision QA is
+still separate and paid. No full-QA-zero-cost or premium-visual-acceptance claim
+is made. Complete Git governance, runtime/license/model hash verification and
+compatibility preflight before authorizing any actual local preview.
+
+
+#### V6 absolute deadline and streaming ceilings
+
+HTTPX read/inactivity timeouts are secondary controls, not the governing timer.
+The local adapter now uses the asyncio loop monotonic clock and an absolute
+`asyncio.timeout_at` deadline across the HTTP operation, polling and cleanup.
+The configured timeout includes cleanup: `min(5 seconds, timeout/4)` is reserved
+inside that budget, so normal work has an earlier deadline. No request restarts
+this budget. Cleanup never receives a fresh five seconds after expiry.
+
+All response bodies are read through `AsyncClient.stream` and raw chunk iteration.
+The image ceiling remains 33,554,432 bytes (32 MiB); metadata/JSON/interrupt bodies
+have a 4 MiB ceiling. The running byte count is checked before appending each
+chunk, with 64 KiB iteration chunks. Exactly-at-limit plus EOF is accepted by the
+reader; limit+1 fails immediately on detection, without consuming the remaining
+body. PNG/dimension checks remain independent. Content-Length is only an early
+validation aid. Identity content encoding is required; compressed responses are
+rejected before decoding to prevent decompression-based size bypasses.
+
+Stream contexts close responses on success, malformed data, size failure,
+network errors and cancellation. One bounded interrupt is attempted only if a
+submission may have occurred; the owned HTTP client is closed in `finally` using
+the same remaining total budget. Interrupt/client cleanup errors are noted on the
+original failure; a successful operation cannot hide client-cleanup failure.
+Cancellation is cooperative, not a hard-real-time process kill. If cleanup cannot
+complete by the deadline, its state is unconfirmed and the operation fails; no
+claim is made that a server job has stopped solely because the client timed out.
+There is one generation attempt, no retry, and no Sunburst or paid fallback.
+
+This is still inactive source only: no ComfyUI installed/started, no model approved
+or downloaded, and no visual calibration completed. A future local preview remains
+PREVIEW_ONLY and does not establish full semantic QA or campaign approval.
