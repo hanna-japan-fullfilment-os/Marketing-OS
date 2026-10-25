@@ -1595,7 +1595,9 @@ async def test_prepared_calibration_routes_subset_and_stops(monkeypatch, tmp_pat
         return campaign
     monkeypatch.setattr(runner, "run_visuals_stage", visuals)
     monkeypatch.setattr(runner, "run_qa_stage", qa)
-    ledger = provider_module._BoundedExposureLedger()
+    # Synthetic maximum exercises routing only, never prices a live image.
+    monkeypatch.setattr(provider_module, "_sunburst_reservation", lambda: 0.2)
+    ledger = _synthetic_governed_ledger("CALIBRATION_SLIDE1", 10)
     provider = SimpleNamespace(hard_budget_snapshot=ledger.snapshot)
     config = SimpleNamespace(qa_max_retries=0, qa_best_of_n=1, recreate_with_ai=False,
         use_masked_scene_edit=False, detect_product_zone=False, hero_only=False,
@@ -1784,3 +1786,227 @@ async def test_owner_grammar_stays_text_and_pixel_qa_stays_within_two_vision_cal
     with pytest.raises(provider_module.HardBudgetExceededError, match="HARD_CALL_CAP"):
         await responses.create(model="gpt-5.1", input=[{"type": "input_image", "image_url": "fixture"}])
     assert ledger.call_counts["vision"] == 2
+
+
+# Governed monetary repair: positive image maxima here are synthetic accounting
+# fixtures ONLY. Canonical Sunburst remains unresolved in the negative cases.
+def _synthetic_governed_ledger(mode, budget):
+    exposure = provider_module.governed_budget_preflight(mode=mode, max_budget_usd=budget)
+    ledger = provider_module._HardBudgetLedger(float(exposure["max_budget_usd"]),
+                                               call_limits=exposure["call_limits"])
+    ledger.governed_exposure = exposure
+    ledger.in_flight, ledger.entries = False, []
+    return ledger
+
+
+@pytest.mark.parametrize("budget", [None, "bad", -1, 0, "NaN", "Infinity", True, "0.0000001"])
+def test_governed_invalid_budget_before_client(monkeypatch, budget):
+    def forbidden(**kwargs): raise AssertionError("SDK construction before gate")
+    monkeypatch.setattr(provider_module, "AsyncOpenAI", forbidden)
+    with pytest.raises(provider_module.HardBudgetExceededError, match="POSITIVE_USD"):
+        provider_module.OpenAIProvider("fake", governed_mode="CALIBRATION_SLIDE1", hard_budget_usd=budget)
+
+
+@pytest.mark.parametrize("mode,counts", [("CALIBRATION_SLIDE1", (1,5,2)), ("FULL", (6,10,2))])
+def test_governed_exposure_shared_policy(monkeypatch, mode, counts):
+    from decimal import Decimal
+    monkeypatch.setattr(provider_module, "_sunburst_reservation", lambda: 0.2)
+    maximum = Decimal("0.2")*counts[0] + Decimal("0.540960")*(counts[1]+counts[2])
+    for budget in (str(maximum), str(maximum+1)):
+        plan=provider_module.governed_budget_preflight(mode=mode,max_budget_usd=budget)
+        assert plan["call_limits"] == dict(zip(("image","text","vision","other"), (*counts,0)))
+        assert Decimal(plan["maximum_exposure_usd"])==maximum
+    with pytest.raises(provider_module.HardBudgetExceededError, match="EXCEEDS_AUTHORIZATION"):
+        provider_module.governed_budget_preflight(mode=mode,max_budget_usd=str(maximum-Decimal("0.000001")))
+
+
+@pytest.mark.parametrize("factor,value", [("best_of_n",2),("qa_retries",1),("sdk_retries",1),
+                                            ("provider_fallbacks",1),("concurrency",2),("sdk_retries",False)])
+def test_governed_multipliers_cannot_be_assumed(monkeypatch,factor,value):
+    with pytest.raises(provider_module.HardBudgetExceededError,match="MULTIPLIER"):
+        provider_module.governed_budget_preflight(mode="CALIBRATION_SLIDE1",max_budget_usd=10,**{factor:value})
+
+
+@pytest.mark.parametrize("budget", [0.19354975,0.194631,100000])
+def test_governed_historical_cost_cannot_price_sunburst(monkeypatch,budget):
+    def forbidden(**kwargs): raise AssertionError("Unresolved maximum constructed SDK")
+    monkeypatch.setattr(provider_module,"AsyncOpenAI",forbidden)
+    with pytest.raises(provider_module.HardBudgetExceededError,match="UNKNOWN_IMAGE_MAXIMUM"):
+        provider_module.OpenAIProvider("fake",governed_mode="CALIBRATION_SLIDE1",hard_budget_usd=budget)
+
+
+def test_governed_unknown_model_and_nonpositive_maximum(monkeypatch):
+    with pytest.raises(provider_module.HardBudgetExceededError,match="MISSING_PRICING"):
+        provider_module.governed_budget_preflight(mode="FULL",max_budget_usd=100,models=("unknown",))
+    monkeypatch.setattr(provider_module,"_sunburst_reservation",lambda:0)
+    with pytest.raises(provider_module.HardBudgetExceededError,match="UNKNOWN_MAXIMUM"):
+        provider_module.governed_budget_preflight(mode="FULL",max_budget_usd=100)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind,maximum",[("image",1),("text",5),("vision",2)])
+async def test_governed_independent_calibration_caps(monkeypatch,kind,maximum):
+    monkeypatch.setattr(provider_module,"_sunburst_reservation",lambda:0.2)
+    ledger=_synthetic_governed_ledger("CALIBRATION_SLIDE1",10)
+    target=FakeImages() if kind=="image" else FakeResponses()
+    if kind=="image":
+        async def image(**kwargs):
+            target.calls.append(kwargs)
+            return SimpleNamespace(data=[SimpleNamespace(b64_json="AA==")],usage=SimpleNamespace(
+                input_tokens_details=SimpleNamespace(text_tokens=1,image_tokens=1),output_tokens=1))
+        target.edit=image
+    proxy=provider_module._BoundedAcceptanceResource(target,ledger,image=kind=="image")
+    kwargs={"model":SUNBURST,"prompt":"scene","image":[_bounded_upload()],"size":"1088x1360","quality":"xhigh"} if kind=="image" else {
+        "model":"gpt-5.1","input":[{"type":"input_image","image_url":"data:image/png;base64,AA=="}] if kind=="vision" else "text"}
+    for _ in range(maximum):
+        await (proxy.edit(**kwargs) if kind=="image" else proxy.create(**kwargs))
+    spent=ledger.spent_usd
+    with pytest.raises(provider_module.HardBudgetExceededError,match="HARD_CALL_CAP"):
+        await (proxy.edit(**kwargs) if kind=="image" else proxy.create(**kwargs))
+    assert len(target.calls)==maximum and ledger.call_counts[kind]==maximum
+    assert ledger.reserved_usd==0 and ledger.spent_usd==spent
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("result",["failure","missing","breach"])
+async def test_governed_partial_billing_is_never_free(monkeypatch,result):
+    monkeypatch.setattr(provider_module,"_sunburst_reservation",lambda:0.2)
+    ledger=_synthetic_governed_ledger("CALIBRATION_SLIDE1",10)
+    class Responses:
+        async def create(self,**kwargs):
+            assert ledger.reserved_usd==provider_module._acceptance_text_reservation("gpt-5.1")
+            if result=="failure": raise TimeoutError("could be billed")
+            if result=="missing": return SimpleNamespace()
+            return SimpleNamespace(usage=SimpleNamespace(input_tokens=10000000,output_tokens=1))
+    proxy=provider_module._BoundedAcceptanceResource(Responses(),ledger)
+    if result=="missing": await proxy.create(model="gpt-5.1",input="text")
+    else:
+        with pytest.raises((TimeoutError,provider_module.HardBudgetExceededError)):
+            await proxy.create(model="gpt-5.1",input="text")
+    assert ledger.halted and ledger.reserved_usd>0 and ledger.call_counts["text"]==1
+    with pytest.raises(provider_module.HardBudgetExceededError,match="HALTED"):
+        await proxy.create(model="gpt-5.1",input="text")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("input_value",["x"*400000,{"unexpected":object()}],ids=["oversize","nonserializable"])
+async def test_governed_response_payload_cap_before_invocation(monkeypatch,input_value):
+    monkeypatch.setattr(provider_module,"_sunburst_reservation",lambda:0.2)
+    ledger=_synthetic_governed_ledger("CALIBRATION_SLIDE1",10);target=FakeResponses()
+    proxy=provider_module._BoundedAcceptanceResource(target,ledger)
+    with pytest.raises(provider_module.HardBudgetExceededError,match="PAYLOAD"):
+        await proxy.create(model="gpt-5.1",input=input_value)
+    assert target.calls==[] and ledger.call_counts["text"]==0
+
+
+@pytest.mark.asyncio
+async def test_governed_cli_threads_budget_before_db_or_client(monkeypatch):
+    import sys
+    from scripts import run_live_acceptance as runner
+    monkeypatch.setattr(sys,"argv",["run_live_acceptance.py","--brand-slug","example","--prepared-campaign-id","prepared",
+        "--bounded-exposure","--calibration-slide1","--quality-mode","premium","--max-budget-usd","10"])
+    def forbidden(*a,**kw):raise AssertionError("DB/client touched before exposure gate")
+    monkeypatch.setattr(runner,"isolated_calibration_session",forbidden)
+    monkeypatch.setattr(runner,"openai_provider_from_effective_settings",forbidden)
+    with pytest.raises(provider_module.HardBudgetExceededError,match="UNKNOWN_IMAGE_MAXIMUM"):
+        await runner.main()
+
+
+def test_governed_snapshot_cannot_mutate_runtime_caps(monkeypatch):
+    monkeypatch.setattr(provider_module,"_sunburst_reservation",lambda:0.2)
+    ledger=_synthetic_governed_ledger("CALIBRATION_SLIDE1",10)
+    snapshot=ledger.snapshot();snapshot["call_limits"]["image"]=6
+    snapshot["governed_exposure"]["call_limits"]["image"]=6
+    assert ledger.call_limits["image"]==ledger.governed_exposure["call_limits"]["image"]==1
+
+
+@pytest.mark.asyncio
+async def test_governed_percall_remaining_budget_and_concurrency(monkeypatch):
+    monkeypatch.setattr(provider_module,"_sunburst_reservation",lambda:0.2)
+    ledger=_synthetic_governed_ledger("CALIBRATION_SLIDE1",10)
+    target=FakeResponses();proxy=provider_module._BoundedAcceptanceResource(target,ledger)
+    ledger.reserve(9.9,operation="unknown prior bill")
+    with pytest.raises(provider_module.HardBudgetExceededError,match="PRECALL_BLOCK"):
+        await proxy.create(model="gpt-5.1",input="text")
+    assert target.calls==[] and ledger.call_counts["text"]==0
+    ledger.in_flight=True
+    with pytest.raises(provider_module.HardBudgetExceededError,match="CONCURRENT"):
+        await proxy.create(model="gpt-5.1",input="text")
+    assert target.calls==[]
+
+
+def test_governed_factory_initializes_only_after_approved_gate(monkeypatch):
+    monkeypatch.setattr(provider_module,"_sunburst_reservation",lambda:0.2)
+    # No transport/client construction: fake both constructors deterministically.
+    import httpx
+    monkeypatch.setattr(httpx,"AsyncClient",lambda **kw: object())
+    monkeypatch.setattr(httpx,"AsyncHTTPTransport",lambda **kw: object())
+    calls=[]
+    def client(**kw):calls.append(kw);return FakeClient()
+    monkeypatch.setattr(provider_module,"AsyncOpenAI",client)
+    effective={key:"gpt-5.1" for key in ("openai_creative_director_model","openai_vision_model",
+        "openai_creative_qa_model","openai_copy_model","openai_platform_adapter_model")}
+    effective["openai_api_key"]="fake"
+    provider=provider_module.openai_provider_from_effective_settings(effective,governed_mode="CALIBRATION_SLIDE1",hard_budget_usd="10")
+    snap=provider.hard_budget_snapshot()
+    assert len(calls)==1 and calls[0]["max_retries"]==0
+    assert snap["enabled"] and snap["exact_per_run_usd_ceiling"]
+    assert snap["call_limits"]=={"image":1,"text":5,"vision":2,"other":0}
+    assert snap["max_image_calls"]==1 and snap["limit_usd"]==10
+    with pytest.raises(provider_module.HardBudgetExceededError,match="EXCEEDS_AUTHORIZATION"):
+        provider_module.openai_provider_from_effective_settings(effective,governed_mode="CALIBRATION_SLIDE1",hard_budget_usd="0.1")
+    assert len(calls)==1
+
+
+def test_governed_per_attempt_rounding_precedes_graph_multiplication(monkeypatch):
+    monkeypatch.setattr(provider_module,"_sunburst_reservation",lambda:0.20000001)
+    plan=provider_module.governed_budget_preflight(mode="FULL",max_budget_usd="100")
+    assert plan["components_usd"]["image"]=="1.200006"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("extra",[{"max_output_tokens":4097},{"tools":[{"type":"web_search"}]},
+    {"stream":True},{"previous_response_id":"old"}])
+async def test_governed_request_cannot_escape_contract(monkeypatch,extra):
+    monkeypatch.setattr(provider_module,"_sunburst_reservation",lambda:0.2)
+    ledger=_synthetic_governed_ledger("CALIBRATION_SLIDE1",10);target=FakeResponses()
+    proxy=provider_module._BoundedAcceptanceResource(target,ledger)
+    with pytest.raises(provider_module.HardBudgetExceededError):
+        await proxy.create(model="gpt-5.1",input="text",**extra)
+    assert target.calls==[]
+
+
+@pytest.mark.asyncio
+async def test_governed_cli_accepts_and_threads_exact_usd(monkeypatch):
+    import sys
+    from scripts import run_live_acceptance as runner
+    monkeypatch.setattr(provider_module,"_sunburst_reservation",lambda:0.2)
+    monkeypatch.setattr(sys,"argv",["runner","--brand-slug","example","--prepared-campaign-id","prepared",
+        "--bounded-exposure","--calibration-slide1","--quality-mode","premium","--max-budget-usd","10.123456"])
+    closed=[]
+    session=SimpleNamespace(bind=SimpleNamespace(dispose=lambda:closed.append("engine")),close=lambda:closed.append("session"))
+    monkeypatch.setattr(runner,"isolated_calibration_session",lambda *a:session)
+    monkeypatch.setattr(runner,"get_effective_settings",lambda s:{"openai_api_key":"fake"})
+    def factory(effective,**kwargs):
+        assert kwargs=={"hard_budget_usd":"10.123456","governed_mode":"CALIBRATION_SLIDE1"}
+        raise RuntimeError("fake factory boundary; no SDK constructed")
+    monkeypatch.setattr(runner,"openai_provider_from_effective_settings",factory)
+    with pytest.raises(RuntimeError,match="fake factory boundary"):
+        await runner.main()
+    assert closed==["session","engine"]
+
+
+@pytest.mark.asyncio
+async def test_governed_legacy_bounded_cannot_authorize_prepared_run():
+    from scripts import run_live_acceptance as runner
+    provider=SimpleNamespace(hard_budget_snapshot=provider_module._BoundedExposureLedger().snapshot)
+    with pytest.raises(provider_module.HardBudgetExceededError,match="MONETARY_POLICY"):
+        await runner.run_prepared_acceptance(None,campaign_id="prepared",config=None,renderer=None,provider=provider,calibration_slide1=True)
+
+
+def test_governed_image_model_drift_is_rejected_before_factory_client(monkeypatch):
+    def forbidden(**kwargs):raise AssertionError("SDK constructed")
+    monkeypatch.setattr(provider_module,"AsyncOpenAI",forbidden)
+    with pytest.raises(provider_module.HardBudgetExceededError,match="IMAGE_MODEL_SUBSTITUTION"):
+        provider_module.openai_provider_from_effective_settings({"openai_premium_image_model":"unknown"},
+            governed_mode="CALIBRATION_SLIDE1",hard_budget_usd=100)

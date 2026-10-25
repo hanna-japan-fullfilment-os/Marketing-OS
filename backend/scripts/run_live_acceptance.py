@@ -141,7 +141,9 @@ _ESTIMATED_SCRIPT_ONLY_CASE_USD = 0.20
 
 _VERDICT_SEVERITY = {"PASS": 0, "NEEDS_REVIEW": 1, "INCOMPLETE_BUDGET_CEILING": 2, "FAIL": 3}
 
-PREPARED_ACCEPTANCE_CALL_LIMITS = {"image": 6, "text": 10, "vision": 2, "other": 0}
+from app.services.ai.openai_provider import governed_call_limits, governed_budget_preflight
+
+PREPARED_ACCEPTANCE_CALL_LIMITS = governed_call_limits("FULL")
 
 
 def prepared_acceptance_reserved_costs() -> dict:
@@ -152,24 +154,35 @@ def prepared_acceptance_reserved_costs() -> dict:
     """
     image = _sunburst_reservation()
     text = _acceptance_text_reservation("gpt-5.1")
-    return {"image": 6 * image, "text": 10 * text, "vision": 2 * text,
-            "other": 0.0, "total": 6 * image + 12 * text}
+    limits = governed_call_limits("FULL")
+    costs = {kind: count * (image if kind == "image" else text)
+             for kind, count in limits.items()}
+    return {**costs, "total": sum(costs.values())}
 
 
 async def run_prepared_acceptance(session, *, campaign_id, config, renderer, provider,
                                   calibration_slide1=False):
     """Guard the existing prepared Visuals -> QA path; never rerun copy/planning.
 
-    This callable is NOT live authorization. Bounded exposure is explicitly
-    distinct from the older exact-dollar mode, which still rejects Sunburst.
+    This callable is NOT live authorization. Prepared execution requires a
+    constructor-approved monetary policy; unknown Sunburst maxima stay blocked.
     """
     snapshot = provider.hard_budget_snapshot()
+    exposure = snapshot.get("governed_exposure")
+    mode = "CALIBRATION_SLIDE1" if calibration_slide1 else "FULL"
     bounded = snapshot.get("bounded_exposure", False)
-    if (not (snapshot["enabled"] or bounded)
-            or snapshot["call_limits"] != PREPARED_ACCEPTANCE_CALL_LIMITS
-            or any(snapshot["call_counts"].values())
-            or snapshot["spent_usd"] or snapshot["reserved_usd"]
-            or snapshot["halted"]):
+    # Legacy dollar runner remains fail-closed; bounded attempts alone cannot
+    # authorize prepared execution. Revalidate the constructor's exact gate.
+    if not exposure:
+        if not bounded:
+            prepared_acceptance_reserved_costs()
+        raise HardBudgetExceededError("PREPARED_ACCEPTANCE_REQUIRES_MONETARY_POLICY")
+    expected = governed_budget_preflight(mode=mode, max_budget_usd=snapshot["limit_usd"],
+                                         models=tuple(exposure["models"]))
+    if (exposure != expected or not snapshot["enabled"] or bounded
+            or snapshot["call_limits"] != governed_call_limits(mode)
+            or any(snapshot["call_counts"].values()) or snapshot["spent_usd"]
+            or snapshot["reserved_usd"] or snapshot["halted"] or snapshot.get("in_flight")):
         raise HardBudgetExceededError("PREPARED_ACCEPTANCE_REQUIRES_FRESH_SHARED_GUARD")
     if (config.qa_max_retries != 0 or config.qa_best_of_n != 1
             or config.recreate_with_ai or config.use_masked_scene_edit
@@ -177,11 +190,7 @@ async def run_prepared_acceptance(session, *, campaign_id, config, renderer, pro
             or not config.use_ai_background or not config.require_ai_background_success
             or not config.enable_qa_stage or config.quality_mode != "premium"):
         raise HardBudgetExceededError("PREPARED_ACCEPTANCE_UNSUPPORTED_POLICY")
-    if not bounded:
-        costs = prepared_acceptance_reserved_costs()
-        if costs["total"] > snapshot["remaining_usd"]:
-            raise HardBudgetExceededError("PREPARED_ACCEPTANCE_INSUFFICIENT_TOTAL_BUDGET")
-    else:
+    if exposure:
         from app.schemas.ai import SlidePlan
         from app.services.orchestrator import _load_stage_json, _stage_language_variant, validate_slide_provenance
         campaign = session.get(Campaign, campaign_id)
@@ -196,7 +205,7 @@ async def run_prepared_acceptance(session, *, campaign_id, config, renderer, pro
         for plan in plans:
             validate_slide_provenance(session, campaign, plan)
     if calibration_slide1:
-        if (not bounded or session.bind.dialect.name != "sqlite"
+        if (session.bind.dialect.name != "sqlite"
                 or any(row[2] for row in session.connection().exec_driver_sql("PRAGMA database_list").all())):
             raise ValueError("Calibration requires an isolated in-memory database")
         output = Path(config.output_root)
@@ -888,9 +897,9 @@ async def main() -> int:
     parser.add_argument("--calibration-slide1", action="store_true",
                         help="Explicit isolated slide1 render and subset QA; never approve the six-slide campaign.")
     parser.add_argument("--bounded-exposure", action="store_true",
-                        help="Explicit 6 image / 10 text / 2 vision sequential attempt policy; NOT a guaranteed USD ceiling.")
+                        help="Prepared request policy: calibration 1/5/2, full 6/10/2; also requires --max-budget-usd.")
     parser.add_argument(
-        "--max-budget-usd", type=float, default=None,
+        "--max-budget-usd", type=str, default=None,
         help=(
             "Required pre-call USD ceiling. Unknown maximum billable exposure "
             "is rejected before a paid request, including GPT Image 2.5 requests."
@@ -1000,9 +1009,13 @@ async def main() -> int:
         parser.error("Slide1 calibration requires prepared bounded exposure")
     if args.bounded_exposure or args.prepared_campaign_id:
         if (not args.bounded_exposure or not args.prepared_campaign_id
-                or args.max_budget_usd is not None or args.quality_mode != "premium"
+                or args.quality_mode != "premium"
                 or args.smoke or args.premium_hero_only):
-            parser.error("Prepared bounded exposure requires both flags, premium quality, no exact-dollar ceiling, and no hero/smoke mode.")
+            parser.error("Prepared bounded exposure requires both flags, premium quality, an explicit USD ceiling, and no hero/smoke mode.")
+        mode = "CALIBRATION_SLIDE1" if args.calibration_slide1 else "FULL"
+        # First gate is before session/output/client creation; actual effective
+        # model roles are revalidated by the factory before SDK construction.
+        governed_budget_preflight(mode=mode, max_budget_usd=args.max_budget_usd)
         # No init_db: no automatic schema changes in the prepared entrypoint.
         session = (isolated_calibration_session(db_module.engine.url.database)
                    if args.calibration_slide1 else db_module.SessionLocal())
@@ -1011,7 +1024,7 @@ async def main() -> int:
             if not effective.get("openai_api_key"):
                 raise HardBudgetExceededError("PREPARED_ACCEPTANCE_API_KEY_NOT_CONFIGURED")
             provider = openai_provider_from_effective_settings(
-                effective, bounded_acceptance=True, max_image_calls_override=6)
+                effective, hard_budget_usd=args.max_budget_usd, governed_mode=mode)
             config = _build_autopilot_config(
                 effective, effective.get("output_root", "./data/output"),
                 use_ai_background=True, recreate_with_ai=False, detect_product_zone=False,
@@ -1038,6 +1051,10 @@ async def main() -> int:
 
     if args.max_budget_usd is None:
         parser.error("Live acceptance requires --max-budget-usd; no spending is authorized implicitly.")
+    try:
+        args.max_budget_usd = float(args.max_budget_usd)
+    except (TypeError, ValueError):
+        parser.error("--max-budget-usd must be numeric")
     # Run before init_db/session creation: even startup migrations must not run
     # for an acceptance whose image cost ceiling cannot be proven.
     if args.quality_mode in {"premium", "draft"}:

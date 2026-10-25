@@ -627,8 +627,8 @@ class _HardBudgetLedger:
                 6,
             )
 
-        return {
-            "call_limits": self.call_limits,
+        result = {
+            "call_limits": dict(self.call_limits) if self.call_limits is not None else None,
             "call_counts": dict(self.call_counts),
             "halted": self.halted,
             "enabled": self.enabled,
@@ -651,6 +651,12 @@ class _HardBudgetLedger:
                 else None
             ),
         }
+        if getattr(self, "governed_exposure", None):
+            result.update(governed_exposure=json.loads(json.dumps(self.governed_exposure)),
+                          in_flight=self.in_flight, entries=[dict(e) for e in self.entries],
+                          exact_per_run_usd_ceiling=True, sdk_retries=0, http_retries=0,
+                          max_concurrent_paid_calls=1)
+        return result
 
 
 class _BudgetedResponsesProxy:
@@ -1063,6 +1069,78 @@ _SUNBURST_PAYLOAD_LIMITS = {
 }
 
 
+# One policy definition drives both monetary exposure and independent attempt caps.
+def governed_call_limits(mode: str) -> dict[str, int]:
+    if mode == "CALIBRATION_SLIDE1":
+        return {"image": 1, "text": 5, "vision": 2, "other": 0}
+    if mode == "FULL":
+        return dict(_BOUNDED_ACCEPTANCE_LIMITS)
+    raise HardBudgetExceededError("GOVERNED_UNKNOWN_EXECUTION_MODE")
+
+
+def governed_budget_preflight(*, mode: str, max_budget_usd, models=("gpt-5.1",),
+                               best_of_n=1, qa_retries=0, sdk_retries=0,
+                               provider_fallbacks=0, concurrency=1) -> dict:
+    """Pure gate: no client, database, files, or network. Unknown maxima stay blocked.
+
+    Only the fixed no-retry policy is supported, so multiplicative exposure
+    cannot silently expand. Currency comparisons use Decimal, rounding maxima up.
+    """
+    limits = governed_call_limits(mode)
+    factors = (best_of_n, qa_retries, sdk_retries, provider_fallbacks, concurrency)
+    if any(type(n) is not int for n in factors) or factors != (1, 0, 0, 0, 1):
+        raise HardBudgetExceededError("GOVERNED_UNSUPPORTED_EXPOSURE_MULTIPLIER")
+    try:
+        if isinstance(max_budget_usd, bool):
+            raise ValueError("boolean budget")
+        budget = Decimal(str(max_budget_usd))
+        if not budget.is_finite() or budget <= 0:
+            raise ValueError("nonpositive budget")
+        budget = budget.quantize(Decimal("0.000001"), rounding="ROUND_FLOOR")
+        if budget <= 0 or Decimal(str(float(budget))) != budget:
+            raise ValueError("budget not representable by existing ledger")
+    except (ArithmeticError, ValueError, TypeError) as exc:
+        raise HardBudgetExceededError("GOVERNED_EXPLICIT_POSITIVE_USD_REQUIRED") from exc
+    if not models:
+        raise HardBudgetExceededError("GOVERNED_MODELS_REQUIRED")
+    text = max(Decimal(str(_acceptance_text_reservation(model))) for model in models)
+    image = Decimal(str(_sunburst_reservation()))
+    if not all(n.is_finite() and n > 0 for n in (image, text)):
+        raise HardBudgetExceededError("GOVERNED_UNKNOWN_MAXIMUM")
+    image = image.quantize(Decimal("0.000001"), rounding=ROUND_CEILING)
+    text = text.quantize(Decimal("0.000001"), rounding=ROUND_CEILING)
+    maxima = {kind: (image if kind == "image" else text) * count
+              for kind, count in limits.items() if kind != "other"}
+    maxima["other"] = Decimal(0)
+    total = sum(maxima.values()).quantize(Decimal("0.000001"), rounding=ROUND_CEILING)
+    if total > budget:
+        raise HardBudgetExceededError("GOVERNED_TOTAL_EXPOSURE_EXCEEDS_AUTHORIZATION")
+    return {"mode": mode, "call_limits": limits, "max_budget_usd": str(budget),
+            "maximum_exposure_usd": str(total),
+            "components_usd": {k: str(v) for k, v in maxima.items()},
+            "models": sorted(set(models)), "pricing_version": _ACCEPTANCE_PRICING["version"],
+            "best_of_n": 1, "qa_retries": 0, "sdk_retries": 0,
+            "provider_fallbacks": 0, "max_concurrent_paid_calls": 1}
+
+
+def _governed_response_payload(kwargs: dict) -> None:
+    # Reserve the ENTIRE model context, including all vision/schema overhead.
+    # This local byte cap is an additional request bound, not an image-token
+    # estimator. A provider context-overflow failure is still a charged attempt.
+    schema = kwargs.get("text_format")
+    if schema is not None:
+        if not hasattr(schema, "model_json_schema"):
+            raise HardBudgetExceededError("GOVERNED_UNBOUNDED_RESPONSE_SCHEMA")
+        schema = schema.model_json_schema()
+    try:
+        raw = json.dumps({"input": kwargs.get("input"), "schema": schema},
+                         ensure_ascii=False, allow_nan=False).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise HardBudgetExceededError("GOVERNED_UNBOUNDED_RESPONSE_PAYLOAD") from exc
+    if len(raw) + _HARD_BUDGET_INPUT_OVERHEAD_TOKENS > 400000:
+        raise HardBudgetExceededError("GOVERNED_RESPONSE_PAYLOAD_CAP")
+
+
 def _actual_bounded_cost(response, model: str, *, image: bool) -> float | None:
     """Uncached Standard usage cost, never a pre-call price guarantee."""
     rates = _ACCEPTANCE_PRICING.get(model)
@@ -1184,7 +1262,28 @@ class _BoundedAcceptanceResource:
             kwargs = {**kwargs, "max_output_tokens": output}
             kind = "vision" if _response_has_image(kwargs.get("input")) else "text"
             metadata = {"max_output_tokens": output}
-        entry = self._ledger.begin(kind, kwargs)
+        governed = getattr(self._ledger, "governed_exposure", None)
+        if governed:
+            if self._ledger.in_flight:
+                raise HardBudgetExceededError("BOUNDED_CONCURRENT_CALL_REJECTED")
+            if not self._image:
+                if model not in governed["models"]:
+                    raise HardBudgetExceededError("GOVERNED_MODEL_SUBSTITUTION")
+                _governed_response_payload(kwargs)
+            maximum = _sunburst_reservation() if self._image else _acceptance_text_reservation(model)
+            reservation = self._ledger.reserve(maximum, operation=kind)
+            try:
+                self._ledger.count_attempt(kind)
+            except BaseException:
+                self._ledger.release(reservation)
+                raise
+            entry = {"class": kind, "status": "attempted", "actual_cost_usd": None,
+                     "reserved_maximum_usd": reservation,
+                     "request_sha256": hashlib.sha256(json.dumps(kwargs, sort_keys=True, default=str).encode()).hexdigest()}
+            self._ledger.entries.append(entry)
+            self._ledger.in_flight = True
+        else:
+            entry = self._ledger.begin(kind, kwargs)
         entry.update(metadata)
         try:
             response = await getattr(self._target, method)(**kwargs)
@@ -1196,7 +1295,11 @@ class _BoundedAcceptanceResource:
             elif method == "parse" and getattr(response, "output_parsed", None) is None:
                 raise ValueError("Malformed structured response")
             entry["actual_cost_usd"] = _actual_bounded_cost(response, model, image=self._image)
-            entry["status"] = "completed"
+            if governed and entry["actual_cost_usd"] is not None:
+                self._ledger.commit(reservation, entry["actual_cost_usd"], operation=kind)
+            elif governed:
+                self._ledger.halted = True  # unknown billing retains full reservation
+            entry["status"] = "completed" if entry["actual_cost_usd"] is not None else "usage_unknown"
             return response
         except BaseException:
             entry["status"] = "failed_or_incomplete"
@@ -1263,11 +1366,22 @@ class OpenAIProvider:
         max_image_calls: int | None = None,
         acceptance_call_limits: dict[str, int] | None = None,
         bounded_acceptance: bool = False,
+        governed_mode: str | None = None,
+        governed_models: tuple[str, ...] = ("gpt-5.1",),
     ):
+        exposure = None
+        if governed_mode is not None:
+            if bounded_acceptance or acceptance_call_limits is not None:
+                raise HardBudgetExceededError("GOVERNED_POLICY_CANNOT_BE_OVERRIDDEN")
+            exposure = governed_budget_preflight(mode=governed_mode,
+                max_budget_usd=hard_budget_usd, models=governed_models)
+            hard_budget_usd = float(exposure["max_budget_usd"])
+            acceptance_call_limits = exposure["call_limits"]
+            max_image_calls = acceptance_call_limits["image"]
         if bounded_acceptance and (hard_budget_usd is not None or acceptance_call_limits not in (None, _BOUNDED_ACCEPTANCE_LIMITS)):
             raise ValueError("Bounded exposure is not an exact USD ceiling; requires fixed 6/10/2/0 limits.")
-        self._bounded_acceptance = bounded_acceptance
-        if bounded_acceptance:
+        self._bounded_acceptance = bounded_acceptance or exposure is not None
+        if bounded_acceptance or exposure:
             import httpx
             bounded_http = httpx.AsyncClient(
                 transport=httpx.AsyncHTTPTransport(retries=0),
@@ -1277,8 +1391,8 @@ class OpenAIProvider:
                 api_key=api_key,
                 timeout=_OPENAI_REQUEST_TIMEOUT_SECONDS,
                 max_retries=_OPENAI_MAX_RETRIES,
-                **({"project": project_id} if bounded_acceptance and project_id else {}),
-                **({"http_client": bounded_http} if bounded_acceptance else {}),
+                **({"project": project_id} if (bounded_acceptance or exposure) and project_id else {}),
+                **({"http_client": bounded_http} if bounded_acceptance or exposure else {}),
             )
             if api_key
             else None
@@ -1301,6 +1415,11 @@ class OpenAIProvider:
             )
         )
 
+        if exposure:
+            self._hard_budget_ledger.governed_exposure = exposure
+            self._hard_budget_ledger.in_flight = False
+            self._hard_budget_ledger.entries = []
+
         self._project_id = (
             str(
                 project_id
@@ -1320,7 +1439,7 @@ class OpenAIProvider:
 
         self._client = (
             _BoundedAcceptanceClient(raw_client, self._hard_budget_ledger)
-            if bounded_acceptance and raw_client is not None else _BudgetedOpenAIClient(
+            if (bounded_acceptance or exposure) and raw_client is not None else _BudgetedOpenAIClient(
                 raw_client,
                 self._hard_budget_ledger,
             )
@@ -1364,7 +1483,8 @@ class OpenAIProvider:
 
         if self._bounded_acceptance:
             used = self._hard_budget_ledger.call_counts["image"]
-            snapshot.update(max_image_calls=6, image_calls_used=used, image_calls_remaining=max(0, 6-used))
+            maximum = self._hard_budget_ledger.call_limits["image"]
+            snapshot.update(max_image_calls=maximum, image_calls_used=used, image_calls_remaining=max(0, maximum-used))
 
         return snapshot
 
@@ -2245,6 +2365,7 @@ def openai_provider_from_effective_settings(
     max_image_calls_override: int | None = None,
     acceptance_call_limits: dict[str, int] | None = None,
     bounded_acceptance: bool = False,
+    governed_mode: str | None = None,
 ) -> OpenAIProvider:
     """Create the canonical runtime OpenAI provider from effective settings.
 
@@ -2253,6 +2374,10 @@ def openai_provider_from_effective_settings(
     are all configured. Text-only OpenAI operations remain usable while
     those image-specific controls are intentionally unconfigured.
     """
+    if governed_mode is not None:
+        for key in ("openai_image_model", "openai_premium_image_model"):
+            if effective.get(key) not in (None, "", "gpt-image-2.5-sunburst-2026-09-08"):
+                raise HardBudgetExceededError("GOVERNED_IMAGE_MODEL_SUBSTITUTION")
     return OpenAIProvider(
         api_key=(
             str(
@@ -2266,6 +2391,10 @@ def openai_provider_from_effective_settings(
         hard_budget_usd=hard_budget_usd,
         acceptance_call_limits=acceptance_call_limits,
         bounded_acceptance=bounded_acceptance,
+        governed_mode=governed_mode,
+        governed_models=tuple(str(effective.get(key) or "") for key in (
+            "openai_creative_director_model", "openai_vision_model", "openai_creative_qa_model",
+            "openai_copy_model", "openai_platform_adapter_model")) if governed_mode else ("gpt-5.1",),
         project_id=str(
             effective.get(
                 "openai_project_id"

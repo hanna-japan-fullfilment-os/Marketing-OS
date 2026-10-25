@@ -438,3 +438,31 @@ callout, translation, emphasis or promotional award assertions. There is no
 brand/product/award-name exception. Canonical permission data has not been
 activated by this source repair; its mutation remains separately governed.
 Structural/mock tests do not establish live visual acceptance.
+
+
+### Governed prepared-run monetary authorization
+
+Prepared runs require `--max-budget-usd` with a finite positive USD amount.
+`--bounded-exposure` selects the prepared request restrictions; it does not
+substitute attempt limits for monetary authorization. The pure whole-run gate
+resolves the execution policy and model maxima before constructing the SDK client.
+Maximum exposure must be <= authorization (equality is allowed); currency maxima
+round upward. Missing/unpriced/unbounded exposure fails closed.
+
+The provider owns a shared policy: `CALIBRATION_SLIDE1` independently caps image,
+text, vision attempts at 1/5/2; `FULL` retains 6/10/2. The same counts determine
+maximum monetary exposure. Best-of-N=1, QA/SDK retries=0, fallbacks=0 and concurrency=1
+are enforced; unsupported multipliers are rejected rather than silently omitted.
+The existing monetary ledger reserves before each invocation, retains reservations
+on failure or missing usage, and reconciles known actual usage. Unknown usage halts
+the governed run. Actual spend cannot retroactively authorize an over-budget call.
+Text/vision reserve the full configured model context plus capped output; a local
+serialized request/schema byte cap is additional protection, not an image-token
+pricing formula. All governed responses cap output at 4096 tokens.
+
+Sunburst's versioned token rates exist, but its authoritative maximum billable
+request exposure remains unresolved. `_sunburst_reservation` therefore continues
+to reject execution before client construction. This repair does **not** make V5
+paid-ready. Historical ~$0.19 costs, operator estimates and project spend-limit
+attestations cannot replace an authoritative maximum. A separately authorized
+post-repair zero-cost preflight and separate paid authorization remain required.
