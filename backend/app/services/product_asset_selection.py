@@ -208,3 +208,47 @@ def select_render_assets(
         product_id=product_id,
         limit=limit,
     )
+
+
+def resolve_authentic_package_mark_permission(db, campaign, render_asset_id):
+    """Read an exact approval from the real source; never infer inheritance."""
+    import hashlib
+    from pathlib import Path
+    from ..schemas.qa import AuthenticPackageMarkPermission
+    render = db.get(Asset, render_asset_id, populate_existing=True)
+    if render is None:
+        raise ValueError("Package-mark render asset missing")
+    metadata = render.ai_metadata or {}
+    source = (db.get(Asset, metadata.get("source_asset_id"), populate_existing=True)
+              if render.image_role == APPROVED_PRODUCT_MASTER_ROLE else render)
+    if source is None:
+        raise ValueError("Package-mark source missing")
+    source_metadata = source.ai_metadata or {}
+    if "authentic_package_mark_permissions" not in source_metadata:
+        return None
+    raw = source_metadata["authentic_package_mark_permissions"]
+    if not isinstance(raw, list) or len(raw) > 100:
+        raise ValueError("Malformed package-mark permission list")
+    entries = [AuthenticPackageMarkPermission.model_validate(p) for p in raw]
+    keys = [(p.campaign_id, p.render_asset_id) for p in entries]
+    if len(set(keys)) != len(keys):
+        raise ValueError("Duplicate package-mark approval scope")
+    matching = [p for p in entries if p.campaign_id == campaign.id and p.render_asset_id == render.id]
+    if not matching:
+        return None
+    permission = matching[0]
+    if (permission.brand_id != campaign.brand_id or permission.product_id != campaign.product_id
+            or render.brand_id != campaign.brand_id or render.product_id != campaign.product_id
+            or source.brand_id != render.brand_id or source.product_id != render.product_id
+            or permission.source_asset_id != source.id or permission.source_sha256 != source.sha256
+            or permission.render_sha256 != render.sha256 or not source.is_active or not render.is_active
+            or source.image_role != "product" or source_metadata.get("ai_generated") is not False):
+        raise ValueError("Package-mark identity/authenticity mismatch")
+    if render is not source and choose_approved_product_master([render], source_lookup=lambda key: db.get(Asset, key)) is None:
+        raise ValueError("Package-mark master approval missing")
+    if render is source and render.image_role != "product":
+        raise ValueError("Package-mark product role mismatch")
+    for asset in (source, render):
+        if hashlib.sha256(Path(asset.absolute_path).read_bytes()).hexdigest() != asset.sha256:
+            raise ValueError("Package-mark asset bytes changed")
+    return permission if permission.status == "APPROVED" else None

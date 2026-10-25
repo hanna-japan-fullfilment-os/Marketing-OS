@@ -618,3 +618,102 @@ def test_high_generic_score_cannot_override_paint_campaign_contract(failure):
         reference_fidelity=99, background_has_product=False, unintended_duplicate_product=False,
         campaign_reference_coherent=failure != "paint_coherence", slide_reference_results=[result])
     assert reference_qa_hard_fails(CreativeCritiqueResult(**values), target, manifest)
+
+
+def _physical_mark_qa_fixture():
+    from app.schemas.qa import AuthenticPackageMarkPermission, PackageMarkSlideContext, CreativeCritiqueResult
+    from app.services.qa_engine import _provenance_hash
+    permission = AuthenticPackageMarkPermission.model_validate(dict(version=1, status="APPROVED", authority="OWNER",
+        approved_at="2026-01-01T00:00:00Z", campaign_id="campaign", brand_id="brand", product_id="product",
+        source_asset_id="source", render_asset_id="master", source_sha256="a"*64, render_sha256="b"*64,
+        owner_decision_sha256="c"*64, use="PHYSICAL_PACKAGE_DEPICTION_ONLY",
+        allowed_marks=[dict(mark_id="seal", kind="award", visible_text=["Real seal"])]) )
+    context = PackageMarkSlideContext(slide_id="slide", contract_sha256="d"*64,
+        permission_sha256=_provenance_hash(permission.model_dump(mode="json")), permission=permission,
+        render_asset_id="master", render_sha256="b"*64, render_path="master.bin",
+        source_asset_id="source", source_sha256="a"*64, source_path="source.bin",
+        background_path="background.bin", background_sha256="e"*64, final_path="final.bin", final_sha256="f"*64)
+    result = {k:getattr(context,k) for k in ["slide_id", "contract_sha256", "permission_sha256", "render_asset_id", "render_sha256", "source_asset_id", "source_sha256"]}
+    result.update(marks=[dict(mark_id="seal", origin="AUTHORIZED_PRODUCT_LAYER", matches_authorized_asset=True)],
+        generated_award_or_ranking_content=False, renderer_added_award_or_ranking_content=False,
+        unsupported_promotional_award_content=False, assessment_complete=True)
+    return context, result
+
+
+@pytest.mark.parametrize("fault", [None, "no_permission", "generated_badge", "generated_ranking", "renderer_added",
+    "unsupported_award_copy", "unsupported_ranking_copy", "other_mark", "unmatched", "unknown", "missing",
+    "duplicate", "foreign", "stale_permission", "stale_plan", "wrong_asset", "wrong_source", "incomplete", "duplicate_mark"])
+def test_package_mark_qa_decision_table_and_high_score_guard(fault):
+    from app.schemas.qa import CreativeCritiqueResult
+    from app.services.qa_engine import package_mark_hard_fails
+    context, result = _physical_mark_qa_fixture()
+    if fault in {"generated_badge", "generated_ranking"}:
+        result["generated_award_or_ranking_content"] = True
+        result["marks"][0]["origin"] = "GENERATED_BACKGROUND"
+    if fault == "renderer_added":
+        result["renderer_added_award_or_ranking_content"] = True
+        result["marks"][0]["origin"] = "RENDERER_ADDED"
+    if fault in {"unsupported_award_copy", "unsupported_ranking_copy"}: result["unsupported_promotional_award_content"] = True
+    if fault == "other_mark": result["marks"][0]["mark_id"] = "unapproved"
+    if fault == "unmatched": result["marks"][0]["matches_authorized_asset"] = False
+    if fault == "unknown": result["marks"][0]["origin"] = "UNKNOWN"
+    if fault == "stale_permission": result["permission_sha256"] = "0"*64
+    if fault == "stale_plan": result["contract_sha256"] = "0"*64
+    if fault == "wrong_asset": result["render_asset_id"] = "other"
+    if fault == "wrong_source": result["source_sha256"] = "0"*64
+    if fault == "incomplete": result["assessment_complete"] = False
+    if fault == "foreign": result["slide_id"] = "other"
+    if fault == "duplicate_mark": result["marks"] *= 2
+    results = [] if fault == "missing" else [result, result] if fault == "duplicate" else [result]
+    creative = CreativeCritiqueResult(overall_quality=100, package_mark_results=results)
+    assert bool(package_mark_hard_fails(creative, None if fault == "no_permission" else [context])) == (fault is not None)
+
+
+def test_permission_does_not_suppress_unrelated_failures_or_create_claims():
+    from app.schemas.qa import CreativeCritiqueResult, TechnicalQAResult
+    from app.services.qa_engine import _creative_overall_and_fails, package_mark_hard_fails
+    context, result = _physical_mark_qa_fixture()
+    creative = CreativeCritiqueResult(overall_quality=100, package_mark_results=[result], hard_fails=["unsupported promotional claim"])
+    assert not package_mark_hard_fails(creative, [context])
+    assert _creative_overall_and_fails(TechnicalQAResult(passed=True), [], [], creative)[1] == ["unsupported promotional claim"]
+    assert "claim_id" not in type(context.permission).model_fields
+    assert not package_mark_hard_fails(CreativeCritiqueResult())  # Legacy parsing grants no exception.
+
+
+async def test_package_mark_context_uses_same_single_vision_request(tmp_path, monkeypatch):
+    from pathlib import Path
+    import hashlib
+    from types import SimpleNamespace
+    from app.services.ai import openai_provider as module
+    from app.schemas.qa import CreativeCritiqueResult
+    context, result = _physical_mark_qa_fixture()
+    updates = {}
+    for prefix in ["source", "render", "background", "final"]:
+        path = tmp_path / (prefix + ".bin"); path.write_bytes(prefix.encode())
+        updates[prefix + "_path"] = str(path)
+        updates[prefix + "_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+    permission = context.permission.model_copy(update={"source_sha256":updates["source_sha256"], "render_sha256":updates["render_sha256"]})
+    from app.services.qa_engine import _provenance_hash
+    updates.update(permission=permission, permission_sha256=_provenance_hash(permission.model_dump(mode="json")))
+    context = context.model_copy(update=updates)
+    calls = []
+    class FakeResponses:
+        async def parse(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(output_parsed=CreativeCritiqueResult(), usage=None)
+    client = SimpleNamespace(responses=FakeResponses())
+    provider = module.OpenAIProvider("sk-fake-offline")
+    monkeypatch.setattr(provider, "_require_client", lambda: client)
+    monkeypatch.setattr(module, "_openai_image_data_uri", lambda p: "fixture:" + str(p))
+    await provider.critique_creative(image_paths=[Path(context.final_path)], source_image_path=None,
+        context="factual campaign", model="fake", package_mark_context=[context])
+    assert len(calls) == 1
+    content = calls[0]["input"][0]["content"]
+    assert sum(x["type"] == "input_image" for x in content) == 4
+    text = str(content)
+    assert "EXACT APPROVED RENDER ASSET" in text and "PHYSICAL_PACKAGE_DEPICTION_ONLY" in text
+    Path(context.render_path).write_bytes(b"changed")
+    with pytest.raises(ValueError, match="pixels changed"):
+        await provider.critique_creative(image_paths=[Path(context.final_path)], source_image_path=None,
+            context="factual campaign", model="fake", package_mark_context=[context])
+    assert len(calls) == 1

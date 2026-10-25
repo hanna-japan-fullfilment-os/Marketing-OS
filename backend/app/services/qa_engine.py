@@ -89,6 +89,79 @@ _IDENTICAL_TEXT_MIN_LENGTH = 8
 # Part A — Technical QA (deterministic, no AI).
 # ---------------------------------------------------------------------------
 
+def _package_mark_permission(db, campaign, plan):
+    from .product_asset_selection import resolve_authentic_package_mark_permission
+    return (resolve_authentic_package_mark_permission(db, campaign, plan.product_asset.asset_id)
+            if plan.product_asset is not None else None)
+
+
+def package_mark_context(db, campaign, image_paths, prepared_plans):
+    """Host-only permission/image context for the existing final vision request."""
+    from ..models.asset import Asset
+    from ..schemas.qa import PackageMarkSlideContext
+    from .creative.pipeline import slide_contract_digest
+    plans = [SlidePlan.model_validate(p) for p in prepared_plans]
+    permissions = [_package_mark_permission(db, campaign, p) for p in plans]
+    if not any(permissions):
+        return None  # No new exception or provider kwargs for legacy campaigns.
+    if len(plans) != len(image_paths) or len({p.slide_id for p in plans}) != len(plans):
+        raise ValueError("Package-mark QA requires exact slide coverage")
+    result = []
+    for image, plan, permission in zip(image_paths, plans, permissions, strict=True):
+        validate_slide_provenance(db, campaign, plan)
+        ctx = json.loads(build_render_context_path(image).read_text(encoding="utf-8"))
+        final_hash = hashlib.sha256(Path(image).read_bytes()).hexdigest()
+        if (ctx.get("slide_contract") != plan.model_dump()
+                or ctx.get("slide_contract_sha256") != slide_contract_digest(plan)
+                or ctx.get("render_sha256") != final_hash
+                or ctx.get("visual_base_kind") != "generated_background"):
+            raise ValueError("Stale package-mark render provenance")
+        background = Path(ctx["visual_base_path"])
+        if hashlib.sha256(background.read_bytes()).hexdigest() != ctx.get("visual_base_sha256"):
+            raise ValueError("Package-mark background bytes changed")
+        render = db.get(Asset, plan.product_asset.asset_id)
+        source = db.get(Asset, render.ai_metadata["source_asset_id"]) if render.image_role == "product_master_approved" else render
+        result.append(PackageMarkSlideContext(slide_id=plan.slide_id,
+            contract_sha256=slide_contract_digest(plan), permission=permission,
+            permission_sha256=_provenance_hash(permission.model_dump(mode="json") if permission else None),
+            render_asset_id=render.id, render_sha256=render.sha256, render_path=render.absolute_path,
+            source_asset_id=source.id, source_sha256=source.sha256, source_path=source.absolute_path,
+            background_path=str(background), background_sha256=ctx["visual_base_sha256"],
+            final_path=str(image), final_sha256=final_hash))
+    return result
+
+
+def package_mark_hard_fails(creative, context=None):
+    """No score or free-text filtering can grant a physical-mark exception."""
+    results = creative.package_mark_results if creative is not None else []
+    if context is None:
+        return (["package_mark_hard_fail: award content without host permission"]
+                if any(r.marks or r.generated_award_or_ranking_content
+                       or r.renderer_added_award_or_ranking_content
+                       or r.unsupported_promotional_award_content for r in results) else [])
+    expected = {x.slide_id: x for x in context}
+    if (len(results) != len(expected) or len({r.slide_id for r in results}) != len(results)
+            or {r.slide_id for r in results} != set(expected)):
+        return ["package_mark_hard_fail: missing/duplicate/foreign assessment"]
+    fails = []
+    for result in results:
+        item = expected[result.slide_id]
+        identity = ("contract_sha256", "permission_sha256", "render_asset_id", "render_sha256",
+                    "source_asset_id", "source_sha256")
+        if (not result.assessment_complete or any(getattr(result, k) != getattr(item, k) for k in identity)
+                or result.generated_award_or_ranking_content or result.renderer_added_award_or_ranking_content
+                or result.unsupported_promotional_award_content):
+            fails.append("package_mark_hard_fail: provenance or added/promotional content")
+        allowed = {m.mark_id for m in item.permission.allowed_marks} if item.permission else set()
+        if len({m.mark_id for m in result.marks}) != len(result.marks):
+            fails.append("package_mark_hard_fail: duplicated physical mark")
+        for mark in result.marks:
+            if (mark.mark_id not in allowed or mark.origin != "AUTHORIZED_PRODUCT_LAYER"
+                    or not mark.matches_authorized_asset):
+                fails.append("package_mark_hard_fail: unauthorized mark origin")
+    return fails
+
+
 def _qa_subset_plans(plans, campaign, *, qa_mode="FULL_CAMPAIGN", required_slide_numbers=None):
     if qa_mode == "FULL_CAMPAIGN":
         if required_slide_numbers is not None:
@@ -157,6 +230,12 @@ def current_slide_attestations(db, campaign, variant, *, creative_data=None,
             "variant_sha256": _provenance_hash({"platform": variant.target_platform, "language": variant.language,
                 "content_type": variant.content_type, "format": variant.render_format_key,
                 "direction": variant.creative_direction})})
+    # Policy changes/revocation invalidate old QA without changing SlidePlan or
+    # relaxing the selected asset's existing full metadata provenance hash.
+    for plan, attestation in zip(plans, result, strict=True):
+        permission = _package_mark_permission(db, campaign, plan)
+        if permission is not None:
+            attestation["package_mark_permission_sha256"] = _provenance_hash(permission.model_dump(mode="json"))
     if qa_mode == "CALIBRATION_SUBSET":
         for attestation in result:
             attestation["qa_mode"] = qa_mode
@@ -520,7 +599,7 @@ def reference_qa_hard_fails(creative, target, manifest=None):
 
 async def run_creative_qa(
     ai_provider: AIProvider | None, *, image_paths: list[Path], source_image_path: Path | None, context: str,
-    model: str, reference_target=None, reference_paths=None, background_paths=None,
+    model: str, reference_target=None, reference_paths=None, background_paths=None, package_mark_context=None,
 ) -> CreativeCritiqueResult | None:
     """AI-optional wrapper around `AIProvider.critique_creative` — `None`
     (never a fabricated scorecard) with no provider or on a failed call.
@@ -530,6 +609,8 @@ async def run_creative_qa(
     try:
         options = {} if reference_target is None else dict(reference_target=reference_target,
                     reference_paths=reference_paths, background_paths=background_paths)
+        if package_mark_context is not None:
+            options["package_mark_context"] = package_mark_context
         return await ai_provider.critique_creative(
             image_paths=image_paths, source_image_path=source_image_path, context=context, model=model, **options,
         )
@@ -1784,6 +1865,11 @@ async def _qa_one_static_variant(
             scoring_context += "\nPREPARED_REFERENCE_SLIDE_MANIFEST: " + json.dumps(reference_manifest, sort_keys=True)
             target_options = dict(reference_target=active_target, reference_paths=target_pixels,
                                   background_paths=background_pixels)
+        mark_context = package_mark_context(db, campaign, image_paths, _qa_subset_plans(
+            _planned_slides_for_variant(creative_data_raw, language, spec), campaign,
+            qa_mode=qa_mode, required_slide_numbers=required_slide_numbers))
+        if mark_context is not None:
+            target_options["package_mark_context"] = mark_context
         creative = await run_creative_qa(
             ai_provider, image_paths=image_paths, source_image_path=source_product_image_path, context=scoring_context,
             model=config.creative_qa_model, **target_options,
@@ -1828,7 +1914,7 @@ async def _qa_one_static_variant(
         claims_hard_fails = format_claims_hard_fails(claims_result)
 
         overall, hard_fails = _creative_overall_and_fails(technical, platform_fails, language_fails, creative)
-        hard_fails = hard_fails + claims_hard_fails + reference_qa_hard_fails(creative, active_target, reference_manifest)
+        hard_fails = hard_fails + claims_hard_fails + reference_qa_hard_fails(creative, active_target, reference_manifest) + package_mark_hard_fails(creative, mark_context)
         # Fail closed (REQUIREMENT 5): an unsupported claim can never receive
         # PASS regardless of how high `overall` scores otherwise.
         if current_slide_attestations(db, campaign, variant, creative_data=creative_data_raw,

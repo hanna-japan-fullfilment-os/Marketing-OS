@@ -402,3 +402,39 @@ The preserved 52-entry direction proposal remains immutable; prospective paint
 objects fit inside its already-counted visual_brief updates. Reference approval,
 direction mutation, product-artwork decisions and paid visual acceptance remain
 separately governed. Structural/mock QA does not establish live visual acceptance.
+
+
+### Explicit physical package-mark permission
+
+The optional `Asset.ai_metadata.authentic_package_mark_permissions` list lives on
+verified real source assets. Missing/empty grants no exception. Strict version-1
+entries bind campaign_id, brand_id, product_id, source_asset_id, render_asset_id,
+source_sha256, render_sha256, OWNER authority, timezone-aware approved_at,
+owner_decision_sha256, APPROVED/REVOKED status and
+use=PHYSICAL_PACKAGE_DEPICTION_ONLY. allowed_marks contains unique mark_id,
+award/ranking kind and quoted visible_text identity tokens. Unknown, partial,
+duplicate or mismatched metadata fails closed. Siblings inherit nothing.
+Actual hashes and the existing approved-master/source contract remain required.
+
+Source-anchored policy leaves the selected approved master's full metadata
+provenance and prepared direction untouched. QA separately attests the resolved
+permission digest: changing/removing/revoking it invalidates prior QA. A directly
+rendered source whose metadata changes still needs explicit provenance rebinding;
+no existing identity check is relaxed.
+
+The existing final vision request gains typed host-only per-slide context and
+labeled source, exact render asset, native background and final images. Strict
+PackageMarkSlideQA results must match slide/contract/permission/asset identities,
+be complete, and classify allowed marks as AUTHORIZED_PRODUCT_LAYER with a
+matching approved mark_id. GENERATED_BACKGROUND, RENDERER_ADDED, UNKNOWN, added
+award/ranking content and unsupported promotional award/ranking copy fail.
+Missing assessments cannot approve permission-enabled evaluations. No free-text
+hard failure is suppressed. All claim, reference, duplicate-product, background
+and campaign-coherence gates remain required. Legacy parsing remains compatible
+and grants no exception without policy. No additional provider call is created.
+
+Package pixels and permission never create claim evidence or authorize headline,
+callout, translation, emphasis or promotional award assertions. There is no
+brand/product/award-name exception. Canonical permission data has not been
+activated by this source repair; its mutation remains separately governed.
+Structural/mock tests do not establish live visual acceptance.

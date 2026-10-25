@@ -35,7 +35,9 @@ as "passed") rather than crashing.
 """
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, StrictBool
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, Field, StrictBool, StrictStr, AwareDatetime, model_validator
 
 
 class TechnicalQAResult(BaseModel):
@@ -55,6 +57,84 @@ class TechnicalQAResult(BaseModel):
 
     def to_dict(self) -> dict:
         return {"passed": self.passed, "issues": self.issues, "checks": self.checks}
+
+
+# Canonical host policy, never a model-selected authorization.
+MarkIdentity = Annotated[StrictStr, Field(min_length=1, max_length=200)]
+MarkSHA256 = Annotated[StrictStr, Field(pattern=r"^[0-9a-f]{64}$", min_length=64, max_length=64)]
+
+
+class AllowedPackageMark(BaseModel):
+    model_config = {"extra": "forbid", "frozen": True}
+    mark_id: Annotated[StrictStr, Field(pattern=r"^[a-z0-9][a-z0-9_-]{0,63}$")]
+    kind: Literal["award", "ranking"]
+    visible_text: list[Annotated[StrictStr, Field(min_length=1, max_length=200)]] = Field(min_length=1, max_length=20)
+
+
+class AuthenticPackageMarkPermission(BaseModel):
+    model_config = {"extra": "forbid", "frozen": True}
+    version: Annotated[int, Field(strict=True, ge=1, le=1)]
+    status: Literal["APPROVED", "REVOKED"]
+    authority: Literal["OWNER"]
+    approved_at: AwareDatetime
+    campaign_id: MarkIdentity
+    brand_id: MarkIdentity
+    product_id: MarkIdentity
+    source_asset_id: MarkIdentity
+    render_asset_id: MarkIdentity
+    source_sha256: MarkSHA256
+    render_sha256: MarkSHA256
+    owner_decision_sha256: MarkSHA256
+    use: Literal["PHYSICAL_PACKAGE_DEPICTION_ONLY"]
+    allowed_marks: list[AllowedPackageMark] = Field(min_length=1, max_length=20)
+
+    @model_validator(mode="after")
+    def unique_marks(self):
+        if len({m.mark_id for m in self.allowed_marks}) != len(self.allowed_marks):
+            raise ValueError("Duplicate permitted physical mark")
+        return self
+
+
+class PackageMarkFinding(BaseModel):
+    model_config = {"extra": "forbid"}
+    mark_id: MarkIdentity
+    origin: Literal["AUTHORIZED_PRODUCT_LAYER", "GENERATED_BACKGROUND", "RENDERER_ADDED", "UNKNOWN"]
+    matches_authorized_asset: StrictBool
+
+
+class PackageMarkSlideQA(BaseModel):
+    model_config = {"extra": "forbid"}
+    slide_id: MarkIdentity
+    contract_sha256: MarkSHA256
+    permission_sha256: MarkSHA256
+    render_asset_id: MarkIdentity
+    render_sha256: MarkSHA256
+    source_asset_id: MarkIdentity
+    source_sha256: MarkSHA256
+    marks: list[PackageMarkFinding]
+    generated_award_or_ranking_content: StrictBool
+    renderer_added_award_or_ranking_content: StrictBool
+    unsupported_promotional_award_content: StrictBool
+    assessment_complete: StrictBool
+
+
+class PackageMarkSlideContext(BaseModel):
+    """Validated host-only paths and identities; not returned by a provider."""
+    model_config = {"extra": "forbid", "frozen": True}
+    slide_id: MarkIdentity
+    contract_sha256: MarkSHA256
+    permission_sha256: MarkSHA256
+    permission: AuthenticPackageMarkPermission | None
+    render_asset_id: MarkIdentity
+    render_sha256: MarkSHA256
+    render_path: Annotated[StrictStr, Field(min_length=1, max_length=2000)]
+    source_asset_id: MarkIdentity
+    source_sha256: MarkSHA256
+    source_path: Annotated[StrictStr, Field(min_length=1, max_length=2000)]
+    background_path: Annotated[StrictStr, Field(min_length=1, max_length=2000)]
+    background_sha256: MarkSHA256
+    final_path: Annotated[StrictStr, Field(min_length=1, max_length=2000)]
+    final_sha256: MarkSHA256
 
 
 class SlideReferenceQA(BaseModel):
@@ -95,6 +175,7 @@ class CreativeCritiqueResult(BaseModel):
     unintended_duplicate_product: StrictBool | None = None
     slide_reference_results: list[SlideReferenceQA] = []
     campaign_reference_coherent: StrictBool | None = None
+    package_mark_results: list[PackageMarkSlideQA] = Field(default_factory=list)
 
     overall_quality: int = 0
     brand_alignment: int = 0

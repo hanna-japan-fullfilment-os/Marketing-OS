@@ -715,3 +715,124 @@ def test_paint_variation_preserves_shared_language_and_exact_prepared_values(own
         assert len(reference_qa_manifest(images, prepared)) == 2
         with pytest.raises(ValueError, match="QA target differs"):
             reference_qa_inputs(images)
+
+
+def _mark_permission_fixture(tmp_path):
+    import hashlib
+    from types import SimpleNamespace
+    source_path = tmp_path / "source.bin"; source_path.write_bytes(b"real package source fixture")
+    render_path = tmp_path / "master.bin"; render_path.write_bytes(b"approved package master fixture")
+    digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
+    source = SimpleNamespace(id="source", product_id="product", brand_id="brand", is_active=True,
+        image_role="product", absolute_path=str(source_path), sha256=digest(source_path), ai_metadata={"ai_generated": False})
+    render = SimpleNamespace(id="master", product_id="product", brand_id="brand", is_active=True,
+        image_role="product_master_approved", absolute_path=str(render_path), sha256=digest(render_path), ai_metadata={"source_asset_id": "source"})
+    campaign = SimpleNamespace(id="campaign", product_id="product", brand_id="brand")
+    permission = dict(version=1, status="APPROVED", authority="OWNER", approved_at="2026-01-01T00:00:00Z",
+        campaign_id=campaign.id, brand_id=campaign.brand_id, product_id=campaign.product_id,
+        source_asset_id=source.id, render_asset_id=render.id, source_sha256=source.sha256,
+        render_sha256=render.sha256, owner_decision_sha256="a" * 64, use="PHYSICAL_PACKAGE_DEPICTION_ONLY",
+        allowed_marks=[dict(mark_id="physical-seal", kind="award", visible_text=["Manufacturer seal"])])
+    source.ai_metadata["authentic_package_mark_permissions"] = [permission]
+    db = SimpleNamespace(get=lambda cls, key, **kwargs: {"source": source, "master": render}.get(key))
+    return db, campaign, source, render, permission
+
+
+@pytest.mark.parametrize("fault", [None, "missing", "blank", "partial", "extra", "authority", "owner_proof",
+    "campaign", "product", "brand", "source_id", "render_id", "source_hash", "render_hash", "sibling",
+    "generated_source", "changed_source", "changed_render", "revoked", "duplicate", "duplicate_mark", "master_approval"])
+def test_authentic_package_permission_is_exact_and_source_anchored(tmp_path, monkeypatch, fault):
+    from app.services import product_asset_selection as selection
+    db, campaign, source, render, permission = _mark_permission_fixture(tmp_path)
+    monkeypatch.setattr(selection, "choose_approved_product_master", lambda *a, **k: render if fault != "master_approval" else None)
+    baseline_metadata = dict(render.ai_metadata)
+    if fault == "missing": source.ai_metadata.pop("authentic_package_mark_permissions")
+    if fault == "blank": source.ai_metadata["authentic_package_mark_permissions"] = ""
+    if fault == "partial": permission.pop("owner_decision_sha256")
+    if fault == "extra": permission["allow_copy"] = True
+    if fault == "authority": permission["authority"] = "MODEL"
+    if fault == "owner_proof": permission["owner_decision_sha256"] = ""
+    for name, key in [("campaign", "campaign_id"), ("product", "product_id"), ("brand", "brand_id"),
+                      ("source_id", "source_asset_id"), ("render_id", "render_asset_id")]:
+        if fault == name: permission[key] = "unrelated"
+    if fault == "source_hash": permission["source_sha256"] = "0" * 64
+    if fault == "render_hash": permission["render_sha256"] = "0" * 64
+    if fault == "sibling": render.id = "sibling"
+    if fault == "generated_source": source.ai_metadata["ai_generated"] = True
+    if fault == "changed_source": Path(source.absolute_path).write_bytes(b"substitution")
+    if fault == "changed_render": Path(render.absolute_path).write_bytes(b"substitution")
+    if fault == "revoked": permission["status"] = "REVOKED"
+    if fault == "duplicate": source.ai_metadata["authentic_package_mark_permissions"].append(dict(permission))
+    if fault == "duplicate_mark": permission["allowed_marks"] *= 2
+    try:
+        result = selection.resolve_authentic_package_mark_permission(db, campaign, "master")
+    except ValueError:
+        assert fault is not None
+    else:
+        assert (result is not None) == (fault is None)
+    assert render.ai_metadata == baseline_metadata  # Source policy cannot change render provenance.
+
+
+def test_permission_policy_digest_changes_and_legacy_remains_unpermissioned(tmp_path, monkeypatch):
+    from app.services import product_asset_selection as selection
+    from app.services.qa_engine import _provenance_hash
+    db, campaign, source, render, permission = _mark_permission_fixture(tmp_path)
+    monkeypatch.setattr(selection, "choose_approved_product_master", lambda *a, **k: render)
+    current = lambda: selection.resolve_authentic_package_mark_permission(db, campaign, "master")
+    before = _provenance_hash(current().model_dump(mode="json"))
+    permission["allowed_marks"][0]["visible_text"] = ["Changed owner-approved physical text"]
+    assert _provenance_hash(current().model_dump(mode="json")) != before
+    permission["status"] = "REVOKED"
+    assert current() is None
+    source.ai_metadata.pop("authentic_package_mark_permissions")
+    assert current() is None
+
+
+@pytest.mark.parametrize("fault", ["bad_origin", "bool_string", "missing_boolean", "extra", "bad_hash"])
+def test_package_mark_structured_result_rejects_ambiguous_contract(fault):
+    from app.schemas.qa import PackageMarkSlideQA
+    data = dict(slide_id="slide", contract_sha256="a"*64, permission_sha256="a"*64,
+        render_asset_id="master", render_sha256="a"*64, source_asset_id="source", source_sha256="a"*64,
+        marks=[dict(mark_id="seal", origin="AUTHORIZED_PRODUCT_LAYER", matches_authorized_asset=True)],
+        generated_award_or_ranking_content=False, renderer_added_award_or_ranking_content=False,
+        unsupported_promotional_award_content=False, assessment_complete=True)
+    if fault == "bad_origin": data["marks"][0]["origin"] = "SIMILAR_PACKAGE"
+    if fault == "bool_string": data["assessment_complete"] = "true"
+    if fault == "missing_boolean": data.pop("assessment_complete")
+    if fault == "extra": data["trust_me"] = True
+    if fault == "bad_hash": data["permission_sha256"] += "\n"
+    with pytest.raises(ValueError): PackageMarkSlideQA.model_validate(data)
+
+
+@pytest.mark.parametrize("fault", [None, "background", "final", "contract", "kind", "missing", "source_storage"])
+def test_package_mark_context_validates_actual_render_handoff(tmp_path, monkeypatch, fault):
+    import json
+    from app.services import product_asset_selection as selection
+    from app.services import qa_engine as qa
+    from app.schemas.ai import SlidePlan
+    from app.services.creative.pipeline import build_render_context_path, slide_contract_digest
+    db, campaign, source, render, permission = _mark_permission_fixture(tmp_path)
+    monkeypatch.setattr(selection, "choose_approved_product_master", lambda *a, **k: render)
+    monkeypatch.setattr(qa, "validate_slide_provenance", lambda *a, **k: None)  # Host registry/claims independently covered.
+    plan = SlidePlan(slide_number=1, slide_id="slide", purpose="hook", headline="Discover", visual_brief="",
+        product_asset=dict(asset_id=render.id, role=render.image_role, path=render.absolute_path, sha256=render.sha256),
+        selection_rationale="Canonical selection")
+    image=tmp_path/'final.bin';image.write_bytes(b'final fixture')
+    background=tmp_path/'background.bin';background.write_bytes(b'background fixture')
+    ctx=dict(slide_contract=plan.model_dump(),slide_contract_sha256=slide_contract_digest(plan),
+        render_sha256=_sha256(image),visual_base_kind="generated_background",
+        visual_base_path=str(background),visual_base_sha256=_sha256(background))
+    if fault == "background": background.write_bytes(b"changed")
+    if fault == "final": image.write_bytes(b"changed")
+    if fault == "contract": ctx["slide_contract_sha256"]="0"*64
+    if fault == "kind": ctx["visual_base_kind"]="product_image"
+    if fault == "source_storage":
+        render.ai_metadata["authentic_package_mark_permissions"]=source.ai_metadata.pop("authentic_package_mark_permissions")
+    build_render_context_path(image).write_text(json.dumps(ctx))
+    if fault == "source_storage":
+        assert qa.package_mark_context(db,campaign,[image],[plan]) is None
+    elif fault is not None:
+        with pytest.raises(ValueError):qa.package_mark_context(db,campaign,[] if fault=="missing" else [image],[plan])
+    else:
+        resolved=qa.package_mark_context(db,campaign,[image],[plan])
+        assert len(resolved)==1 and resolved[0].render_asset_id==render.id and resolved[0].permission.render_asset_id==render.id
