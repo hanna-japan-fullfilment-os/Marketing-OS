@@ -10,6 +10,7 @@ import asyncio
 import hashlib
 import json
 import sys
+import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -17,7 +18,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.models import Campaign
 from app.schemas.ai import SlidePlan
 from app.schemas.creative_director import reference_target_from_brief
-from app.services.ai.local_background_provider import BACKEND, MODEL, select_background_backend
+from app.services.ai.local_background_provider import BACKEND, MODEL
+from app.services.ai.image_provider_factory import LocalProviderSession
 from app.services.orchestrator import (
     _load_stage_json, _stage_language_variant, validate_slide_provenance, run_visuals_stage,
 )
@@ -51,9 +53,11 @@ async def preview(*, backend, manifest, workflow, runtime_url, database, databas
         target = reference_target_from_brief(plans[0].visual_brief)
         if target is None:
             raise ValueError("Owner reference contract required")
-        provider = select_background_backend(backend, base_url=runtime_url,
+        # Explicit isolated preview selection does not activate production routing.
+        preview_id = str(uuid.uuid5(uuid.NAMESPACE_URL, str(output) + campaign_id + database_sha256 + str(seed)))
+        provider = LocalProviderSession(job_id=preview_id, campaign_id=campaign_id, seed=seed, base_url=runtime_url,
             manifest_path=Path(manifest), workflow_path=Path(workflow),
-            reference_id=target.reference_id, reference_sha256=target.sha256, seed=seed)
+            timeout_seconds=300)
         settings = get_effective_settings(session)
         config = _build_autopilot_config(settings, str(output), use_ai_background=True,
             recreate_with_ai=False, detect_product_zone=False, quality_mode="premium",

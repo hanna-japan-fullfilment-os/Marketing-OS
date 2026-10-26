@@ -239,6 +239,8 @@ class AutopilotConfig:
     # exists — see `services/feedback_selector.py`'s module docstring.
     feedback_examples_limit: int = 5
 
+    generation_job_id: str = ""
+
     # BUILD6R_PREMIUM_HERO_TRUE_SCOPE_V1
     # Explicit acceptance-mode cost/scope boundary. Defaults OFF so
     # normal campaigns continue to generate their CarouselPlan.
@@ -706,6 +708,7 @@ async def generate_ai_background(
     allow_reference_images: bool = True,
     reference_art_direction_only: bool = False,
     selected_references: list[Path] | None = None,
+    local_context: dict | None = None,
 ) -> Image.Image | None:
     """Best-effort AI-generated scene background — the brief's documented
     `SlideCreativeInput.generated_background` hook, finally wired up. Shared by
@@ -806,12 +809,19 @@ async def generate_ai_background(
             "The approved product is added once afterward by the deterministic compositor."
         )
         size = _nearest_ai_image_size(width, height, model=model)
-        image_bytes = await image_provider.generate(
+        scoped_provider = image_provider
+        if (getattr(image_provider, "is_local_background", False) is True):
+            if local_context is None:
+                raise ValueError("Prepared local slide context required")
+            scoped_provider = image_provider.for_slide(**local_context)
+        image_bytes = await scoped_provider.generate(
             prompt=prompt, size=size, model=model, reference_images=reference_paths or None, quality=quality,
         )
+        if (getattr(image_provider, "is_local_background", False) is True):
+            image_provider.provenance = scoped_provider.provenance
         return Image.open(io.BytesIO(image_bytes)).convert("RGB")
     except Exception:  # noqa: BLE001
-        if target is not None:
+        if target is not None or (getattr(image_provider, "is_local_background", False) is True):
             raise  # Owner target cannot silently degrade to a generic background.
         return None
 
@@ -4776,6 +4786,17 @@ async def run_visuals_stage(
     target_platforms = list(campaign.target_platforms) if campaign.target_platforms else ["instagram"]
     primary_platform = target_platforms[0] if target_platforms else "instagram"
 
+    if (getattr(image_provider, "is_local_background", False) is True):
+        if (not config.use_ai_background or config.recreate_with_ai or config.use_masked_scene_edit
+                or config.enable_qa_stage or config.qa_max_retries != 0 or config.qa_best_of_n != 1
+                or config.quality_mode == "draft"):
+            raise ValueError("Local background does not permit recreation or QA regeneration")
+        fmt = get_platform_format(effective_platform_key)
+        if target_platforms != ["instagram"] or abs(fmt.width / fmt.height - 0.8) > 0.02:
+            raise ValueError("Local background requires the governed Instagram 4:5 contract")
+        image_provider.prepare(plans=planned_slides[:1] if calibration_slide1 else planned_slides,
+                               platforms=target_platforms, languages=languages)
+
     # Build 6R defense-in-depth: reject unsupported persisted
     # campaign/copy/creative claims before even the source-product identity
     # vision call, platform adaptation, CreativeDirection, or image generation.
@@ -5146,6 +5167,8 @@ async def run_visuals_stage(
                 fmt = get_platform_format(effective_platform_key)
                 generated_background = await generate_ai_background(
                     db, selected_references=[Path(r.path) for r in slide.reference_assets], image_provider=image_provider, brand=brand, model=quality_image_model,
+                    **({"local_context": {"plan": slide, "platform": primary_platform, "language": primary_language}}
+                       if getattr(image_provider, "is_local_background", False) is True else {}),
                     width=fmt.width, height=fmt.height, visual_brief=getattr(slide, "visual_brief", ""),
                     quality=quality_tier,
                     creative_direction=primary_creative_direction,
@@ -5304,6 +5327,14 @@ async def run_visuals_stage(
 
         qa_report_path.parent.mkdir(parents=True, exist_ok=True)
         qa_dict = result.qa.to_dict()
+        if (getattr(image_provider, "is_local_background", False) is True) and image_provider.provenance:
+            provenance = image_provider.provenance
+            evidence_path = Path(provenance["background_path"]).with_suffix(".render-link.json")
+            from .ai.image_provider_factory import write_json
+            write_json(evidence_path, {**provenance, "rendered_asset_path": str(result.output_path)})
+            db.add(CampaignOutput(campaign_id=campaign.id, kind="local_background_provenance",
+                                  platform=effective_platform_key, file_path=str(evidence_path)))
+            qa_dict["local_background_provenance"] = str(evidence_path)
         if fidelity_outcome is not None:
             # Mirrors the user's own uploaded creative-handoff contract's
             # PRODUCT_FIDELITY_CHECK field — kept in the QA record (not the
@@ -6147,6 +6178,8 @@ product=None, verified_facts_note: str = "") -> int:
                         else:
                             generated_background = await generate_ai_background(
                                 db, selected_references=[Path(r.path) for r in slide.reference_assets], image_provider=image_provider, brand=brand, model=quality_image_model,
+                                **({"local_context": {"plan": slide, "platform": platform, "language": language}}
+                                   if getattr(image_provider, "is_local_background", False) is True else {}),
                                 width=fmt.width, height=fmt.height, visual_brief=getattr(slide, "visual_brief", ""),
                                 quality=quality_tier, creative_direction=creative_direction,
                                 allow_reference_images=(

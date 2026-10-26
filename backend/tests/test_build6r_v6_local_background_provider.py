@@ -13,23 +13,46 @@ from app.services.ai import local_background_provider as local
 
 
 @pytest.fixture
-def approved_contract(tmp_path):
+def approved_contract(tmp_path, monkeypatch):
     workflow = tmp_path / "workflow.json"
     workflow.write_bytes((Path(__file__).parents[1] / "config/image_backends/comfy_sdxl_background.workflow.json").read_bytes())
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    monkeypatch.setitem(globals(), "_mock_runtime_root", runtime)
+    files = ["ComfyUI/main.py", "ComfyUI/server.py", "ComfyUI/cuda_malloc.py", "standalone-env/python.exe"]
+    files += ["ComfyUI/custom_nodes/ComfyUI_IPAdapter_plus/" + n for n in
+              ("__init__.py", "CrossAttentionPatch.py", "image_proj_models.py", "IPAdapterPlus.py", "utils.py", "LICENSE", "pyproject.toml")]
+    for name in files:
+        target = runtime / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(("SYNTHETIC CODE NOT EXECUTABLE " + name).encode())
     artifacts = {}
-    for name in local._ARTIFACTS:
-        artifact = tmp_path / (name + ".synthetic")
-        artifact.write_bytes(("NOT MODEL BYTES: " + name).encode())
-        artifacts[name] = {"path": str(artifact), "sha256": local.digest(artifact), "license_approved": True}
+    pins = {}
+    for name, (filename, _) in local.PINNED_MODEL_HASHES.items():
+        artifact = runtime / filename
+        artifact.write_bytes(("SYNTHETIC NOT MODEL BYTES " + name).encode())
+        sha = local.digest(artifact)
+        artifacts[name] = {"path": str(artifact), "sha256": sha, "license_approved": True}
+        pins[name] = (filename, sha)
+    # Synthetic content hashes are test doubles, never a production approval.
+    monkeypatch.setattr(local, "PINNED_MODEL_HASHES", pins)
+    node = runtime / "ComfyUI/custom_nodes/ComfyUI_IPAdapter_plus/IPAdapterPlus.py"
+    artifacts["custom_node_code"] = {"path": str(node), "sha256": local.digest(node), "license_approved": True}
+    inventory = runtime / "runtime-lock.json"
+    inventory.write_text(json.dumps({"files": [{"path": name, "sha256": local.digest(runtime / name)} for name in files]}))
+    artifacts["runtime_lock"] = {"path": str(inventory), "sha256": local.digest(inventory), "license_approved": True}
+    state = tmp_path / "private-state"
+    state.mkdir()
     manifest = tmp_path / "manifest.json"
-    data = {"version": 1, "backend": local.BACKEND, "status": "APPROVED",
-        "owner_approval": "SYNTHETIC TEST ONLY", "runtime_root": str(tmp_path),
+    data = {"version": 2, "backend": local.BACKEND, "status": "APPROVED",
+        "owner_approval": "SYNTHETIC TEST ONLY", "runtime_root": str(runtime),
         "runtime_identity_verified": True, "dedicated_single_job_runtime": True,
-        "workflow_sha256": local.digest(workflow), "artifacts": artifacts}
+        "workflow_sha256": local.digest(workflow), "artifacts": artifacts,
+        "state_root": str(state), "reference_roots": [str(tmp_path)]}
     manifest.write_text(json.dumps(data))
     reference = tmp_path / "reference.png"
     Image.new("RGB", (4, 5), "purple").save(reference)
-    return {"base_url": "http://127.0.0.1:8188", "manifest_path": manifest,
+    return {"base_url": "http://127.0.0.1:8189", "manifest_path": manifest,
         "workflow_path": workflow, "reference_id": "owner-target", "reference_sha256": local.digest(reference),
         "seed": 17}, reference
 
@@ -97,36 +120,49 @@ def runtime_mock(mode="success"):
     def handler(request):
         calls.append((request.method, request.url.path))
         assert request.url.host == "127.0.0.1"
+        if request.url.path == "/system_stats":
+            return httpx.Response(200, json={"system": {"comfyui_version": "0.42.1", "pytorch_version": "2.12.1+cu130",
+                "python_version": "3.13.12 (synthetic)", "argv": [str(_mock_runtime_root / "ComfyUI/main.py")]},
+                "devices": [{"type": "cuda", "name": "cuda:0 NVIDIA GeForce RTX 3060 : cudaMallocAsync"}]})
         if request.url.path == "/object_info":
             if mode == "timeout": raise httpx.ReadTimeout("mock timeout")
             if mode == "redirect": return httpx.Response(302, headers={"location": "https://paid.example"})
             return httpx.Response(200, json={key: {} for key in local._CLASSES})
+        if request.url.path.startswith("/models/"):
+            return httpx.Response(200, json=[v[0] for v in local.PINNED_MODEL_HASHES.values()])
+        if request.url.path == "/queue":
+            return httpx.Response(200, json={"queue_running": [], "queue_pending": []})
         if request.url.path == "/upload/image":
-            state["name"] = re.search(rb'filename="(mos-bg-[a-f0-9]+\.png)"', request.content).group(1).decode()
-            return httpx.Response(200, json={"name": state["name"], "subfolder": ""})
+            state["name"] = re.search(rb'filename="(mos-bg-[a-f0-9-]+\.png)"', request.content).group(1).decode()
+            return httpx.Response(200, json={"name": state["name"], "subfolder": "", "type": "input"})
         if request.url.path == "/prompt":
             payload = json.loads(request.content)
             assert payload["prompt"]["3"]["inputs"]["text"].startswith("product, package")
             assert payload["prompt"]["4"]["inputs"] == {"width": 1024, "height": 1280, "batch_size": 1}
-            assert payload["prompt"]["9"]["inputs"]["seed"] == 17
+            state.update(payload)
             state["prefix"] = payload["prompt"]["11"]["inputs"]["filename_prefix"]
-            return httpx.Response(200, json={} if mode == "bad_submit" else {"prompt_id": "test-job"})
-        if request.url.path == "/history/test-job":
+            return httpx.Response(200, json={} if mode == "bad_submit" else {"prompt_id": payload["prompt_id"], "node_errors": {}})
+        if request.url.path.startswith("/history/"):
+            ident = state["prompt_id"]
+            if mode == "pending" and not state.get("cancelled"):
+                return httpx.Response(200, json={})
             images = [] if mode == "missing" else [{"filename": state["prefix"] + "_00001_.png", "subfolder": "", "type": "output"}]
             if mode == "traversal": images[0]["filename"] = "../secret.png"
-            return httpx.Response(200, json={"test-job": {"status": {"status_str": "success", "completed": True}, "outputs": {"11": {"images": images}}}})
+            return httpx.Response(200, json={ident: {"status": {"status_str": "error" if state.get("cancelled") else "success", "completed": True},
+                "prompt": [0, ident, state["prompt"], {"client_id": state["client_id"]}], "outputs": {"11": {"images": images}}}})
         if request.url.path == "/view":
             if mode == "invalid_png": return httpx.Response(200, content=b"not image bytes")
             buffer = io.BytesIO()
-            # Static test raster, not generated creative or inference.
             Image.new("RGB", (1024, 1280) if mode != "size" else (16, 16), "black").save(buffer, format="PNG")
             return httpx.Response(200, content=buffer.getvalue())
-        if request.url.path == "/interrupt": return httpx.Response(200, json={})
+        if request.url.path.startswith("/api/jobs/") and request.url.path.endswith("/cancel"):
+            assert request.url.path == "/api/jobs/" + state["prompt_id"] + "/cancel"
+            state["cancelled"] = True
+            return httpx.Response(200, json={"cancelled": True})
         raise AssertionError("Unexpected endpoint")
     def streaming_handler(request):
         response = handler(request)
-        return httpx.Response(response.status_code, headers=response.headers,
-            stream=_Chunks([response.content]))
+        return httpx.Response(response.status_code, headers=response.headers, stream=_Chunks([response.content]))
     return httpx.MockTransport(streaming_handler), calls
 
 
@@ -136,7 +172,7 @@ async def test_mock_background_provenance_and_one_attempt(approved_contract):
     adapter = provider(approved_contract, transport)
     result = await adapter.generate(prompt="BACKGROUND ONLY. cinematic empty environment", size="1024x1280",
         model=local.MODEL, reference_images=[approved_contract[1]])
-    assert result.startswith(b"\x89PNG") and len(calls) == 5
+    assert result.startswith(b"\x89PNG") and len(calls) == 10
     assert adapter.provenance["kind"] == "LOCAL_GENERATED_BACKGROUND"
     assert adapter.provenance["product_provenance"] is False
     assert adapter.provenance["claim_evidence"] is False
@@ -144,7 +180,7 @@ async def test_mock_background_provenance_and_one_attempt(approved_contract):
     assert adapter.provenance["reference_id"] == "owner-target"
     with pytest.raises(local.LocalBackgroundError, match="One local image attempt"):
         await adapter.generate(prompt="BACKGROUND ONLY.", size="1024x1280", model=local.MODEL)
-    assert len(calls) == 5
+    assert len(calls) == 10
 
 
 @pytest.mark.asyncio
@@ -156,7 +192,8 @@ async def test_runtime_errors_never_fallback(approved_contract, mode):
         await adapter.generate(prompt="BACKGROUND ONLY.", size="1024x1280", model=local.MODEL,
             reference_images=[approved_contract[1]])
     assert all(not path.startswith("/v1") for _, path in calls)
-    if mode not in ("timeout", "redirect"): assert calls[-1] == ("POST", "/interrupt")
+    assert sum(path == "/prompt" for _, path in calls) <= 1
+    assert all(path != "/interrupt" for _, path in calls)
 
 
 @pytest.mark.asyncio
@@ -359,28 +396,28 @@ def test_stream_repair_adapter_deadline_size_and_cleanup(approved_contract,monke
     _run_virtual(scenario())
     assert streams and stream.closed and clients[0].is_closed
     assert sum(path=="/prompt" for _,path in base_calls)==1
-    assert sum(path=="/interrupt" for _,path in base_calls)==1
+    assert sum(path=="/interrupt" for _,path in base_calls)==0  # History already terminal: no GPU job to interrupt.
     if failure=="continuous":assert stream.consumed < 10
     if failure=="size":assert stream.consumed==9
 
 
 def test_stream_repair_cleanup_cannot_extend_total_deadline(approved_contract,monkeypatch):
     monkeypatch.setattr(local,"STREAM_CHUNK_BYTES",1)
-    transport,calls=runtime_mock();work=_Chunks([b"x"]*100,delay=0.1)
+    transport,calls=runtime_mock("pending");work=_Chunks([b"{}"],delay=2)
     cleanup=_Chunks([b"{}"],delay=10)
     def handler(request):
-        if request.url.path=="/view":return httpx.Response(200,stream=work)
-        if request.url.path=="/interrupt":
-            calls.append(("POST","/interrupt"));return httpx.Response(200,stream=cleanup)
+        if request.url.path.startswith("/history/"):return httpx.Response(200,stream=work)
+        if request.url.path.endswith("/cancel"):
+            calls.append(("POST",request.url.path));return httpx.Response(200,stream=cleanup)
         return transport.handler(request)
     adapter=local.LocalComfyBackgroundProvider(**approved_contract[0],timeout_seconds=1,transport=httpx.MockTransport(handler))
     async def scenario():
-        with pytest.raises(TimeoutError):
+        with pytest.raises(local.LocalBackgroundError, match="TIMEOUT"):
             await adapter.generate(prompt="BACKGROUND ONLY.",size="1024x1280",model=local.MODEL,
                 reference_images=[approved_contract[1]])
         assert asyncio.get_running_loop().time()<=1
     _run_virtual(scenario());assert work.closed and cleanup.closed
-    assert sum(path=="/interrupt" for _,path in calls)==1
+    assert sum(path.endswith("/cancel") for _,path in calls)==1
 
 
 def test_stream_repair_shared_deadline_not_restarted(approved_contract,monkeypatch):
@@ -392,7 +429,7 @@ def test_stream_repair_shared_deadline_not_restarted(approved_contract,monkeypat
         return response
     adapter=local.LocalComfyBackgroundProvider(**approved_contract[0],timeout_seconds=1,transport=httpx.MockTransport(handler))
     async def scenario():
-        with pytest.raises(TimeoutError):
+        with pytest.raises(local.LocalBackgroundError, match="TIMEOUT"):
             await adapter.generate(prompt="BACKGROUND ONLY.",size="1024x1280",model=local.MODEL,
                 reference_images=[approved_contract[1]])
         assert asyncio.get_running_loop().time()<=1

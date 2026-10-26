@@ -72,6 +72,19 @@ class JobContext:
 
         self._with_session(_update)
 
+    def record_local_generation(self, evidence: dict) -> None:
+        """Persist correlation alongside the existing Job identity, no new table."""
+        def update(db: Session, job: Job) -> None:
+            metadata = dict(job.job_metadata or {})
+            records = dict(metadata.get("local_generations", {}))
+            ident = evidence["generation_id"]
+            records[ident] = {k: evidence.get(k) for k in (
+                "generation_id", "runtime_prompt_id", "output_sha256", "workflow_sha256",
+                "reference_sha256", "provider_cost_usd", "duration_ms", "background_path", "status", "terminal_confirmed")}
+            metadata["local_generations"] = records
+            job.job_metadata = metadata
+        self._with_session(update)
+
 
 def create_job(db: Session, *, type_: str, campaign_id: str | None = None, metadata: dict | None = None) -> Job:
     job = Job(type=type_, campaign_id=campaign_id, status="QUEUED", job_metadata=metadata or {})
@@ -105,6 +118,16 @@ async def _execute_job(job_id: str, fn: JobFn) -> None:
                 job.status = "COMPLETED"
                 job.progress = 100
                 job.completed_at = datetime.now(timezone.utc)
+        except asyncio.CancelledError as exc:
+            if job is not None:
+                job.status = "CANCELLED"
+                job.error = "CANCELLED"
+                job.completed_at = datetime.now(timezone.utc)
+                if job.campaign_id is not None:
+                    campaign = db2.get(Campaign, job.campaign_id)
+                    if campaign is not None and campaign.status in _STUCK_IF_JOB_FAILS:
+                        campaign.status = "FAILED"
+            exc_to_reraise = exc
         except Exception as exc:  # noqa: BLE001 - job failure is data, not a crash
             if job is not None:
                 # Prefer the exception's own message (usually a clear, actionable

@@ -1,11 +1,15 @@
 {
-  "version": 1,
+  "version": 2,
   "backend": "LOCAL_COMFY_SDXL",
   "status": "UNAPPROVED",
   "owner_approval": null,
   "runtime_root": null,
   "workflow_sha256": null,
   "runtime_identity_verified": false,
+  "state_root": null,
+  "reference_roots": [],
+  "runtime_lock_contract": "SHA256-approved JSON files inventory, complete protected runtime file set except the three pinned models and the inventory file itself; includes all custom-node sources, license, metadata and Python executable.",
+  "host_activation_gate_shutdown_signal_unresolved": true,
   "artifacts": {
     "checkpoint": {
       "path": null,

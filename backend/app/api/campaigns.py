@@ -52,6 +52,7 @@ from ..data.feedback_reasons import FEEDBACK_REASON_CODES
 from ..services import settings_store
 from ..services.ai.base import PublishCopy, PublishTarget
 from ..services.ai.openai_provider import OpenAIProvider, openai_provider_from_effective_settings
+from ..services.ai.image_provider_factory import local_routing_enabled, resolve_image_provider
 from ..services.creative.brand_style import resolve_brand_style
 from ..services.creative.pipeline import (
     SlideCreativeInput, build_qa_report_path, build_slide_output_path, render_slide,
@@ -564,6 +565,8 @@ async def render_campaign_slide(campaign_id: str, payload: SlideRenderRequest, d
     per slide so the text never renders twice; the payload's text fields are still
     saved on the `CampaignSlide` row either way.
     """
+    if (payload.use_ai_background or payload.recreate_with_ai) and local_routing_enabled():
+        raise HTTPException(400, "Local mode requires a prepared SlidePlan and trusted reference; manual rendering is unsupported")
     campaign = db.get(Campaign, campaign_id)
     if campaign is None:
         raise HTTPException(404, "Campaign not found.")
@@ -871,18 +874,25 @@ async def generate_campaign(
     if not output_root:
         raise HTTPException(400, "OUTPUT_ROOT is not configured. Set it in Settings first.")
 
+    local = local_routing_enabled() and (use_ai_background or recreate_with_ai)
+    if local and (recreate_with_ai or detect_product_zone or quality_mode == "draft"):
+        raise HTTPException(400, "Local mode requires prepared background-only high-quality generation")
     job = create_job(db, type_="campaign_generate", campaign_id=campaign.id)
 
     config = _build_autopilot_config(
         effective, output_root, use_ai_background=use_ai_background, detect_product_zone=detect_product_zone,
         recreate_with_ai=recreate_with_ai, quality_mode=quality_mode, render_platform_variants=render_platform_variants,
+        qa_max_retries=0 if local else 2,
     )
     provider = openai_provider_from_effective_settings(effective)
     needs_image_provider = use_ai_background or recreate_with_ai
+    config.generation_job_id = job.id
 
     async def _job_fn(ctx) -> None:
         session = db_module.SessionLocal()
         try:
+            background_provider = (resolve_image_provider(effective, legacy_factory=lambda _: provider, config=config,
+                job_id=job.id, campaign_id=campaign.id) if needs_image_provider else None)
             await run_autopilot(
                 session,
                 campaign_id=campaign.id,
@@ -891,7 +901,7 @@ async def generate_campaign(
                 renderer=get_renderer(),
                 config=config,
                 progress=ctx,
-                image_provider=provider if needs_image_provider else None,
+                image_provider=background_provider if needs_image_provider else None,
             )
         finally:
             session.close()
@@ -1070,9 +1080,12 @@ async def generate_campaign_visuals(
         check_visuals_stage_prerequisite(db, campaign.id)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    local = local_routing_enabled() and (use_ai_background or recreate_with_ai)
+    if local and (recreate_with_ai or detect_product_zone or quality_mode == "draft"):
+        raise HTTPException(400, "Local mode requires prepared background-only high-quality generation")
     image_provider = None
     ai_provider = None
-    if use_ai_background or detect_product_zone or recreate_with_ai:
+    if (use_ai_background and not local) or detect_product_zone or recreate_with_ai:
         _, api_key = _require_openai_key(db)
         provider = openai_provider_from_effective_settings(effective)
         if use_ai_background or recreate_with_ai:
@@ -1088,14 +1101,19 @@ async def generate_campaign_visuals(
     config = _build_autopilot_config(
         effective, output_root, use_ai_background=use_ai_background, detect_product_zone=detect_product_zone,
         recreate_with_ai=recreate_with_ai, quality_mode=quality_mode, render_platform_variants=render_platform_variants,
+        qa_max_retries=0 if local else 2,
     )
+
+    config.generation_job_id = job.id
 
     async def _job_fn(ctx) -> None:
         session = db_module.SessionLocal()
         try:
+            selected_image_provider = (resolve_image_provider(effective, legacy_factory=openai_provider_from_effective_settings,
+                config=config, job_id=job.id, campaign_id=campaign.id) if local else image_provider)
             await run_visuals_stage(
                 session, campaign_id=campaign.id, renderer=get_renderer(), config=config, progress=ctx,
-                image_provider=image_provider, ai_provider=ai_provider,
+                image_provider=selected_image_provider, ai_provider=ai_provider,
             )
         finally:
             session.close()
@@ -1130,6 +1148,8 @@ async def generate_campaign_qa(
     immediately with `{job_id, job_status}` for the frontend to poll; check
     results via `GET /{campaign_id}/variants`.
     """
+    if use_ai_background and local_routing_enabled():
+        raise HTTPException(400, "Local image QA regeneration is not authorized")
     campaign = _require_campaign(db, campaign_id)
     effective = settings_store.get_effective_settings(db)
     output_root = _require_output_root(effective)
@@ -1337,6 +1357,8 @@ async def submit_campaign_review(campaign_id: str, payload: ReviewActionRequest,
     expected to follow up with variant-level requests for whichever
     executions actually need work.
     """
+    if payload.action == "REQUEST_REVISION" and payload.use_ai_background and local_routing_enabled():
+        raise HTTPException(400, "Local image revision is not authorized")
     campaign = _require_campaign(db, campaign_id)
     if payload.level not in LEVELS:
         raise HTTPException(400, f"level must be one of {LEVELS}.")

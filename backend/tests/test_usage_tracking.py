@@ -14,6 +14,42 @@ from app.services.usage_tracking import build_campaign_cost_report, drain_provid
     record_stage_usage
 
 
+def test_local_zero_is_known_without_repricing_zero_paid_usage(temp_db):
+    session = temp_db.SessionLocal()
+    try:
+        campaign = _make_campaign(session)
+        record_ai_usage(session, campaign_id=campaign.id, operation="scene_generation",
+            event={"provider": "local_comfyui", "model": "local-sdxl-background-v1",
+                   "image_count": 1, "estimated_cost_usd": 0.0, "duration_ms": 44})
+        session.commit()
+        local_report = build_campaign_cost_report(session, campaign.id)
+        assert local_report["total_usd"] == 0.0
+        assert local_report["total_usd_is_complete"] is True
+        assert local_report["unpriced_image_call_count"] == 0
+        record_ai_usage(session, campaign_id=campaign.id, operation="scene_generation",
+            event={"provider": "openai", "model": "gpt-image-2.5-sunburst-2026-09-08",
+                   "image_count": 1, "estimated_cost_usd": 0.0})
+        session.commit()
+        mixed = build_campaign_cost_report(session, campaign.id)
+        assert mixed["total_usd"] == 0.0 and mixed["total_usd_is_complete"] is False
+        assert mixed["unpriced_image_call_count"] == 1
+    finally:
+        session.close()
+
+
+def test_unrecognized_local_model_does_not_claim_known_zero(temp_db):
+    session = temp_db.SessionLocal()
+    try:
+        campaign = _make_campaign(session)
+        record_ai_usage(session, campaign_id=campaign.id, operation="scene_generation",
+            event={"provider": "local_comfyui", "model": "unknown-model", "image_count": 1, "estimated_cost_usd": 0.0})
+        session.commit()
+        report = build_campaign_cost_report(session, campaign.id)
+        assert report["total_usd_is_complete"] is False and report["unpriced_image_call_count"] == 1
+    finally:
+        session.close()
+
+
 def _make_campaign(session):
     brand = Brand(name="Hanna From Japan", slug=f"hanna-{uuid.uuid4().hex[:8]}")
     session.add(brand)

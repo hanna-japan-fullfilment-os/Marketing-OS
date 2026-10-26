@@ -848,6 +848,52 @@ def test_v6_local_background_size_dispatch_preserves_paid_models():
         _nearest_ai_image_size(1080,1080,model="local-sdxl-background-v1")
 
 
+@pytest.mark.asyncio
+async def test_local_background_handoff_uses_prepared_slide_and_keeps_product_ownership(owner_target, monkeypatch):
+    from app.schemas.creative_director import CreativeDirection
+    target, reference, _ = owner_target
+    monkeypatch.setattr(orchestrator, "_brand_style_prompt_notes", lambda brand: "")
+    seen = []
+    class Child:
+        provenance = {"kind": "LOCAL_GENERATED_BACKGROUND", "product_provenance": False, "claim_evidence": False}
+        async def generate(self, **kwargs):
+            seen.append(kwargs)
+            return _png_bytes((1024, 1280))
+    class Session:
+        is_local_background = True
+        provenance = None
+        def for_slide(self, **kwargs):
+            assert kwargs == {"plan": "prepared", "platform": "instagram", "language": "pt-BR"}
+            return Child()
+    provider = Session()
+    image = await orchestrator.generate_ai_background(SimpleNamespace(), image_provider=provider,
+        brand=SimpleNamespace(name="Test"), model="local-sdxl-background-v1", width=1080, height=1350,
+        creative_direction=CreativeDirection(reference_target=target), selected_references=[reference],
+        local_context={"plan": "prepared", "platform": "instagram", "language": "pt-BR"})
+    assert image.size == (1024, 1280) and provider.provenance["product_provenance"] is False
+    assert seen[0]["reference_images"] == [reference] and seen[0]["prompt"].startswith("BACKGROUND ONLY.")
+    assert "NO PRODUCT DUPLICATES" in seen[0]["prompt"]
+    with pytest.raises(ValueError, match="Prepared local slide context"):
+        await orchestrator.generate_ai_background(SimpleNamespace(), image_provider=provider,
+            brand=SimpleNamespace(name="Test"), model="local-sdxl-background-v1", width=1080, height=1350,
+            creative_direction=CreativeDirection(reference_target=target), selected_references=[reference])
+
+
+@pytest.mark.asyncio
+async def test_truthy_nonboolean_attribute_cannot_select_local_provider(monkeypatch):
+    monkeypatch.setattr(orchestrator, "_brand_style_prompt_notes", lambda brand: "")
+    calls = []
+    class Legacy:
+        is_local_background = SimpleNamespace()
+        async def generate(self, **kwargs):
+            calls.append(kwargs)
+            return _png_bytes((16, 20))
+    image = await orchestrator.generate_ai_background(SimpleNamespace(), image_provider=Legacy(),
+        brand=SimpleNamespace(name="Legacy"), model="legacy", width=1080, height=1350,
+        selected_references=[])
+    assert image.size == (16, 20) and len(calls) == 1
+
+
 def test_v6_local_adapter_does_not_replace_trusted_product_or_qa():
     from app.services.ai import local_background_provider
     import inspect

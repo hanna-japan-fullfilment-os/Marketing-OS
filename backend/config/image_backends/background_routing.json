@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "enabled": false,
+  "backend": "LOCAL_COMFY_SDXL",
+  "base_url": "http://127.0.0.1:8189",
+  "manifest_path": null,
+  "seed": 0,
+  "host_activation_gate_shutdown_signal_unresolved": true,
+  "note": "Inactive template. Host approval, routing activation and real integration execution require separate authorization."
+}

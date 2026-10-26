@@ -210,6 +210,11 @@ def build_campaign_cost_report(
     ) -> bool:
         # A real persisted provider call with no positive local dollar value
         # is unknown/unpriced, never a claim that the provider charged $0.
+        # Only the implemented local provider/model pair has known zero API
+        # cost. Preserve unknown zero pricing for OpenAI and every other pair.
+        if (row.provider == "local_comfyui" and row.model == "local-sdxl-background-v1"
+                and row_cost(row) == 0.0 and not row.input_tokens and not row.output_tokens):
+            return False
         return (
             row_cost(
                 row
