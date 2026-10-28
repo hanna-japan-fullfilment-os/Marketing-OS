@@ -21,6 +21,7 @@ from .compositor import ProductZone
 from .composition import LayoutSpec
 from .scene import UnifiedSceneSpec
 from .premium_design import ResolvedPremiumSceneStyle
+from .premium_render import PremiumRenderPlan, premium_treatment_css
 
 # Build 5 repair (Part 3): a version identity for the TEMPLATE/LAYOUT SYSTEM as a
 # whole (this registry's own structure — `CreativeTemplate`/`TemplateContext`'s
@@ -32,7 +33,7 @@ from .premium_design import ResolvedPremiumSceneStyle
 # benchmark baseline's layout not directly comparable to a new run's (a new
 # section type, a changed text-block/scrim contract) — never when adding an
 # unrelated new template or tweaking one template's own CSS.
-TEMPLATE_REGISTRY_VERSION = '1.4.0'
+TEMPLATE_REGISTRY_VERSION = '1.5.0'
 
 
 @dataclass(frozen=True)
@@ -88,6 +89,7 @@ class TemplateContext:
     composition_spec: LayoutSpec | None = None
     unified_scene: UnifiedSceneSpec | None = None
     premium_style: ResolvedPremiumSceneStyle | None = None
+    premium_render_plan: PremiumRenderPlan | None = None
     eyebrow: str = ""
     headline: str = ""
     body: str = ""
@@ -154,6 +156,11 @@ def _build_premium_composition(ctx: TemplateContext) -> str:
     panel = "rgba(10,5,20,.82)" if dark else "rgba(255,255,255,.94)"
     scene = ctx.unified_scene
     style = ctx.premium_style
+    render_plan = ctx.premium_render_plan
+    if render_plan is not None:
+        if scene is None or style is None:
+            raise ValueError('V9 render plan requires its scene and style')
+        render_plan.validate(scene,style)
     role_styles = {}
     if style is not None:
         if scene is None:
@@ -191,6 +198,8 @@ def _build_premium_composition(ctx: TemplateContext) -> str:
                   if is_headline and grammar.headline_paint else
                   [role_color] if token else
                   [accent, color] if role.role == "FACT_CALLOUT" else [color])
+        if render_plan is not None and role.role=='CTA' and style.treatments['cta']=='GOLD_EDITORIAL_BAND':
+            colors=[style.palette['cta_foreground']]
         if is_headline:
             if grammar.headline_paint and dark:
                 # A real keyline in an existing approved highlight color keeps
@@ -222,6 +231,9 @@ def _build_premium_composition(ctx: TemplateContext) -> str:
     logo = (f'<img data-composition-logo class="premium-logo" '
             f'style="{geometry(spec.logo)}" src="{ctx.logo_data_uri}" alt="" />'
             if ctx.logo_data_uri else "")
+    if render_plan is not None and ctx.logo_data_uri:
+        logo=(f'<div data-composition-logo class="premium-logo-zone" style="{geometry(spec.logo)}">'
+              f'<img class="premium-logo" style="inset:0;width:100%;height:100%" src="{ctx.logo_data_uri}" alt=""/></div>')
     payload = json.dumps(spec.to_dict(), ensure_ascii=False).replace("<", "\\u003c")
     scene_payload = (f'<script id="unified-scene-spec" type="application/json" data-sha256="{scene.digest}">'
                      + json.dumps(scene.to_dict(), ensure_ascii=False).replace("<", "\\u003c") + '</script>'
@@ -229,6 +241,9 @@ def _build_premium_composition(ctx: TemplateContext) -> str:
     style_payload = (f'<script id="premium-scene-style" type="application/json" data-sha256="{style.digest}">'
                      + json.dumps(style.to_dict(), ensure_ascii=False).replace("<", "\\u003c") + '</script>'
                      if style is not None else "")
+    render_payload=(f'<script id="premium-render-plan" type="application/json" data-sha256="{render_plan.digest}">'
+                    + json.dumps(render_plan.to_dict(),ensure_ascii=False).replace('<','\\u003c')+'</script>'
+                    if render_plan is not None else '')
     design_css = ''
     if style is not None:
         # Per-role geometry, fonts, type size and copy are unchanged. Frozen QA
@@ -237,6 +252,9 @@ def _build_premium_composition(ctx: TemplateContext) -> str:
             design_css += (f'.premium-role[data-composition-role="{token["key"]}"] .feature-copy span'
                            + '{color:inherit}')
         design_css += '.premium-role.fact{border-left-color:' + style.palette['metallic_gold'] + '}'
+    if render_plan is not None:
+        design_css += '.premium-logo-zone{position:absolute;background:transparent}'
+        design_css += premium_treatment_css(render_plan,scene,style)
     return f'''<!doctype html><html><head><meta charset="utf-8"/><style>
     * {{box-sizing:border-box;margin:0;padding:0}}
     html,body,.canvas {{width:{ctx.width}px;height:{ctx.height}px;overflow:hidden}}
@@ -263,6 +281,7 @@ def _build_premium_composition(ctx: TemplateContext) -> str:
     <script id="composition-spec" type="application/json" data-sha256="{spec.digest}">{payload}</script>
     {scene_payload}
     {style_payload}
+    {render_payload}
     </body></html>'''
 
 

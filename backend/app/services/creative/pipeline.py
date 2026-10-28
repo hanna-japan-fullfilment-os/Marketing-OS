@@ -45,6 +45,8 @@ from .composition import Box, resolve_composition, uses_premium_composition
 from .scene import CanonicalSceneAsset, compose_unified_scene
 from .premium_design import (is_hanna_scene, dominant_product_color,
     scene_contrast_samples, resolve_premium_scene_style)
+from .premium_render import (build_premium_render_plan, composite_premium_layers,
+    fit_art_layer, image_digest)
 from .templates import Feature, TemplateContext, get_platform_format, get_template, product_zone_for
 
 
@@ -237,7 +239,7 @@ def _validate_template_control_inventory(creative_input) -> None:
         "text_color", "font_family", "slide_number", "total_slides", "layout_variant", "campaign_archetype",
         "slide_role", "direction_palette", "secondary_font_family", "typography_direction", "headline_emphasis",
             "cta_treatment", "hero_treatment", "visual_style", "mood", "negative_space", "masked_scene_background", "reference_target",
-                "composition_spec", "unified_scene", "premium_style"}
+                "composition_spec", "unified_scene", "premium_style", "premium_render_plan"}
     if {field.name for field in dataclass_fields(TemplateContext)} != text_fields | nontext_fields:
         raise ValueError("Unexamined template context field")
     controls = [creative_input.accent_color, creative_input.text_color, creative_input.font_family,
@@ -367,6 +369,8 @@ class SlideCreativeInput:
     masked_scene_background: bool = False
     # Optional factual category supplied by the caller; never inferred from copy.
     product_category: str = "general"
+    # Explicit V9 requests fail closed; auto only selects exact Hanna references.
+    premium_render_mode: str = "auto"
 
     def __post_init__(self) -> None:
         # dataclass fields can't default to a mutable list directly; normalize
@@ -920,6 +924,10 @@ async def render_slide(
         )
 
     validate_render_slide_contract(creative_input)
+    if creative_input.premium_render_mode not in ('auto','v9'):
+        raise ValueError('Unknown premium render mode')
+    if creative_input.premium_render_mode=='v9' and not uses_premium_composition(creative_input.reference_target):
+        raise ValueError('Explicit V9 rendering requires its premium reference')
     trusted = creative_input.locked_product_composite
     if trusted is not None:
         if not isinstance(trusted, TrustedProductComposite) or trusted.seal is not _COMPOSITE_SEAL:
@@ -948,6 +956,7 @@ async def render_slide(
     background_isolator_used = "none"
     product_alpha = None
     product_safe = None
+    v9_product_layer = None
 
     if trusted is not None:
         # Capability contains deterministic composition of the approved product layer.
@@ -972,6 +981,15 @@ async def render_slide(
                                  Image.Resampling.LANCZOS)
             product_alpha = Image.new("L", (fmt.width, fmt.height))
             product_alpha.paste(alpha, (placement["product_x"], placement["product_y"]))
+            # Reconstruct the already authorized product-only layer using the
+            # exact existing crop/resize/placement; never reuse flattened art.
+            v9_product_layer = Image.new('RGBA',(fmt.width,fmt.height))
+            patch = product_image.crop(tuple(placement['source_alpha_bbox'])).resize(
+                (placement['rendered_width'],placement['rendered_height']),Image.Resampling.LANCZOS)
+            v9_product_layer.alpha_composite(patch,dest=(placement['product_x'],placement['product_y']))
+            from ..locked_product_pipeline import sha256_png
+            if sha256_png(v9_product_layer)!=trusted.metadata['locked_product_layer_sha256']:
+                raise ValueError('Canonical locked product layer reconstruction differs')
     else:
         # BUILD6R_IMMUTABLE_PRODUCT_CUTOUT_SELECTION
         # Prefer the SHA-keyed deterministic cutout for every supported
@@ -1011,10 +1029,11 @@ async def render_slide(
             shadow=not creative_input.masked_scene_background,
         )
         if uses_premium_composition(creative_input.reference_target):
-            product_alpha = build_product_overlay(
+            v9_product_layer = build_product_overlay(
                 canvas_size=(fmt.width, fmt.height), product=isolated_product,
                 zone=zone,
-            ).getchannel("A")
+            )
+            product_alpha = v9_product_layer.getchannel('A')
             product_bounds = product_alpha.getbbox()
             if product_bounds is None:
                 raise ValueError("Premium composition has no visible product")
@@ -1067,6 +1086,8 @@ async def render_slide(
     composition_spec = None
     unified_scene = None
     premium_style = None
+    premium_render_plan = None
+    premium_layer_metadata = None
     if uses_premium_composition(creative_input.reference_target):
         asset_ref = creative_input.slide_plan.product_asset if creative_input.slide_plan else None
         canonical_asset = CanonicalSceneAsset(
@@ -1085,8 +1106,29 @@ async def render_slide(
                 product_color=dominant_product_color(product_image),
                 contrast_samples=scene_contrast_samples(unified_scene, composited),
                 product_category=creative_input.product_category)
+            art_source = creative_input.generated_background
+            if art_source is None:
+                art_source = make_background(width=fmt.width,height=fmt.height,colors=creative_input.brand_colors)
+            initial_plan = build_premium_render_plan(unified_scene,premium_style,art_native_size=art_source.size,
+                product_layer_sha256=image_digest(v9_product_layer))
+            # Sample the clean fitted art, not an old flattened product/shadow.
+            # Code effects reserve all these zones, so final QA sees the same base.
+            premium_style = resolve_premium_scene_style(unified_scene,
+                product_color=dominant_product_color(product_image),
+                contrast_samples=scene_contrast_samples(unified_scene,fit_art_layer(initial_plan,art_source)),
+                product_category=creative_input.product_category)
+            premium_render_plan = build_premium_render_plan(unified_scene,premium_style,
+                art_native_size=art_source.size,product_layer_sha256=image_digest(v9_product_layer))
+            composited,premium_layer_metadata = composite_premium_layers(premium_render_plan,unified_scene,
+                premium_style,art=art_source,product_layer=v9_product_layer)
+            product_alpha = v9_product_layer.getchannel('A')
+        elif creative_input.premium_render_mode=='v9':
+            raise ValueError('Explicit V9 rendering requires an approved Hanna reference')
         ctx = replace(ctx, composition_spec=composition_spec, unified_scene=unified_scene,
-                      premium_style=premium_style)
+                      premium_style=premium_style,premium_render_plan=premium_render_plan,
+                      composited_image_data_uri=_image_to_data_uri(composited))
+    if creative_input.premium_render_mode=='v9' and premium_render_plan is None:
+        raise ValueError('V9 planning failed; legacy fallback prohibited')
     html_doc = template.build_html(ctx)
 
     png_bytes, diagnostics = await renderer.render_png_with_diagnostics(
@@ -1140,6 +1182,10 @@ async def render_slide(
                 "unified_scene_spec_sha256": unified_scene.digest} if unified_scene is not None else {}),
             **({"premium_scene_style": premium_style.to_dict(),
                 "premium_scene_style_sha256": premium_style.digest} if premium_style is not None else {}),
+            **({"premium_render_plan": premium_render_plan.to_dict(),
+                "premium_render_plan_sha256": premium_render_plan.digest,
+                "art_layer_prompt_spec": premium_render_plan.art_layer_prompt_spec,
+                "premium_layer_metadata": premium_layer_metadata} if premium_render_plan is not None else {}),
             "reference_target": creative_input.reference_target.model_dump() if creative_input.reference_target else None,
             "slide_contract": creative_input.slide_plan.model_dump(),
             "slide_contract_sha256": slide_contract_digest(creative_input.slide_plan),
@@ -1315,7 +1361,8 @@ def persist_render_context(
         previous = json.loads(context_path.read_text(encoding="utf-8"))
         for key in ("reference_target", "slide_contract", "slide_contract_sha256", "render_sha256", "composite_sha256", "complete_text_contract", "rendered_text_fields", "structural_text",
                     "composition_spec", "composition_spec_sha256", "unified_scene_spec", "unified_scene_spec_sha256",
-                    "premium_scene_style", "premium_scene_style_sha256"):
+                    "premium_scene_style", "premium_scene_style_sha256", "premium_render_plan",
+                    "premium_render_plan_sha256", "art_layer_prompt_spec", "premium_layer_metadata"):
             if key in previous:
                 payload[key] = previous[key]
 
