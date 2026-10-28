@@ -86,6 +86,74 @@ class FakeClient:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("strict", [False, True])
+async def test_gpt_image_2_reserves_full_maximum_before_dispatch(strict):
+    limits = {"image": 1, "text": 0, "vision": 0, "other": 0} if strict else None
+    ledger = provider_module._HardBudgetLedger(0.50, call_limits=limits)
+    target = FakeImages()
+    proxy = provider_module._BudgetedImagesProxy(target, ledger)
+    await proxy.generate(model="gpt-image-2", prompt="x" * 20000,
+                         quality="high", size="1024x1536", n=1)
+    assert len(target.calls) == 1
+    assert ledger.reserved_usd == 0.265
+    assert ledger.spent_usd == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", [
+    {"prompt": "x" * 70000}, {"prompt": "é" * 10001},
+    {"quality": "auto"}, {"quality": "unknown"}, {"size": "auto"},
+    {"size": "1024x1024"}, {"model": "unknown-image"},
+    {"image": []}, {"image": ["unpriced"]}, {"n": 2}, {"n": True},
+    {"partial_images": 1}, {"stream": True}, {"extra_body": {}},
+    {"output_format": "jpeg"}, {"prompt": ""},
+])
+async def test_gpt_image_2_unapproved_request_rejected_before_dispatch(change):
+    request = dict(model="gpt-image-2", prompt="Background only",
+                   quality="high", size="1024x1536", n=1)
+    request.update(change)
+    target = FakeImages()
+    proxy = provider_module._BudgetedImagesProxy(target,
+        provider_module._HardBudgetLedger(.5, call_limits={
+            "image": 1, "text": 0, "vision": 0, "other": 0}))
+    with pytest.raises(provider_module.HardBudgetExceededError):
+        await proxy.generate(**request)
+    assert target.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("budget,method", [(0.264, "generate"), (0.5, "edit")])
+async def test_gpt_image_2_budget_and_edit_fail_before_dispatch(budget, method):
+    target = FakeImages()
+    proxy = provider_module._BudgetedImagesProxy(target,
+                                               provider_module._HardBudgetLedger(budget))
+    with pytest.raises(provider_module.HardBudgetExceededError):
+        await getattr(proxy, method)(model="gpt-image-2", prompt="Background",
+                                    quality="high", size="1024x1536", n=1)
+    assert target.calls == []
+
+
+@pytest.mark.asyncio
+async def test_gpt_image_2_single_call_cap_retains_failed_exposure():
+    class FailingImages(FakeImages):
+        async def generate(self, **kwargs):
+            self.calls.append(("generate", kwargs))
+            raise RuntimeError("simulated provider failure")
+    ledger = provider_module._HardBudgetLedger(.5, call_limits={
+        "image": 1, "text": 0, "vision": 0, "other": 0})
+    target = FailingImages()
+    proxy = provider_module._BudgetedImagesProxy(target, ledger)
+    request = dict(model="gpt-image-2", prompt="Background only",
+                   quality="high", size="1024x1536", n=1)
+    with pytest.raises(RuntimeError, match="simulated"):
+        await proxy.generate(**request)
+    assert ledger.reserved_usd == .265
+    with pytest.raises(provider_module.HardBudgetExceededError):
+        await proxy.generate(**request)
+    assert len(target.calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_hard_budget_blocks_image_before_network(
     monkeypatch,
 ):

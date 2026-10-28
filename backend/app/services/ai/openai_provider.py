@@ -862,6 +862,30 @@ class _BudgetedResponsesProxy:
         )
 
 
+def _gpt_image_2_reservation(method_name: str, kwargs: dict) -> float:
+    """Bound only the approved text-only V8 request, before any network I/O.
+
+    Output: $0.165; reserve all 20,000 text tokens at the conservative
+    owner-authorized $5/million rate. No usage refund is inferred afterward.
+    """
+    allowed = {"model", "prompt", "quality", "size", "n", "partial_images",
+               "stream", "output_format"}
+    if (method_name != "generate" or set(kwargs) - allowed
+            or kwargs.get("quality") != "high"
+            or kwargs.get("size") != "1024x1536"
+            or type(kwargs.get("n")) is not int or kwargs["n"] != 1
+            or type(kwargs.get("partial_images", 0)) is not int
+            or kwargs.get("partial_images", 0) != 0
+            or kwargs.get("stream", False) is not False
+            or kwargs.get("output_format", "png") != "png"):
+        raise HardBudgetExceededError("HARD_BUDGET_UNSUPPORTED_GPT_IMAGE_2_REQUEST")
+    prompt = kwargs.get("prompt")
+    if (not isinstance(prompt, str) or not prompt.strip()
+            or _hard_budget_input_token_upper_bound(prompt) > 20000):
+        raise HardBudgetExceededError("HARD_BUDGET_GPT_IMAGE_2_TEXT_LIMIT")
+    return float(Decimal("0.165") + Decimal(20000) * Decimal("5.00") / 1000000)
+
+
 class _BudgetedImagesProxy:
     def __init__(
         self,
@@ -893,8 +917,11 @@ class _BudgetedImagesProxy:
                 **kwargs
             )
 
+        bounded_gpt_image_2 = model == "gpt-image-2"
         token_priced = _is_gpt_image_2_5(model)
-        if token_priced:
+        if bounded_gpt_image_2:
+            estimated = _gpt_image_2_reservation(method_name, kwargs)
+        elif token_priced:
             estimated = _sunburst_reservation()  # fails before invocation today
         elif self._ledger.call_limits is not None:
             # Legacy fixed-output estimates omit edit input charges. They are
@@ -917,7 +944,7 @@ class _BudgetedImagesProxy:
         )
 
         try:
-            estimated = estimated if token_priced else float(
+            estimated = estimated if token_priced or bounded_gpt_image_2 else float(
                 _image_usage_cost(
                     model,
                     quality,
@@ -967,6 +994,11 @@ class _BudgetedImagesProxy:
 
         except BaseException:
             raise
+
+        if bounded_gpt_image_2:
+            # Keep the entire pre-call maximum encumbered, including when
+            # usage is missing. A reservation is not an actual billed cost.
+            return response
 
         if token_priced:
             # Do not infer token usage from dimensions or output byte length.
@@ -1524,7 +1556,7 @@ class OpenAIProvider:
         response=None,
     ) -> None:
         cost_known = (
-            not _is_gpt_image_2_5(
+            model != "gpt-image-2" and not _is_gpt_image_2_5(
                 model
             )
         )
@@ -1555,6 +1587,12 @@ class OpenAIProvider:
                 ),
             }
         )
+        if model == "gpt-image-2":
+            self._usage_events[-1].update(
+                cost_known=False, actual_cost_usd=None,
+                pricing_basis="bounded request reservation; not actual billing",
+                request_max_reserved_usd=0.265,
+            )
         if self._bounded_acceptance and response is not None:
             actual = _actual_bounded_cost(response, model, image=True)
             usage = getattr(response, "usage", None)
