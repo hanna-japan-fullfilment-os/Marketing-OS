@@ -20,6 +20,7 @@ from ...schemas.creative_director import ReferenceTarget
 from .compositor import ProductZone
 from .composition import LayoutSpec
 from .scene import UnifiedSceneSpec
+from .premium_design import ResolvedPremiumSceneStyle
 
 # Build 5 repair (Part 3): a version identity for the TEMPLATE/LAYOUT SYSTEM as a
 # whole (this registry's own structure — `CreativeTemplate`/`TemplateContext`'s
@@ -86,6 +87,7 @@ class TemplateContext:
     reference_target: ReferenceTarget | None = None
     composition_spec: LayoutSpec | None = None
     unified_scene: UnifiedSceneSpec | None = None
+    premium_style: ResolvedPremiumSceneStyle | None = None
     eyebrow: str = ""
     headline: str = ""
     body: str = ""
@@ -151,6 +153,13 @@ def _build_premium_composition(ctx: TemplateContext) -> str:
     color = "#ffffff" if dark else ctx.text_color
     panel = "rgba(10,5,20,.82)" if dark else "rgba(255,255,255,.94)"
     scene = ctx.unified_scene
+    style = ctx.premium_style
+    role_styles = {}
+    if style is not None:
+        if scene is None:
+            raise ValueError("Premium styling requires its unified scene")
+        style.validate(scene)
+        role_styles = {r['key']: r for r in style.typography}
     if scene is not None:
         scene.validate_relationships()
         if scene.layout.digest != spec.digest:
@@ -167,6 +176,9 @@ def _build_premium_composition(ctx: TemplateContext) -> str:
     blocks = []
     legibility_css = ""
     for role in spec.roles:
+        token = role_styles.get(role.key)
+        role_color = token['foreground'] if token else color
+        role_panel = token['background'] if token else panel
         text = _esc(role.text)
         if role.key.startswith("feature_"):
             feature = ctx.features[int(role.key.split("_")[1])]
@@ -177,6 +189,7 @@ def _build_premium_composition(ctx: TemplateContext) -> str:
         family = role.font_family
         colors = ([s.color for s in grammar.headline_paint.stops]
                   if is_headline and grammar.headline_paint else
+                  [role_color] if token else
                   [accent, color] if role.role == "FACT_CALLOUT" else [color])
         if is_headline:
             if grammar.headline_paint and dark:
@@ -200,7 +213,11 @@ def _build_premium_composition(ctx: TemplateContext) -> str:
             f'class="premium-role {"headline-role" if is_headline else ""} '
             f'{"fact" if role.role == "FACT_CALLOUT" else ""}" '
             f'style="{geometry(role.box)}font-size:{role.font_px:g}px;'
-            f'font-family:{_esc(family)}">{text}</div>'
+            f'font-family:{_esc(family)};'
+            + (f'color:{role_color};background-color:{role_panel};'
+               f'font-weight:{token["weight"]};line-height:{token["line_height"]};'
+               f'letter-spacing:{token["letter_spacing_em"]}em;' if token else '')
+            + f'">{text}</div>'
         )
     logo = (f'<img data-composition-logo class="premium-logo" '
             f'style="{geometry(spec.logo)}" src="{ctx.logo_data_uri}" alt="" />'
@@ -209,6 +226,17 @@ def _build_premium_composition(ctx: TemplateContext) -> str:
     scene_payload = (f'<script id="unified-scene-spec" type="application/json" data-sha256="{scene.digest}">'
                      + json.dumps(scene.to_dict(), ensure_ascii=False).replace("<", "\\u003c") + '</script>'
                      if scene is not None else "")
+    style_payload = (f'<script id="premium-scene-style" type="application/json" data-sha256="{style.digest}">'
+                     + json.dumps(style.to_dict(), ensure_ascii=False).replace("<", "\\u003c") + '</script>'
+                     if style is not None else "")
+    design_css = ''
+    if style is not None:
+        # Per-role geometry, fonts, type size and copy are unchanged. Frozen QA
+        # measures these actual support surfaces; there is no contrast exemption.
+        for token in style.typography:
+            design_css += (f'.premium-role[data-composition-role="{token["key"]}"] .feature-copy span'
+                           + '{color:inherit}')
+        design_css += '.premium-role.fact{border-left-color:' + style.palette['metallic_gold'] + '}'
     return f'''<!doctype html><html><head><meta charset="utf-8"/><style>
     * {{box-sizing:border-box;margin:0;padding:0}}
     html,body,.canvas {{width:{ctx.width}px;height:{ctx.height}px;overflow:hidden}}
@@ -228,11 +256,13 @@ def _build_premium_composition(ctx: TemplateContext) -> str:
     .premium-logo {{position:absolute;object-fit:contain}}
     {_reference_paint_css(ctx, ctx.reference_target)}
     {legibility_css}
+    {design_css}
     </style></head><body><div class="canvas">
     <img class="background" src="{ctx.composited_image_data_uri}" alt=""/>
     {''.join(blocks)}{logo}</div>
     <script id="composition-spec" type="application/json" data-sha256="{spec.digest}">{payload}</script>
     {scene_payload}
+    {style_payload}
     </body></html>'''
 
 

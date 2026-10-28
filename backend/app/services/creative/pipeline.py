@@ -43,6 +43,8 @@ from .qa import CreativeQAResult, run_creative_qa
 from .renderer import PlaywrightRenderer
 from .composition import Box, resolve_composition, uses_premium_composition
 from .scene import CanonicalSceneAsset, compose_unified_scene
+from .premium_design import (is_hanna_scene, dominant_product_color,
+    scene_contrast_samples, resolve_premium_scene_style)
 from .templates import Feature, TemplateContext, get_platform_format, get_template, product_zone_for
 
 
@@ -235,7 +237,7 @@ def _validate_template_control_inventory(creative_input) -> None:
         "text_color", "font_family", "slide_number", "total_slides", "layout_variant", "campaign_archetype",
         "slide_role", "direction_palette", "secondary_font_family", "typography_direction", "headline_emphasis",
             "cta_treatment", "hero_treatment", "visual_style", "mood", "negative_space", "masked_scene_background", "reference_target",
-                "composition_spec", "unified_scene"}
+                "composition_spec", "unified_scene", "premium_style"}
     if {field.name for field in dataclass_fields(TemplateContext)} != text_fields | nontext_fields:
         raise ValueError("Unexamined template context field")
     controls = [creative_input.accent_color, creative_input.text_color, creative_input.font_family,
@@ -363,6 +365,8 @@ class SlideCreativeInput:
     # contain natural contact lighting/shadow around the protected product,
     # so render_slide performs only the final exact product overlay.
     masked_scene_background: bool = False
+    # Optional factual category supplied by the caller; never inferred from copy.
+    product_category: str = "general"
 
     def __post_init__(self) -> None:
         # dataclass fields can't default to a mutable list directly; normalize
@@ -1062,6 +1066,7 @@ async def render_slide(
     )
     composition_spec = None
     unified_scene = None
+    premium_style = None
     if uses_premium_composition(creative_input.reference_target):
         asset_ref = creative_input.slide_plan.product_asset if creative_input.slide_plan else None
         canonical_asset = CanonicalSceneAsset(
@@ -1075,7 +1080,13 @@ async def render_slide(
                 creative_input.generated_background) if creative_input.generated_background is not None
                 else "deterministic_brand_background", logo_treatment=logo_treatment)
         composition_spec = unified_scene.layout
-        ctx = replace(ctx, composition_spec=composition_spec, unified_scene=unified_scene)
+        if is_hanna_scene(unified_scene):
+            premium_style = resolve_premium_scene_style(unified_scene,
+                product_color=dominant_product_color(product_image),
+                contrast_samples=scene_contrast_samples(unified_scene, composited),
+                product_category=creative_input.product_category)
+        ctx = replace(ctx, composition_spec=composition_spec, unified_scene=unified_scene,
+                      premium_style=premium_style)
     html_doc = template.build_html(ctx)
 
     png_bytes, diagnostics = await renderer.render_png_with_diagnostics(
@@ -1127,6 +1138,8 @@ async def render_slide(
                if composition_spec is not None else {}),
             **({"unified_scene_spec": unified_scene.to_dict(),
                 "unified_scene_spec_sha256": unified_scene.digest} if unified_scene is not None else {}),
+            **({"premium_scene_style": premium_style.to_dict(),
+                "premium_scene_style_sha256": premium_style.digest} if premium_style is not None else {}),
             "reference_target": creative_input.reference_target.model_dump() if creative_input.reference_target else None,
             "slide_contract": creative_input.slide_plan.model_dump(),
             "slide_contract_sha256": slide_contract_digest(creative_input.slide_plan),
@@ -1301,7 +1314,8 @@ def persist_render_context(
     if context_path.exists():
         previous = json.loads(context_path.read_text(encoding="utf-8"))
         for key in ("reference_target", "slide_contract", "slide_contract_sha256", "render_sha256", "composite_sha256", "complete_text_contract", "rendered_text_fields", "structural_text",
-                    "composition_spec", "composition_spec_sha256", "unified_scene_spec", "unified_scene_spec_sha256"):
+                    "composition_spec", "composition_spec_sha256", "unified_scene_spec", "unified_scene_spec_sha256",
+                    "premium_scene_style", "premium_scene_style_sha256"):
             if key in previous:
                 payload[key] = previous[key]
 
