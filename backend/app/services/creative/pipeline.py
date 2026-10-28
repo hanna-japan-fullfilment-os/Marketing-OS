@@ -42,6 +42,7 @@ from .compositor import (
 from .qa import CreativeQAResult, run_creative_qa
 from .renderer import PlaywrightRenderer
 from .composition import Box, resolve_composition, uses_premium_composition
+from .scene import CanonicalSceneAsset, compose_unified_scene
 from .templates import Feature, TemplateContext, get_platform_format, get_template, product_zone_for
 
 
@@ -58,6 +59,40 @@ def _file_to_data_uri(path: Path) -> str:
     ext = path.suffix.lstrip(".").lower() or "png"
     mime = "image/png" if ext == "png" else f"image/{ext}"
     return f"data:{mime};base64,{b64}"
+
+
+def _scene_logo(path: Path) -> tuple[str, dict]:
+    """Derive transparency only from a bounded near-white connected border matte.
+
+    Canonical file/RGB artwork is untouched. Nonuniform/unknown backgrounds
+    retain their pixels and use a source-supported brand zone instead.
+    """
+    from PIL import ImageChops, ImageDraw
+    source_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+    with Image.open(path) as source:
+        image = source.convert("RGBA")
+    mode = "transparent_canonical_mark"
+    matte_removed = False
+    if image.getchannel("A").getextrema() == (255, 255):
+        w, h = image.size
+        border = ([image.getpixel((x, y)) for x in range(w) for y in (0, h-1)]
+                  + [image.getpixel((x, y)) for y in range(h) for x in (0, w-1)])
+        if all(min(pixel[:3]) >= 250 and max(pixel[:3])-min(pixel[:3]) <= 5
+               for pixel in border):
+            red, green, blue, _ = image.split()
+            candidates = ImageChops.darker(ImageChops.darker(red,green),blue).point(
+                lambda value: 255 if value >= 250 else 0)
+            ImageDraw.floodfill(candidates, (0, 0), 128, thresh=0)
+            image.putalpha(candidates.point(lambda value: 0 if value == 128 else 255))
+            matte_removed = True
+        else:
+            mode = "source_supported_brand_zone"
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return ("data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii"),
+            dict(mode=mode, source_sha256=source_hash, connected_border_matte_removed=matte_removed,
+                 matte_channel_floor=250, matte_max_border_chroma=5,
+                 canonical_rgb_preserved=True, source_file_modified=False))
 
 
 _COMPOSITE_SEAL = object()
@@ -200,7 +235,7 @@ def _validate_template_control_inventory(creative_input) -> None:
         "text_color", "font_family", "slide_number", "total_slides", "layout_variant", "campaign_archetype",
         "slide_role", "direction_palette", "secondary_font_family", "typography_direction", "headline_emphasis",
             "cta_treatment", "hero_treatment", "visual_style", "mood", "negative_space", "masked_scene_background", "reference_target",
-            "composition_spec"}
+                "composition_spec", "unified_scene"}
     if {field.name for field in dataclass_fields(TemplateContext)} != text_fields | nontext_fields:
         raise ValueError("Unexamined template context field")
     controls = [creative_input.accent_color, creative_input.text_color, creative_input.font_family,
@@ -982,7 +1017,12 @@ async def render_slide(
             x0, y0, x1, y1 = product_bounds
             product_box = Box(x0, y0, x1-x0, y1-y0)
 
-    logo_data_uri = _file_to_data_uri(creative_input.logo_path) if creative_input.logo_path else None
+    premium = uses_premium_composition(creative_input.reference_target)
+    logo_treatment = dict(mode="absent")
+    if creative_input.logo_path and premium:
+        logo_data_uri, logo_treatment = _scene_logo(creative_input.logo_path)
+    else:
+        logo_data_uri = _file_to_data_uri(creative_input.logo_path) if creative_input.logo_path else None
     ctx = TemplateContext(
         reference_target=creative_input.reference_target,
         width=fmt.width,
@@ -1021,9 +1061,21 @@ async def render_slide(
               masked_scene_background=creative_input.masked_scene_background,
     )
     composition_spec = None
+    unified_scene = None
     if uses_premium_composition(creative_input.reference_target):
-        composition_spec = resolve_composition(ctx, product_box, product_safe=product_safe)
-        ctx = replace(ctx, composition_spec=composition_spec)
+        asset_ref = creative_input.slide_plan.product_asset if creative_input.slide_plan else None
+        canonical_asset = CanonicalSceneAsset(
+            asset_id=asset_ref.asset_id if asset_ref else str(creative_input.source_image_path),
+            sha256=hashlib.sha256(Path(creative_input.source_image_path).read_bytes()).hexdigest(),
+            path=str(creative_input.source_image_path),
+            source_crop=tuple(trusted.metadata['placement']['source_alpha_bbox']) if trusted else
+                (0, 0, product_image.width, product_image.height))
+        unified_scene = compose_unified_scene(ctx, product_box, product_safe=product_safe,
+            canonical_asset=canonical_asset, background_identity=_image_digest(
+                creative_input.generated_background) if creative_input.generated_background is not None
+                else "deterministic_brand_background", logo_treatment=logo_treatment)
+        composition_spec = unified_scene.layout
+        ctx = replace(ctx, composition_spec=composition_spec, unified_scene=unified_scene)
     html_doc = template.build_html(ctx)
 
     png_bytes, diagnostics = await renderer.render_png_with_diagnostics(
@@ -1073,6 +1125,8 @@ async def render_slide(
             **({"composition_spec": composition_spec.to_dict(),
                 "composition_spec_sha256": composition_spec.digest}
                if composition_spec is not None else {}),
+            **({"unified_scene_spec": unified_scene.to_dict(),
+                "unified_scene_spec_sha256": unified_scene.digest} if unified_scene is not None else {}),
             "reference_target": creative_input.reference_target.model_dump() if creative_input.reference_target else None,
             "slide_contract": creative_input.slide_plan.model_dump(),
             "slide_contract_sha256": slide_contract_digest(creative_input.slide_plan),
@@ -1247,7 +1301,7 @@ def persist_render_context(
     if context_path.exists():
         previous = json.loads(context_path.read_text(encoding="utf-8"))
         for key in ("reference_target", "slide_contract", "slide_contract_sha256", "render_sha256", "composite_sha256", "complete_text_contract", "rendered_text_fields", "structural_text",
-                    "composition_spec", "composition_spec_sha256"):
+                    "composition_spec", "composition_spec_sha256", "unified_scene_spec", "unified_scene_spec_sha256"):
             if key in previous:
                 payload[key] = previous[key]
 

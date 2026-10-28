@@ -19,6 +19,7 @@ from typing import Callable
 from ...schemas.creative_director import ReferenceTarget
 from .compositor import ProductZone
 from .composition import LayoutSpec
+from .scene import UnifiedSceneSpec
 
 # Build 5 repair (Part 3): a version identity for the TEMPLATE/LAYOUT SYSTEM as a
 # whole (this registry's own structure — `CreativeTemplate`/`TemplateContext`'s
@@ -84,6 +85,7 @@ class TemplateContext:
     composited_image_data_uri: str
     reference_target: ReferenceTarget | None = None
     composition_spec: LayoutSpec | None = None
+    unified_scene: UnifiedSceneSpec | None = None
     eyebrow: str = ""
     headline: str = ""
     body: str = ""
@@ -148,6 +150,14 @@ def _build_premium_composition(ctx: TemplateContext) -> str:
     dark = grammar.background == "dark_cinematic"
     color = "#ffffff" if dark else ctx.text_color
     panel = "rgba(10,5,20,.82)" if dark else "rgba(255,255,255,.94)"
+    scene = ctx.unified_scene
+    if scene is not None:
+        scene.validate_relationships()
+        if scene.layout.digest != spec.digest:
+            raise ValueError("Scene/layout mismatch")
+        # Contrast is measured against the actual background by frozen QA.
+        # No independent opaque block or automatic contrast exemption.
+        panel = "rgba(0,0,0,0)"
     accent = "#e5bd60" if grammar.callout_treatment == "gold" else ctx.accent_color
 
     def geometry(box):
@@ -196,6 +206,9 @@ def _build_premium_composition(ctx: TemplateContext) -> str:
             f'style="{geometry(spec.logo)}" src="{ctx.logo_data_uri}" alt="" />'
             if ctx.logo_data_uri else "")
     payload = json.dumps(spec.to_dict(), ensure_ascii=False).replace("<", "\\u003c")
+    scene_payload = (f'<script id="unified-scene-spec" type="application/json" data-sha256="{scene.digest}">'
+                     + json.dumps(scene.to_dict(), ensure_ascii=False).replace("<", "\\u003c") + '</script>'
+                     if scene is not None else "")
     return f'''<!doctype html><html><head><meta charset="utf-8"/><style>
     * {{box-sizing:border-box;margin:0;padding:0}}
     html,body,.canvas {{width:{ctx.width}px;height:{ctx.height}px;overflow:hidden}}
@@ -219,6 +232,7 @@ def _build_premium_composition(ctx: TemplateContext) -> str:
     <img class="background" src="{ctx.composited_image_data_uri}" alt=""/>
     {''.join(blocks)}{logo}</div>
     <script id="composition-spec" type="application/json" data-sha256="{spec.digest}">{payload}</script>
+    {scene_payload}
     </body></html>'''
 
 
