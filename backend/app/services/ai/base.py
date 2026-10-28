@@ -19,6 +19,14 @@ from ...schemas.qa import CreativeCritiqueResult
 SchemaT = TypeVar("SchemaT", bound=BaseModel)
 
 
+class CreativeDirectorProvider(Protocol):
+    """Provider-neutral unified artwork boundary; no renderer fallback."""
+
+    async def compose_creative(self, *, package, options) -> bytes: ...
+
+    async def review_creative(self, *, package, candidate: bytes, model: str): ...
+
+
 class AIProvider(Protocol):
     """Reasoning / structured generation / vision."""
 
