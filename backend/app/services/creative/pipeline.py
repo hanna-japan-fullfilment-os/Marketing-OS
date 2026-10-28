@@ -41,6 +41,7 @@ from .compositor import (
 )
 from .qa import CreativeQAResult, run_creative_qa
 from .renderer import PlaywrightRenderer
+from .composition import Box, resolve_composition, uses_premium_composition
 from .templates import Feature, TemplateContext, get_platform_format, get_template, product_zone_for
 
 
@@ -198,7 +199,8 @@ def _validate_template_control_inventory(creative_input) -> None:
     nontext_fields = {"width", "height", "composited_image_data_uri", "logo_data_uri", "accent_color",
         "text_color", "font_family", "slide_number", "total_slides", "layout_variant", "campaign_archetype",
         "slide_role", "direction_palette", "secondary_font_family", "typography_direction", "headline_emphasis",
-        "cta_treatment", "hero_treatment", "visual_style", "mood", "negative_space", "masked_scene_background", "reference_target"}
+            "cta_treatment", "hero_treatment", "visual_style", "mood", "negative_space", "masked_scene_background", "reference_target",
+            "composition_spec"}
     if {field.name for field in dataclass_fields(TemplateContext)} != text_fields | nontext_fields:
         raise ValueError("Unexamined template context field")
     controls = [creative_input.accent_color, creative_input.text_color, creative_input.font_family,
@@ -911,6 +913,12 @@ async def render_slide(
         composited = trusted.image.convert("RGB")
         composited = _resize_cover(composited, fmt.width, fmt.height)
         background_isolator_used = "trusted_locked_product_composite"
+        if uses_premium_composition(creative_input.reference_target) and trusted.image.size != (fmt.width, fmt.height):
+            raise ValueError("Premium locked product canvas cannot be cropped or resized")
+        if uses_premium_composition(creative_input.reference_target):
+            placement = trusted.metadata["placement"]
+            product_box = Box(placement["product_x"], placement["product_y"],
+                              placement["rendered_width"], placement["rendered_height"])
     else:
         # BUILD6R_IMMUTABLE_PRODUCT_CUTOUT_SELECTION
         # Prefer the SHA-keyed deterministic cutout for every supported
@@ -949,6 +957,15 @@ async def render_slide(
             zone=zone,
             shadow=not creative_input.masked_scene_background,
         )
+        if uses_premium_composition(creative_input.reference_target):
+            product_bounds = build_product_overlay(
+                canvas_size=(fmt.width, fmt.height), product=isolated_product,
+                zone=zone,
+            ).getchannel("A").getbbox()
+            if product_bounds is None:
+                raise ValueError("Premium composition has no visible product")
+            x0, y0, x1, y1 = product_bounds
+            product_box = Box(x0, y0, x1-x0, y1-y0)
 
     logo_data_uri = _file_to_data_uri(creative_input.logo_path) if creative_input.logo_path else None
     ctx = TemplateContext(
@@ -988,6 +1005,10 @@ async def render_slide(
               negative_space=creative_input.negative_space,
               masked_scene_background=creative_input.masked_scene_background,
     )
+    composition_spec = None
+    if uses_premium_composition(creative_input.reference_target):
+        composition_spec = resolve_composition(ctx, product_box)
+        ctx = replace(ctx, composition_spec=composition_spec)
     html_doc = template.build_html(ctx)
 
     png_bytes, diagnostics = await renderer.render_png_with_diagnostics(
@@ -1001,6 +1022,8 @@ async def render_slide(
         diagnostics=diagnostics,
         logo_expected=creative_input.logo_path is not None,
         logo_included=logo_data_uri is not None,
+        composition_spec=composition_spec,
+        base_image=composited if composition_spec is not None else None,
         # Only fields that actually land inside `.text-block` (see
         # templates.py::_build_feature_showcase) belong here — badge_text/
         # bottom_features/trust_badges render as separate elements outside it,
@@ -1031,6 +1054,9 @@ async def render_slide(
     if creative_input.slide_plan is not None:
         context_path = build_render_context_path(output_path)
         context_path.write_text(json.dumps({
+            **({"composition_spec": composition_spec.to_dict(),
+                "composition_spec_sha256": composition_spec.digest}
+               if composition_spec is not None else {}),
             "reference_target": creative_input.reference_target.model_dump() if creative_input.reference_target else None,
             "slide_contract": creative_input.slide_plan.model_dump(),
             "slide_contract_sha256": slide_contract_digest(creative_input.slide_plan),
@@ -1204,7 +1230,8 @@ def persist_render_context(
     }
     if context_path.exists():
         previous = json.loads(context_path.read_text(encoding="utf-8"))
-        for key in ("reference_target", "slide_contract", "slide_contract_sha256", "render_sha256", "composite_sha256", "complete_text_contract", "rendered_text_fields", "structural_text"):
+        for key in ("reference_target", "slide_contract", "slide_contract_sha256", "render_sha256", "composite_sha256", "complete_text_contract", "rendered_text_fields", "structural_text",
+                    "composition_spec", "composition_spec_sha256"):
             if key in previous:
                 payload[key] = previous[key]
 

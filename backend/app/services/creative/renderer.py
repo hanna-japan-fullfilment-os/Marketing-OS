@@ -26,7 +26,56 @@ _T = TypeVar("_T")
 # output not directly comparable to a new run's (e.g. a different capture method,
 # a changed overflow-detection heuristic) — never on an unrelated bug fix that
 # doesn't change what gets measured or how.
-RENDERER_VERSION = "1.0.0"
+RENDERER_VERSION = "1.1.0"
+
+_COMPOSITION_PROBE_JS = """
+() => {
+  const spec = document.querySelector('#composition-spec');
+  if (!spec) return null;
+  const box = r => ({x:r.x, y:r.y, width:r.width, height:r.height});
+  const available = family => {
+    const c = document.createElement('canvas').getContext('2d');
+    const sample = 'Wim Áção çã 0123456789';
+    c.font = '72px monospace'; const base = c.measureText(sample).width;
+    c.font = '72px "' + family.replaceAll('"', '') + '", monospace';
+    return Math.abs(c.measureText(sample).width - base) > .1;
+  };
+  const roles = [...document.querySelectorAll('[data-composition-role]')].map(el => {
+    const style = getComputedStyle(el);
+    const families = style.fontFamily.split(',').map(s => s.trim().replace(/^['"]|['"]$/g, ''));
+    const resolved = families.find(f => !['serif','sans-serif','monospace'].includes(f) && available(f));
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const ink = []; let node;
+    while ((node = walker.nextNode())) {
+      if (!node.textContent.trim()) continue;
+      const range = document.createRange(); range.selectNodeContents(node);
+      const face = getComputedStyle(node.parentElement);
+      const measure = document.createElement('canvas').getContext('2d');
+      measure.font = `${face.fontWeight} ${face.fontSize} ${face.fontFamily}`;
+      const glyphs = measure.measureText(node.textContent);
+      // Range rectangles include the face's em ascent/descent, not painted ink.
+      // Tight display leading must not be falsely classified as glyph clipping.
+      for (const r of range.getClientRects()) if (r.width && r.height) ink.push({
+        x:r.x, y:r.y + glyphs.fontBoundingBoxAscent - glyphs.actualBoundingBoxAscent,
+        width:r.width, height:glyphs.actualBoundingBoxAscent + glyphs.actualBoundingBoxDescent});
+    }
+    const lines = [];
+    for (const r of ink) if (!lines.some(y => Math.abs(y-r.y)<2)) lines.push(r.y);
+    const rect = el.getBoundingClientRect();
+    return {key:el.dataset.compositionRole, box:box(rect), ink_boxes:ink,
+      lines:lines.length, font_px:parseFloat(style.fontSize), resolved_font:resolved || null,
+      foreground:JSON.parse(el.dataset.foreground), background:style.backgroundColor,
+      overflow:el.scrollWidth>el.clientWidth+1 ||
+        ink.some(r => r.x<rect.x-1 || r.y<rect.y-1 ||
+          r.x+r.width>rect.right+1 || r.y+r.height>rect.bottom+1)};
+  });
+  const logo = document.querySelector('[data-composition-logo]');
+  return {spec_sha256:spec.dataset.sha256, canvas:[innerWidth,innerHeight], roles,
+    logo:logo ? box(logo.getBoundingClientRect()) : null,
+    images_ready:[...document.images].every(i => i.complete && i.naturalWidth>0),
+    fonts_ready:document.fonts.status==='loaded' && roles.every(r => r.resolved_font)};
+}
+"""
 
 _TEXT_OVERFLOW_PROBE_JS = """
 () => {
@@ -52,6 +101,7 @@ class RenderDiagnostics:
 
     text_block_present: bool
     text_overflowed: bool
+    composition: dict | None = None
 
 
 class PlaywrightRenderer:
@@ -148,11 +198,19 @@ class PlaywrightRenderer:
         page = await browser.new_page(viewport={"width": width, "height": height}, device_scale_factor=1)
         try:
             await page.set_content(html, wait_until="load")
+            if await page.locator("#composition-spec").count():
+                # Readiness is bounded, and never installs/downloads a font/browser.
+                await asyncio.wait_for(page.evaluate("""async () => {
+                    await document.fonts.ready;
+                    await Promise.all([...document.images].map(i => i.decode()));
+                }"""), timeout=5)
+            composition = await page.evaluate(_COMPOSITION_PROBE_JS)
             probe = await page.evaluate(_TEXT_OVERFLOW_PROBE_JS)
             png = await page.screenshot(type="png")
             diagnostics = RenderDiagnostics(
                 text_block_present=bool(probe.get("present", False)),
                 text_overflowed=bool(probe.get("overflowed", False)),
+                composition=composition,
             )
             return png, diagnostics
         finally:

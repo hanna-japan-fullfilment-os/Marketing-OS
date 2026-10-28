@@ -214,6 +214,10 @@ def current_slide_attestations(db, campaign, variant, *, creative_data=None,
         path = Path(raw_path)
         context = json.loads(build_render_context_path(path).read_text(encoding="utf-8"))
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        from ..schemas.creative_director import reference_target_from_brief
+        from .creative.composition import uses_premium_composition
+        validate_premium_composition_report(json.loads(report_bytes), context, digest,
+            required=uses_premium_composition(reference_target_from_brief(plan.visual_brief)))
         if (context.get("slide_contract") != plan.model_dump()
                 or context.get("slide_contract_sha256") != slide_contract_digest(plan)
                 or context.get("render_sha256") != digest
@@ -272,6 +276,43 @@ def assert_campaign_creative_qa_current(db, campaign):
             raise ValueError("Creative QA evidence does not attest current slides")
 
 
+def validate_premium_composition_report(data, context, render_sha256, *, required=False):
+    """Bind current geometry/measurements to the render and recalculate its policy.
+
+    Legacy non-reference campaigns keep their prior report contract. A governed
+    reference render cannot opt out by deleting its report or composition key.
+    """
+    from .creative.composition import VERSION, LayoutSpec, evaluate_composition, uses_premium_composition
+    if not isinstance(data, dict) or not isinstance(context, dict):
+        raise ValueError("Malformed premium composition evidence")
+    if not (required or uses_premium_composition(context.get("reference_target")) or context.get("composition_spec")):
+        return
+    try:
+        layout = LayoutSpec.from_dict(context["composition_spec"])
+        report = data["composition"]
+        target = context.get("reference_target") or {}
+        if (layout.version != VERSION or report["version"] != VERSION
+                or target.get("reference_id") != layout.reference_id
+                or target.get("sha256") != layout.reference_sha256
+                or hashlib.sha256(json.dumps(target, sort_keys=True).encode()).hexdigest()
+                   != layout.reference_contract_sha256
+                or context["composition_spec_sha256"] != layout.digest
+                or report["spec_sha256"] != layout.digest
+                or report["spec"] != context["composition_spec"]
+                or report["render_sha256"] != render_sha256
+                or context["render_sha256"] != render_sha256):
+            raise ValueError("Stale premium composition evidence")
+        recomputed = evaluate_composition(layout, report["measurements"], report["raw_metrics"])
+        for key in ("passed", "hard_checks", "hard_failures", "style_failures",
+                    "subscores", "score", "threshold", "subscore_minimum"):
+            if report[key] != recomputed[key]:
+                raise ValueError("Premium composition policy or evidence differs")
+        if data.get("passed") is not True or recomputed["passed"] is not True:
+            raise ValueError("Premium composition QA did not pass")
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"Missing, stale or failed premium composition QA: {exc}") from exc
+
+
 def run_technical_qa(variant: PlatformCampaignVariant, spec: PlatformCreativeSpec) -> TechnicalQAResult:
     """Dimensions, valid file, aspect ratio, safe zones, text overflow, logo
     presence, export correctness, platform format correctness — for the
@@ -290,6 +331,29 @@ def run_technical_qa(variant: PlatformCampaignVariant, spec: PlatformCreativeSpe
         issues.append("No rendered slide assets to check.")
         return TechnicalQAResult(passed=False, issues=issues, checks=checks)
     checks["has_rendered_assets"] = True
+
+    # Check every governed slide, independently of report-list coverage. Existing
+    # approval attestation also requires the prepared reference plan explicitly.
+    from .creative.pipeline import build_render_context_path
+    from .creative.composition import uses_premium_composition
+    direction = getattr(variant, "creative_direction", None) or {}
+    required = isinstance(direction, dict) and uses_premium_composition(direction.get("reference_target"))
+    for i, p in enumerate(variant.slide_asset_paths):
+        context_path = build_render_context_path(Path(p))
+        try:
+            context = json.loads(context_path.read_text(encoding="utf-8")) if context_path.exists() else {}
+            if not isinstance(context, dict):
+                raise ValueError("Malformed render context")
+            governed = required or uses_premium_composition(context.get("reference_target")) or context.get("composition_spec")
+            if governed:
+                report_path = (variant.qa_report_paths or [])[i]
+                report = json.loads(Path(report_path).read_text(encoding="utf-8"))
+                validate_premium_composition_report(report, context,
+                    hashlib.sha256(Path(p).read_bytes()).hexdigest(), required=True)
+                checks[f"slide_{i+1}_premium_composition"] = True
+        except (OSError, ValueError, TypeError, IndexError) as exc:
+            issues.append(f"Slide {i+1} premium evidence is incomplete: {exc}")
+            checks[f"slide_{i+1}_premium_composition"] = False
 
     for i, p in enumerate(variant.slide_asset_paths, start=1):
         path = Path(p)

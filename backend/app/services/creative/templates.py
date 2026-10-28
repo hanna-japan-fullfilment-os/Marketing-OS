@@ -12,11 +12,13 @@ in the pipeline needs to change.
 from __future__ import annotations
 
 import html
+import json
 from dataclasses import dataclass, field
 from typing import Callable
 
 from ...schemas.creative_director import ReferenceTarget
 from .compositor import ProductZone
+from .composition import LayoutSpec
 
 # Build 5 repair (Part 3): a version identity for the TEMPLATE/LAYOUT SYSTEM as a
 # whole (this registry's own structure — `CreativeTemplate`/`TemplateContext`'s
@@ -28,7 +30,7 @@ from .compositor import ProductZone
 # benchmark baseline's layout not directly comparable to a new run's (a new
 # section type, a changed text-block/scrim contract) — never when adding an
 # unrelated new template or tweaking one template's own CSS.
-TEMPLATE_REGISTRY_VERSION = '1.3.0'
+TEMPLATE_REGISTRY_VERSION = '1.4.0'
 
 
 @dataclass(frozen=True)
@@ -81,6 +83,7 @@ class TemplateContext:
     height: int
     composited_image_data_uri: str
     reference_target: ReferenceTarget | None = None
+    composition_spec: LayoutSpec | None = None
     eyebrow: str = ""
     headline: str = ""
     body: str = ""
@@ -136,6 +139,69 @@ def _esc(value: str) -> str:
     return html.escape(value, quote=True)
 
 
+def _build_premium_composition(ctx: TemplateContext) -> str:
+    """Separate semantic zones over the existing immutable product composite."""
+    spec = ctx.composition_spec
+    if spec is None or ctx.reference_target is None:
+        raise ValueError("Resolved premium composition and reference required")
+    grammar = ctx.reference_target.grammar
+    dark = grammar.background == "dark_cinematic"
+    color = "#ffffff" if dark else ctx.text_color
+    panel = "rgba(10,5,20,.82)" if dark else "rgba(255,255,255,.94)"
+    accent = "#e5bd60" if grammar.callout_treatment == "gold" else ctx.accent_color
+
+    def geometry(box):
+        return (f"left:{box.x:g}px;top:{box.y:g}px;"
+                f"width:{box.width:g}px;height:{box.height:g}px;")
+
+    blocks = []
+    for role in spec.roles:
+        text = _esc(role.text)
+        if role.key.startswith("feature_"):
+            feature = ctx.features[int(role.key.split("_")[1])]
+            text = (f'<span class="feature-icon">{_feature_icon(ctx, feature.icon)}</span>'
+                    f'<span class="feature-copy"><strong>{_esc(feature.title)}</strong>'
+                    f'<span>{_esc(feature.subtitle)}</span></span>')
+        is_headline = role.role == "HEADLINE"
+        family = role.font_family
+        colors = ([s.color for s in grammar.headline_paint.stops]
+                  if is_headline and grammar.headline_paint else
+                  [accent, color] if role.role == "FACT_CALLOUT" else [color])
+        blocks.append(
+            f'<div data-composition-role="{role.key}" '
+            f'data-foreground="{_esc(json.dumps(colors))}" '
+            f'class="premium-role {"headline" if is_headline else ""} '
+            f'{"fact" if role.role == "FACT_CALLOUT" else ""}" '
+            f'style="{geometry(role.box)}font-size:{role.font_px:g}px;'
+            f'font-family:{_esc(family)}">{text}</div>'
+        )
+    logo = (f'<img data-composition-logo class="premium-logo" '
+            f'style="{geometry(spec.logo)}" src="{ctx.logo_data_uri}" alt="" />'
+            if ctx.logo_data_uri else "")
+    payload = json.dumps(spec.to_dict(), ensure_ascii=False).replace("<", "\\u003c")
+    return f'''<!doctype html><html><head><meta charset="utf-8"/><style>
+    * {{box-sizing:border-box;margin:0;padding:0}}
+    html,body,.canvas {{width:{ctx.width}px;height:{ctx.height}px;overflow:hidden}}
+    .canvas {{position:relative;background:{ctx.accent_color};color:{color}}}
+    .background {{position:absolute;inset:0;width:100%;height:100%}}
+    .premium-role {{position:absolute;overflow:hidden;white-space:pre-wrap;
+      line-height:1.25;font-weight:500;padding:4px;background-color:{panel};
+      overflow-wrap:normal;word-break:normal}}
+    .premium-role.headline {{font-weight:900;line-height:1.06;letter-spacing:-.022em;overflow:visible}}
+    .premium-role.fact {{color:{accent};border-left:2px solid {accent}}}
+    .feature-icon {{display:inline-flex;width:38px;height:38px;float:left;margin-right:8px}}
+    .feature-copy {{display:block;overflow:hidden}}
+    .feature-copy strong,.feature-copy span {{display:block}}
+    .feature-copy span {{color:{color}}}
+    .premium-logo {{position:absolute;object-fit:contain}}
+    {_reference_paint_css(ctx, ctx.reference_target)}
+    </style></head><body><div class="canvas">
+    <img class="background" src="{ctx.composited_image_data_uri}" alt=""/>
+    {''.join(blocks)}{logo}</div>
+    <script id="composition-spec" type="application/json" data-sha256="{spec.digest}">{payload}</script>
+    </body></html>'''
+
+
 def _slide_marker_html(ctx: TemplateContext) -> str:
     if ctx.total_slides <= 1 or ctx.slide_number <= 0:
         return ""
@@ -172,6 +238,8 @@ def _build_premium_product_hero(ctx: TemplateContext) -> str:
     that has nothing to caption. The logo still renders independently either way —
     it's never left to the AI regardless of whether text was baked in.
     """
+    if ctx.composition_spec is not None:
+        return _build_premium_composition(ctx)
     has_text = bool(ctx.eyebrow or ctx.headline or ctx.body or ctx.cta)
     logo_html = (
         f'<img class="logo" src="{ctx.logo_data_uri}" alt="brand logo" />'
@@ -765,6 +833,9 @@ def _feature_icon(ctx: TemplateContext, glyph: str) -> str:
 
 def _build_feature_showcase(ctx: TemplateContext) -> str:
     """Build 6R-C2C product-driven deterministic commercial composition."""
+
+    if ctx.composition_spec is not None:
+        return _build_premium_composition(ctx)
 
     valid_layouts = {
         "sparse_hero",
