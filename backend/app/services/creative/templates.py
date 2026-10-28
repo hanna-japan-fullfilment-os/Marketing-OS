@@ -155,6 +155,7 @@ def _build_premium_composition(ctx: TemplateContext) -> str:
                 f"width:{box.width:g}px;height:{box.height:g}px;")
 
     blocks = []
+    legibility_css = ""
     for role in spec.roles:
         text = _esc(role.text)
         if role.key.startswith("feature_"):
@@ -167,10 +168,26 @@ def _build_premium_composition(ctx: TemplateContext) -> str:
         colors = ([s.color for s in grammar.headline_paint.stops]
                   if is_headline and grammar.headline_paint else
                   [accent, color] if role.role == "FACT_CALLOUT" else [color])
+        if is_headline:
+            if grammar.headline_paint and dark:
+                # A real keyline in an existing approved highlight color keeps
+                # dark metallic stops readable without replacing the gradient.
+                highlight = max(colors, key=lambda c: sum(int(c[i:i+2], 16) for i in (1,3,5)))
+                keyline = 1.5 * ctx.width / 1080
+                colors = dict(fills=colors, outline=dict(color=highlight, width_px=keyline))
+                legibility_css = f'''
+                .canvas .premium-role .headline {{position:relative;isolation:isolate;z-index:0}}
+                .canvas .premium-role .headline::before {{content:attr(data-ink);
+                  position:absolute;inset:0;z-index:-1;color:transparent;
+                  -webkit-text-fill-color:transparent;
+                  -webkit-text-stroke:{keyline*2:g}px {highlight};background:none;
+                  white-space:inherit;pointer-events:none}}
+                '''
+            text = f'<span class="headline" data-ink="{_esc(role.text)}">{text}</span>'
         blocks.append(
             f'<div data-composition-role="{role.key}" '
             f'data-foreground="{_esc(json.dumps(colors))}" '
-            f'class="premium-role {"headline" if is_headline else ""} '
+            f'class="premium-role {"headline-role" if is_headline else ""} '
             f'{"fact" if role.role == "FACT_CALLOUT" else ""}" '
             f'style="{geometry(role.box)}font-size:{role.font_px:g}px;'
             f'font-family:{_esc(family)}">{text}</div>'
@@ -187,7 +204,9 @@ def _build_premium_composition(ctx: TemplateContext) -> str:
     .premium-role {{position:absolute;overflow:hidden;white-space:pre-wrap;
       line-height:1.25;font-weight:500;padding:4px;background-color:{panel};
       overflow-wrap:normal;word-break:normal}}
-    .premium-role.headline {{font-weight:900;line-height:1.06;letter-spacing:-.022em;overflow:visible}}
+    .premium-role.headline-role {{font-weight:900;line-height:1.06;letter-spacing:-.022em;overflow:visible;
+      text-transform:{"uppercase" if grammar.typography == "condensed" else "none"}}}
+    .premium-role .headline {{display:inline-block;max-width:100%}}
     .premium-role.fact {{color:{accent};border-left:2px solid {accent}}}
     .feature-icon {{display:inline-flex;width:38px;height:38px;float:left;margin-right:8px}}
     .feature-copy {{display:block;overflow:hidden}}
@@ -195,6 +214,7 @@ def _build_premium_composition(ctx: TemplateContext) -> str:
     .feature-copy span {{color:{color}}}
     .premium-logo {{position:absolute;object-fit:contain}}
     {_reference_paint_css(ctx, ctx.reference_target)}
+    {legibility_css}
     </style></head><body><div class="canvas">
     <img class="background" src="{ctx.composited_image_data_uri}" alt=""/>
     {''.join(blocks)}{logo}</div>

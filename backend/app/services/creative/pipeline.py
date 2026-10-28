@@ -907,6 +907,8 @@ async def render_slide(
     detection = creative_input.product_zone_detection
     product_zone_detected = False
     background_isolator_used = "none"
+    product_alpha = None
+    product_safe = None
 
     if trusted is not None:
         # Capability contains deterministic composition of the approved product layer.
@@ -919,6 +921,18 @@ async def render_slide(
             placement = trusted.metadata["placement"]
             product_box = Box(placement["product_x"], placement["product_y"],
                               placement["rendered_width"], placement["rendered_height"])
+            from ..locked_product_pipeline import PRODUCT_BOTTOM_Y_RATIO, PRODUCT_SAFE_TOP_RATIO
+            # The existing locked-product contract has its own ~3% edge inset
+            # and typography-safe top. Do not move/shrink it to a text-zone inset.
+            pad_x = round(fmt.width*(1-PRODUCT_BOTTOM_Y_RATIO))
+            safe_top = round(fmt.height*PRODUCT_SAFE_TOP_RATIO)
+            safe_bottom = round(fmt.height*PRODUCT_BOTTOM_Y_RATIO)
+            product_safe = Box(pad_x, safe_top, fmt.width-2*pad_x, safe_bottom-safe_top)
+            alpha = product_image.getchannel("A").crop(tuple(placement["source_alpha_bbox"]))
+            alpha = alpha.resize((placement["rendered_width"], placement["rendered_height"]),
+                                 Image.Resampling.LANCZOS)
+            product_alpha = Image.new("L", (fmt.width, fmt.height))
+            product_alpha.paste(alpha, (placement["product_x"], placement["product_y"]))
     else:
         # BUILD6R_IMMUTABLE_PRODUCT_CUTOUT_SELECTION
         # Prefer the SHA-keyed deterministic cutout for every supported
@@ -958,10 +972,11 @@ async def render_slide(
             shadow=not creative_input.masked_scene_background,
         )
         if uses_premium_composition(creative_input.reference_target):
-            product_bounds = build_product_overlay(
+            product_alpha = build_product_overlay(
                 canvas_size=(fmt.width, fmt.height), product=isolated_product,
                 zone=zone,
-            ).getchannel("A").getbbox()
+            ).getchannel("A")
+            product_bounds = product_alpha.getbbox()
             if product_bounds is None:
                 raise ValueError("Premium composition has no visible product")
             x0, y0, x1, y1 = product_bounds
@@ -1007,7 +1022,7 @@ async def render_slide(
     )
     composition_spec = None
     if uses_premium_composition(creative_input.reference_target):
-        composition_spec = resolve_composition(ctx, product_box)
+        composition_spec = resolve_composition(ctx, product_box, product_safe=product_safe)
         ctx = replace(ctx, composition_spec=composition_spec)
     html_doc = template.build_html(ctx)
 
@@ -1024,6 +1039,7 @@ async def render_slide(
         logo_included=logo_data_uri is not None,
         composition_spec=composition_spec,
         base_image=composited if composition_spec is not None else None,
+        product_alpha=product_alpha,
         # Only fields that actually land inside `.text-block` (see
         # templates.py::_build_feature_showcase) belong here — badge_text/
         # bottom_features/trust_badges render as separate elements outside it,

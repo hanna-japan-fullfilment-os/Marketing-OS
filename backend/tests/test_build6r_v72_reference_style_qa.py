@@ -32,6 +32,13 @@ def fixture():
     return spec, observed, visual
 
 
+def product_mask(spec):
+    mask = Image.new("L", (spec.width,spec.height))
+    p = spec.product
+    ImageDraw.Draw(mask).rectangle((p.x,p.y,p.right-1,p.bottom-1),fill=255)
+    return mask
+
+
 def test_complete_synthetic_measurements_pass_and_weights_match_audit():
     spec, obs, visual = fixture()
     result = evaluate_composition(spec, obs, visual)
@@ -157,10 +164,10 @@ def test_local_contrast_and_palette_are_measured_not_inferred_from_spec():
     spec, obs, _ = fixture()
     image = Image.new("RGB", (1080,1350), "#100820")
     ImageDraw.Draw(image).rectangle((572,650,1036,1279), fill="#cc88ff")
-    metrics = raster_composition_metrics(spec,obs,image)
+    metrics = raster_composition_metrics(spec,obs,image,product_mask(spec))
     assert metrics["minimum_contrast"] > 4.5 and metrics["product_separation"] > 12
     obs["roles"][0]["foreground"] = ["#100820"]
-    assert raster_composition_metrics(spec,obs,image)["minimum_contrast"] < 4.5
+    assert raster_composition_metrics(spec,obs,image,product_mask(spec))["minimum_contrast"] < 4.5
 
 
 def test_missing_diagnostics_cannot_pass_mechanical_qa():
@@ -219,9 +226,92 @@ async def test_real_browser_measurements_on_synthetic_local_fixture(long_copy):
     assert diag.composition and diag.composition["images_ready"]
     assert diag.composition["fonts_ready"]
     result = run_creative_qa(png_bytes=png,expected_width=1080,expected_height=1350,
-        diagnostics=diag,logo_expected=True,logo_included=True,composition_spec=spec,base_image=image)
+        diagnostics=diag,logo_expected=True,logo_included=True,composition_spec=spec,base_image=image,
+        product_alpha=product_mask(spec))
     if long_copy:
         assert not result.passed
         assert "text_overflow" in result.composition["hard_failures"]
     else:
         assert result.passed, json.dumps([r for r in diag.composition["roles"] if r["overflow"]])
+
+
+def test_v74_separation_samples_opaque_silhouette_not_transparent_envelope():
+    spec, obs, _ = fixture()
+    image = Image.new("RGB",(1080,1350),"#100820")
+    mask = Image.new("L",image.size)
+    # Deliberately transparent margins inside the declared product envelope.
+    actual = (600,680,1010,1250)
+    ImageDraw.Draw(image).rectangle(actual,fill="#cc88ff")
+    ImageDraw.Draw(mask).rectangle(actual,fill=255)
+    result = raster_composition_metrics(spec,obs,image,mask)
+    assert result["product_separation"] > 12
+    assert len(result["edge_samples"]) == 10
+    assert all(s["alpha"] >= 128 for s in result["edge_samples"])
+    with pytest.raises(ValueError,match="alpha"):
+        raster_composition_metrics(spec,obs,image)
+    with pytest.raises(ValueError,match="opaque"):
+        raster_composition_metrics(spec,obs,image,Image.new("L",image.size))
+
+
+def test_v74_safe_product_envelope_does_not_waive_collisions():
+    spec, obs, visual = fixture()
+    p = Box(551,648,497,662)
+    spec = resolve_composition(context(features=[Feature(title="7 máscaras")],cta="Saiba mais",
+        logo_data_uri="data:image/png;base64,fixture"),p,product_safe=Box(32,299,1016,1011))
+    obs["spec_sha256"] = spec.digest
+    assert evaluate_composition(spec,obs,visual)["passed"]
+    obs["roles"][1]["box"] = Box(600,700,300,100).__dict__
+    assert "product_collision" in evaluate_composition(spec,obs,visual)["hard_failures"]
+    spec, obs, visual = fixture()
+    spec = replace(spec,product=p)  # No locked envelope: old generic inset still fails.
+    obs["spec_sha256"] = spec.digest
+    assert "product_bounds" in evaluate_composition(spec,obs,visual)["hard_failures"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fact,lines", [
+    ("Embalagem com 7 máscaras.",2),
+    ("Embalagem com 7 máscaras e 150 mL de essência.",3),
+])
+async def test_v74_real_wrapping_and_palette_keyline(fact,lines):
+    from app.schemas.creative_director import ReferenceTarget
+    from app.services.creative.templates import get_template
+    from app.services.creative.renderer import PlaywrightRenderer
+    image = Image.new("RGB",(1080,1350),"#14051F")
+    ImageDraw.Draw(image).rectangle((572,650,1036,1279),fill="#cc88ff")
+    data=io.BytesIO();image.save(data,format="PNG")
+    ctx=context(features=[Feature(title=fact)],composited_image_data_uri=
+        "data:image/png;base64,"+base64.b64encode(data.getvalue()).decode())
+    raw=ctx.reference_target.model_dump()
+    raw['grammar']['typography']='condensed'
+    raw['grammar']['headline_paint']=dict(kind="linear_gradient",angle_degrees=90,
+        stops=[dict(offset=0,color="#704394"),dict(offset=.5,color="#F6E4FF"),dict(offset=1,color="#7F36AF")],
+        stroke_color="#2F133F",stroke_width_px=.5,shadow_color="#14051F",shadow_blur_px=5,
+        shadow_offset_y_px=2)
+    raw['grammar']['icon_paint']=dict(kind="luminous_vector",tint="#F3D9FF",glow_color="#A845FF",
+        glow_opacity=.85,glow_radius_px=8,stroke_width_px=1.2,ring_width_px=1,size_scale=1.25)
+    ctx=replace(ctx,reference_target=ReferenceTarget.model_validate(raw))
+    spec=resolve_composition(ctx,product())
+    html=get_template('feature_showcase').build_html(replace(ctx,composition_spec=spec))
+    assert '::before' in html and 'data-ink="Conheça"' in html
+    renderer=PlaywrightRenderer()
+    try:
+        png,diag=await renderer.render_png_with_diagnostics(html=html,width=1080,height=1350)
+    finally:
+        await renderer.close()
+    observed=next(r for r in diag.composition['roles'] if r['key']=='feature_0')
+    assert observed['lines']==lines and not observed['overflow']
+    result=run_creative_qa(png_bytes=png,expected_width=1080,expected_height=1350,
+        diagnostics=diag,logo_expected=False,logo_included=False,composition_spec=spec,
+        base_image=image,product_alpha=product_mask(spec))
+    assert result.passed,result.to_dict()
+    assert result.composition['threshold']==85 and result.composition['score']>=85
+    # Removing the physically rendered keyline from its observation cannot earn
+    # a contrast pass. Neither the 4.5 contrast rule nor weights are lowered.
+    plain=copy.deepcopy(diag.composition)
+    head=next(r for r in plain['roles'] if r['key']=='headline')
+    assert head['foreground']['outline']['color']=='#F6E4FF'
+    head['foreground']=head['foreground']['fills']
+    assert raster_composition_metrics(spec,plain,image,product_mask(spec))['minimum_contrast']<4.5
+    pixels=Image.open(io.BytesIO(png)).convert('RGB').crop((40,100,520,250)).tobytes()
+    assert sum(1 for i in range(0,len(pixels),3) if pixels[i]>220 and pixels[i+1]>190 and pixels[i+2]>230)>20

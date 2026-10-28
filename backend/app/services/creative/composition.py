@@ -11,7 +11,7 @@ import math
 from dataclasses import asdict, dataclass
 from itertools import combinations
 
-VERSION = "build6r-premium-composition-v1"
+VERSION = "build6r-premium-composition-v2"
 STYLE_WEIGHTS = dict(product=20, typography=20, alignment=15, density=15,
                      palette_contrast=10, brand_cta=10, art_separation=10)
 STYLE_THRESHOLD = 85
@@ -109,6 +109,7 @@ class LayoutSpec:
     logo_required: bool
     cta_required: bool
     reference_contract_sha256: str = ""
+    product_safe: Box | None = None
 
     def to_dict(self):
         return asdict(self)
@@ -121,6 +122,8 @@ class LayoutSpec:
                               for r in data["roles"])
         for key in ("product", "logo", "cta", "quiet"):
             data[key] = Box(**data[key])
+        if data.get("product_safe") is not None:
+            data["product_safe"] = Box(**data["product_safe"])
         return cls(**data)
 
     @property
@@ -129,7 +132,7 @@ class LayoutSpec:
                                         ensure_ascii=False).encode()).hexdigest()
 
 
-def resolve_composition(ctx, product: Box) -> LayoutSpec:
+def resolve_composition(ctx, product: Box, *, product_safe: Box | None = None) -> LayoutSpec:
     """Map existing fields to separate roles. Do not trim, rewrite or fill slots."""
     if ctx.reference_target is None:
         raise ValueError("Premium composition requires an explicit reference target")
@@ -193,11 +196,35 @@ def resolve_composition(ctx, product: Box) -> LayoutSpec:
     if profile == "specification":
         items.sort(key=lambda item: item[1] != "FACT_CALLOUT")
     support_start = dict(hero=.34, feature=.32, specification=.36, context=.35, close=.40)
-    support_y = max(.30*h if sparse else support_start[profile]*h,
-                    head_y + head_h + .025*h)
+    support_y = (head_y + head_h + .025*h if sparse else
+                 max(support_start[profile]*h, head_y + head_h + .025*h))
     support_bottom = .85*h if ctx.cta else .93*h
     gap = .016*h
-    weights = [max(2, math.ceil(len(text)/25)) for _, _, text, _ in items]
+    def line_budget(item):
+        key, role, text, _ = item
+        size = (30 if sparse else 26) * scale
+        icon_width = 0
+        if key.startswith("feature_"):
+            paint = g.icon_paint
+            icon_width = (max(w*.039, 24)*paint.size_scale if paint else 38*scale) + 8*scale
+        text_width = max(size, column_w - icon_width - 10*scale)
+        # Word-aware conservative budgeting, not a per-product character limit.
+        # Actual glyph overflow remains independently checked by the browser.
+        lines, occupied = 1, 0.0
+        paragraphs = text.split("\n")
+        for number, paragraph in enumerate(paragraphs):
+            for word in paragraph.split():
+                advance = (len(word)+1)*size*.64
+                if occupied and occupied+advance > text_width:
+                    lines += 1
+                    occupied = 0
+                occupied += advance
+            if number < len(paragraphs)-1:
+                lines += 1
+                occupied = 0
+        return max(3 if role == "FACT_CALLOUT" else 2, lines)
+
+    weights = [line_budget(item) for item in items]
     available = max(1, support_bottom-support_y-gap*max(0, len(items)-1))
     for (key, role, text, paths), weight in zip(items, weights):
         size = (30 if sparse else 26) * scale
@@ -225,7 +252,8 @@ def resolve_composition(ctx, product: Box) -> LayoutSpec:
                       product, tuple(role_list), Box(.80*w, .037*h, .16*w, .043*h),
                       cta, quiet, margin, sparse, bool(ctx.logo_data_uri),
                       profile == "close" or bool(ctx.cta), hashlib.sha256(json.dumps(
-                          target.model_dump(), sort_keys=True).encode()).hexdigest())
+                          target.model_dump(), sort_keys=True).encode()).hexdigest(),
+                      product_safe or Box(margin, margin, w-2*margin, h-2*margin))
 
 
 def union_area(boxes):
@@ -305,7 +333,8 @@ def evaluate_composition(spec: LayoutSpec, measured: dict, visual: dict) -> dict
         headline = next((r for r in observed if r["key"] == "headline"), None)
         checks["hierarchy"] = (not headline or not type_ratios
                                 or headline["font_px"] >= 2.5*max(type_ratios))
-        checks["product_bounds"] = safe.contains(spec.product)
+        checks["product_bounds"] = (canvas.contains(spec.product, tolerance=0)
+                                    and (spec.product_safe or safe).contains(spec.product))
         fraction = spec.product.width/spec.width
         checks["product_scale"] = .25 <= fraction <= .65
         checks["negative_space"] &= not spec.product.intersects(spec.quiet)

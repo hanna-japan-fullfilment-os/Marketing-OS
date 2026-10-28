@@ -165,3 +165,31 @@ def test_pipeline_resolves_before_render_and_preserves_context_on_enrichment(tmp
     assert after["composition_spec_sha256"] == before["composition_spec_sha256"]
     assert after["composition_spec"] == before["composition_spec"]
     assert after["slide_contract"] == plan.model_dump()
+
+
+@pytest.mark.parametrize("text", ["Embalagem com 7 máscaras.",
+    "Embalagem com 7 máscaras e 150 mL de essência."])
+def test_v74_callout_reserves_three_lines_without_copy_or_type_changes(text):
+    ctx = context(features=[Feature(title=text)])
+    first = resolve_composition(ctx,product())
+    second = resolve_composition(ctx,product())
+    fact = next(r for r in first.roles if r.key == "feature_0")
+    assert fact.text == text and fact.font_px == fact.min_font_px == 30
+    assert fact.box.height >= 3*fact.font_px*1.25+8
+    assert fact.max_lines >= 3 and first.digest == second.digest
+    assert fact.box.y > next(r for r in first.roles if r.key == "headline").box.bottom
+
+
+def test_v74_locked_product_has_separate_unchanged_safe_envelope():
+    from app.services.locked_product_pipeline import PRODUCT_BOTTOM_Y_RATIO, PRODUCT_SAFE_TOP_RATIO
+    p = Box(551,648,497,662)
+    w,h = 1080,1350
+    pad = round(w*(1-PRODUCT_BOTTOM_Y_RATIO))
+    top = round(h*PRODUCT_SAFE_TOP_RATIO)
+    bottom = round(h*PRODUCT_BOTTOM_Y_RATIO)
+    allowed = Box(pad,top,w-2*pad,bottom-top)
+    spec = resolve_composition(context(),p,product_safe=allowed)
+    assert spec.product == p and spec.product_safe.contains(p)
+    assert spec.margin == 43.2  # Text and logo policy did not get relaxed.
+    assert p.width/w == pytest.approx(.4601851851851852)
+    assert not allowed.contains(Box(p.x+20,p.y,p.width,p.height))

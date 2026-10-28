@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import io
 import hashlib
+import math
 import re
 from dataclasses import dataclass, field
 
@@ -39,7 +40,7 @@ class CreativeQAResult:
         return result
 
 
-def raster_composition_metrics(spec, measured, base_image):
+def raster_composition_metrics(spec, measured, base_image, product_alpha=None):
     """Sample actual pre-text pixels and the browser's painted text colors.
 
     Local contrast includes the deterministic role panel's alpha. Product-edge
@@ -48,6 +49,9 @@ def raster_composition_metrics(spec, measured, base_image):
     if base_image.size != (spec.width, spec.height):
         raise ValueError("Composition raster dimensions differ")
     image = base_image.convert("RGB")
+    if (product_alpha is None or product_alpha.mode != "L"
+            or product_alpha.size != image.size):
+        raise ValueError("Actual product alpha is required for separation QA")
 
     def luminance(rgb):
         linear = [v/255/12.92 if v/255 <= .04045 else ((v/255+.055)/1.055)**2.4 for v in rgb]
@@ -55,6 +59,19 @@ def raster_composition_metrics(spec, measured, base_image):
 
     contrast = []
     for role in measured["roles"]:
+        foreground = role["foreground"]
+        outline = None
+        if isinstance(foreground, dict):
+            fills = foreground["fills"]
+            outline = foreground["outline"]
+            if (not math.isfinite(outline["width_px"])
+                    or outline["width_px"] < 1.5*spec.width/1080
+                    or outline["color"] not in fills):
+                raise ValueError("Unverified headline keyline")
+        else:
+            fills = foreground
+        if not fills:
+            raise ValueError("Missing measured foreground colors")
         panel = [float(v) for v in re.findall(r"[\d.]+", role["background"])]
         if len(panel) not in (3, 4):
             raise ValueError("Missing measured role background")
@@ -65,23 +82,45 @@ def raster_composition_metrics(spec, measured, base_image):
                 y = max(0, min(spec.height-1, round(b["y"]+b["height"]*fy)))
                 bg = image.getpixel((x, y))
                 bg_l = luminance([panel[i]*alpha+bg[i]*(1-alpha) for i in range(3)])
-                for color in role["foreground"]:
+                for color in fills:
                     fg_l = luminance(ImageColor.getrgb(color))
-                    contrast.append((max(bg_l, fg_l)+.05)/(min(bg_l, fg_l)+.05))
+                    ratio = (max(bg_l, fg_l)+.05)/(min(bg_l, fg_l)+.05)
+                    if outline is not None:
+                        edge_l = luminance(ImageColor.getrgb(outline["color"]))
+                        edge_ratio = (max(bg_l, edge_l)+.05)/(min(bg_l, edge_l)+.05)
+                        # Both fill and a physically rendered keyline are ink.
+                        # A dark fill is legible only when its real edge passes.
+                        ratio = max(ratio, edge_ratio)
+                    contrast.append(ratio)
     if not contrast:
         raise ValueError("No contrast samples")
     hist = image.convert("L").histogram()
-    p = spec.product
+    opaque = product_alpha.point(lambda value: 255 if value >= 128 else 0).getbbox()
+    if opaque is None:
+        raise ValueError("Product has no opaque silhouette")
     differences = []
+    edge_samples = []
     for f in (.15,.35,.55,.75,.9):
-        y = max(0, min(spec.height-1, round(p.y+p.height*f)))
-        for inside, outside in ((p.x+3, p.x-8), (p.right-4, p.right+8)):
-            a = image.getpixel((max(0,min(spec.width-1,round(inside))), y))
-            b = image.getpixel((max(0,min(spec.width-1,round(outside))), y))
+        y = min(spec.height-1, round(opaque[1]+(opaque[3]-opaque[1])*f))
+        row = product_alpha.crop((0,y,spec.width,y+1)).tobytes()
+        occupied = [x for x, alpha in enumerate(row) if alpha >= 128]
+        if not occupied:
+            continue
+        left, right = occupied[0], occupied[-1]
+        for inside, outside in ((min(right,left+3), left-8), (max(left,right-3), right+8)):
+            outside = max(0,min(spec.width-1,outside))
+            a = image.getpixel((inside, y))
+            b = image.getpixel((outside, y))
             differences.append(sum(abs(x-y) for x,y in zip(a,b))/3)
+            edge_samples.append(dict(inside=[inside,y], outside=[outside,y],
+                                     alpha=product_alpha.getpixel((inside,y))))
+    if len(edge_samples) < 6:
+        raise ValueError("Insufficient opaque product-edge samples")
     return dict(minimum_contrast=min(contrast),
                 dark_fraction=sum(hist[:64])/(spec.width*spec.height),
-                product_separation=sum(differences)/len(differences))
+                product_separation=sum(differences)/len(differences),
+                edge_samples=edge_samples,
+                product_alpha_sha256=hashlib.sha256(product_alpha.tobytes()).hexdigest())
 
 
 def run_creative_qa(
@@ -95,6 +134,7 @@ def run_creative_qa(
     text_expected: bool = True,
     composition_spec: LayoutSpec | None = None,
     base_image: Image.Image | None = None,
+    product_alpha: Image.Image | None = None,
 ) -> CreativeQAResult:
     issues: list[str] = []
     checks: dict[str, bool] = {}
@@ -162,10 +202,12 @@ def run_creative_qa(
     if composition_spec is not None:
         measured = diagnostics.composition or {}
         try:
-            visual = raster_composition_metrics(composition_spec, measured, base_image)
+            visual = raster_composition_metrics(composition_spec, measured, base_image, product_alpha)
         except (KeyError, TypeError, ValueError, AttributeError):
             visual = {}
         composition = evaluate_composition(composition_spec, measured, visual)
+        composition["raster_evidence"] = {k: visual[k] for k in
+            ("edge_samples", "product_alpha_sha256") if k in visual}
         composition["render_sha256"] = hashlib.sha256(png_bytes).hexdigest()
         checks["premium_composition"] = composition["passed"]
         issues.extend(f"Composition hard failure: {s}" for s in composition["hard_failures"])
