@@ -86,7 +86,7 @@ def decode_creative_response(response) -> bytes:
     return base64.b64decode(result, validate=True)
 
 
-def direct_images_edit_request(delivery) -> dict:
+def direct_images_edit_request(delivery, *, scene_edit=None) -> dict:
     """SDK multipart translation. Semantic roles survive as a numbered prompt legend."""
     from ..creative_delivery import direct_edit_prompt
     from ..hanna_creative_package import verified_image_bytes
@@ -98,9 +98,33 @@ def direct_images_edit_request(delivery) -> dict:
         extension = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}[asset.mime_type]
         files.append((f"{index+1}_{reference.role}.{extension}", verified_image_bytes(asset), asset.mime_type))
     prompt = direct_edit_prompt(delivery)
+    mask = None
+    if scene_edit is not None:
+        from ...schemas.locked_scene import SceneEditAssets
+        from ..locked_scene import validate_scene_assets, locked_scene_instructions
+        scene_edit = SceneEditAssets.model_validate(scene_edit.model_dump())
+        if scene_edit.plan.delivery != delivery:
+            raise ValueError("Locked scene and creative delivery differ")
+        validate_scene_assets(scene_edit)
+        # Base MUST be first: Images Edit applies the mask to the first image.
+        files.insert(0,("0_LOCKED_PRODUCT_BASE.png",verified_image_bytes(scene_edit.base),"image/png"))
+        mask=("environment-mask.png",verified_image_bytes(scene_edit.environment_mask),"image/png")
+        from ..hanna_creative_package import CREATIVE_DIRECTOR_INSTRUCTIONS, canonical_json
+        # Reuse V10's complete neutral handoff, guide and reference legend, but
+        # replace its generative product/logo ownership with the V11 instruction.
+        # No canonical facts or copy are truncated to satisfy the prompt ceiling.
+        payload = json.loads(prompt.rsplit("\n",1)[1])
+        for reference in payload["image_roles"]:
+            reference["image_index"] += 1
+        payload["image_roles"].insert(0,{"image_index":1,"role":"LOCKED_PRODUCT_BASE",
+            "purpose":"canonical geometry and protected product position","sha256":scene_edit.base.sha256})
+        prompt = CREATIVE_DIRECTOR_INSTRUCTIONS + locked_scene_instructions(scene_edit) + "\n" + canonical_json(payload)
     if not 1 <= len(prompt) <= 32000:
         raise ValueError("Direct edit prompt exceeds official 32000-character limit; no silent truncation")
-    return {**delivery.settings.model_dump(), "prompt": prompt, "image": files}
+    result = {**delivery.settings.model_dump(), "prompt": prompt, "image": files}
+    if mask is not None:
+        result["mask"] = mask
+    return result
 
 
 def decode_direct_edit_response(response) -> bytes:
@@ -1814,11 +1838,13 @@ class OpenAIProvider:
         response = await self._require_client().responses.create(**request)
         return decode_creative_response(response)
 
-    async def compose_direct_creative(self, *, delivery) -> bytes:
+    async def compose_direct_creative(self, *, delivery, scene_edit=None) -> bytes:
         from ..multimodal_cost import estimate_multimodal_cost
         from decimal import Decimal
-        request = direct_images_edit_request(delivery)
-        quote = estimate_multimodal_cost(request["prompt"], delivery.references, delivery.settings)
+        request = direct_images_edit_request(delivery,scene_edit=scene_edit)
+        pricing_inputs = delivery.references if scene_edit is None else (
+            scene_edit.base, scene_edit.environment_mask, *delivery.references)
+        quote = estimate_multimodal_cost(request["prompt"], pricing_inputs, delivery.settings)
         try:
             quote.require_within(Decimal("0.50"))
         except ValueError as exc:
