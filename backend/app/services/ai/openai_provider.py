@@ -86,6 +86,32 @@ def decode_creative_response(response) -> bytes:
     return base64.b64decode(result, validate=True)
 
 
+def direct_images_edit_request(delivery) -> dict:
+    """SDK multipart translation. Semantic roles survive as a numbered prompt legend."""
+    from ..creative_delivery import direct_edit_prompt
+    from ..hanna_creative_package import verified_image_bytes
+    from ...schemas.creative_delivery import PreparedDelivery
+    delivery = PreparedDelivery.model_validate(delivery.model_dump())
+    files = []
+    for index, reference in enumerate(delivery.references):
+        asset = reference.asset
+        extension = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}[asset.mime_type]
+        files.append((f"{index+1}_{reference.role}.{extension}", verified_image_bytes(asset), asset.mime_type))
+    prompt = direct_edit_prompt(delivery)
+    if not 1 <= len(prompt) <= 32000:
+        raise ValueError("Direct edit prompt exceeds official 32000-character limit; no silent truncation")
+    return {**delivery.settings.model_dump(), "prompt": prompt, "image": files}
+
+
+def decode_direct_edit_response(response) -> bytes:
+    if len(response.data or ()) != 1 or not getattr(response.data[0], "b64_json", None):
+        raise ValueError("Exactly one direct edit image result required")
+    result = response.data[0].b64_json
+    if len(result) > 44739244:
+        raise ValueError("Direct edit candidate exceeds byte ceiling")
+    return base64.b64decode(result, validate=True)
+
+
 def creative_review_request(package, candidate: bytes, *, model: str) -> dict:
     from ...schemas.creative_bridge import CreativeReview
     from ..hanna_creative_package import canonical_json, verified_image_bytes
@@ -1787,6 +1813,21 @@ class OpenAIProvider:
         self._require_creative_budget()
         response = await self._require_client().responses.create(**request)
         return decode_creative_response(response)
+
+    async def compose_direct_creative(self, *, delivery) -> bytes:
+        from ..multimodal_cost import estimate_multimodal_cost
+        from decimal import Decimal
+        request = direct_images_edit_request(delivery)
+        quote = estimate_multimodal_cost(request["prompt"], delivery.references, delivery.settings)
+        try:
+            quote.require_within(Decimal("0.50"))
+        except ValueError as exc:
+            raise HardBudgetExceededError(str(exc)) from exc
+        # A future supported estimator also needs existing-ledger admission; a
+        # caller's quote never bypasses the provider's hard-budget safety boundary.
+        self._require_creative_budget()
+        response = await self._require_client().images.edit(**request)
+        return decode_direct_edit_response(response)
 
     async def review_creative(self, *, package, candidate: bytes, model: str):
         request = creative_review_request(package, candidate, model=model)
