@@ -32,9 +32,10 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
+from ..schemas.premium_handoff import PremiumReviewRequest
 from sqlalchemy.orm import Session
 
 from .. import db as db_module
@@ -570,6 +571,9 @@ async def render_campaign_slide(campaign_id: str, payload: SlideRenderRequest, d
     campaign = db.get(Campaign, campaign_id)
     if campaign is None:
         raise HTTPException(404, "Campaign not found.")
+    from ..services.premium_handoff import uses_premium_handoff
+    if uses_premium_handoff(db, campaign):
+        raise HTTPException(409, "Premium production uses external handoff/import/review; automated rendering is closed.")
     brand = db.get(Brand, campaign.brand_id)
     if brand is None:
         raise HTTPException(404, "Brand not found.")
@@ -776,6 +780,14 @@ def get_campaign_slide_image(campaign_id: str, slide_number: int, db: Session = 
     campaign = db.get(Campaign, campaign_id)
     if campaign is None:
         raise HTTPException(404, "Campaign not found.")
+    from ..services.premium_handoff import uses_premium_handoff
+    from ..services.premium_ingestion import require_publishing_ready
+    if uses_premium_handoff(db, campaign):
+        result = require_publishing_ready(db, campaign)
+        matches = [s for s in result["slides"] if s["slide_number"] == slide_number]
+        if len(matches) != 1:
+            raise HTTPException(409, "Select an unambiguous locale/channel slide in premium creative review.")
+        return FileResponse(matches[0]["file_path"])
     slide = next((s for s in campaign.slides if s.slide_number == slide_number), None)
     if slide is None or not slide.rendered_asset_path:
         raise HTTPException(404, "This slide has not been rendered yet.")
@@ -786,6 +798,14 @@ def get_campaign_slide_image(campaign_id: str, slide_number: int, db: Session = 
 
 
 def _require_current_creative_qa(db, campaign):
+    from ..services.premium_handoff import uses_premium_handoff
+    from ..services.premium_ingestion import require_publishing_ready
+    if uses_premium_handoff(db,campaign):
+        try:
+            require_publishing_ready(db,campaign)
+            return
+        except (ValueError,OSError) as exc:
+            raise HTTPException(409,str(exc)) from exc
     from ..services.qa_engine import assert_campaign_creative_qa_current
     try:
         assert_campaign_creative_qa_current(db, campaign)
@@ -874,6 +894,9 @@ async def generate_campaign(
     if not output_root:
         raise HTTPException(400, "OUTPUT_ROOT is not configured. Set it in Settings first.")
 
+    from ..services.premium_handoff import uses_premium_handoff
+    if uses_premium_handoff(db, campaign):
+        use_ai_background = detect_product_zone = recreate_with_ai = False
     local = local_routing_enabled() and (use_ai_background or recreate_with_ai)
     if local and (recreate_with_ai or detect_product_zone or quality_mode == "draft"):
         raise HTTPException(400, "Local mode requires prepared background-only high-quality generation")
@@ -939,6 +962,104 @@ def _require_output_root(effective: dict) -> str:
     if not output_root:
         raise HTTPException(400, "OUTPUT_ROOT is not configured. Set it in Settings first.")
     return output_root
+
+
+def _premium_campaign(db, campaign_id):
+    from ..services.premium_handoff import uses_premium_handoff
+    campaign = _require_campaign(db, campaign_id)
+    if not uses_premium_handoff(db, campaign):
+        raise HTTPException(409, "This brand has not selected external premium creative production.")
+    return campaign
+
+
+@router.get("/{campaign_id}/premium-creative")
+def premium_creative_status(campaign_id: str, db: Session = Depends(get_db)):
+    from ..services.premium_handoff import build_campaign_handoff, uses_premium_handoff
+    from ..services.premium_ingestion import readiness
+    campaign = _require_campaign(db, campaign_id)
+    if not uses_premium_handoff(db, campaign):
+        return {"enabled": False}
+    try:
+        handoff = build_campaign_handoff(db, campaign)
+        return {"enabled": True, "briefs": [s.model_dump(mode="json") for s in handoff.slides],
+                "readiness": readiness(db, campaign, handoff=handoff)}
+    except (ValueError, OSError) as exc:
+        return {"enabled": True, "blocked": str(exc)}
+
+
+@router.post("/{campaign_id}/premium-creative/export")
+def premium_creative_export(campaign_id: str, db: Session = Depends(get_db)):
+    from ..services.premium_ingestion import prepare_campaign_export
+    campaign = _premium_campaign(db, campaign_id)
+    root = _require_output_root(settings_store.get_effective_settings(db))
+    try:
+        archive, _ = prepare_campaign_export(db, campaign, root)
+        db.commit()
+        return FileResponse(archive, media_type="application/zip", filename=archive.name)
+    except (ValueError, OSError) as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/{campaign_id}/premium-creative/import")
+async def premium_creative_import(campaign_id: str, slide_key: str = Form(...),
+                                  expected_version: int = Form(...), image: UploadFile = File(...),
+                                  db: Session = Depends(get_db)):
+    from ..services.premium_ingestion import import_slide
+    campaign = _premium_campaign(db, campaign_id)
+    root = _require_output_root(settings_store.get_effective_settings(db))
+    try:
+        data = await image.read(20 * 1024 * 1024 + 1)
+        result = import_slide(db, campaign, root, slide_key=slide_key, filename=image.filename or "slide",
+                              data=data, expected_version=expected_version)
+        db.commit()
+        return {"version": result["version"]}
+    except (ValueError, OSError) as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc)) from exc
+    finally:
+        await image.close()
+
+
+@router.post("/{campaign_id}/premium-creative/review")
+def premium_creative_review(campaign_id: str, payload: PremiumReviewRequest, db: Session = Depends(get_db)):
+    from ..services.premium_ingestion import review_slide
+    campaign = _premium_campaign(db, campaign_id)
+    root = _require_output_root(settings_store.get_effective_settings(db))
+    try:
+        result = review_slide(db, campaign, root, payload)
+        db.commit()
+        return {"version": result["version"]}
+    except (ValueError, OSError) as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/{campaign_id}/premium-creative/revision")
+def premium_creative_revision(campaign_id: str, slide_key: str, db: Session = Depends(get_db)):
+    from ..services.premium_ingestion import export_revision
+    campaign = _premium_campaign(db, campaign_id)
+    root = _require_output_root(settings_store.get_effective_settings(db))
+    try:
+        archive = export_revision(db, campaign, root, slide_key)
+        return FileResponse(archive, media_type="application/zip", filename="HANNA_SLIDE_REVISION.zip")
+    except (ValueError, OSError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.get("/{campaign_id}/premium-creative/preview")
+def premium_creative_preview(campaign_id: str, slide_key: str, db: Session = Depends(get_db)):
+    from ..services.premium_ingestion import _read_state
+    campaign = _premium_campaign(db, campaign_id)
+    _, state = _read_state(db, campaign)
+    record = state["slides"].get(slide_key)
+    if record is None:
+        raise HTTPException(404, "Imported slide not found")
+    import hashlib
+    path = Path(record["file_path"])
+    if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != record["sha256"]:
+        raise HTTPException(409, "Imported slide bytes changed")
+    return FileResponse(path)
 
 
 def _build_autopilot_config(
@@ -1076,6 +1197,9 @@ async def generate_campaign_visuals(
     campaign = _require_campaign(db, campaign_id)
     effective = settings_store.get_effective_settings(db)
     output_root = _require_output_root(effective)
+    from ..services.premium_handoff import uses_premium_handoff
+    if uses_premium_handoff(db, campaign):
+        use_ai_background = detect_product_zone = recreate_with_ai = False
     try:
         check_visuals_stage_prerequisite(db, campaign.id)
     except ValueError as exc:
@@ -1151,6 +1275,9 @@ async def generate_campaign_qa(
     if use_ai_background and local_routing_enabled():
         raise HTTPException(400, "Local image QA regeneration is not authorized")
     campaign = _require_campaign(db, campaign_id)
+    from ..services.premium_handoff import uses_premium_handoff
+    if uses_premium_handoff(db, campaign):
+        raise HTTPException(409, "Use premium human product/copy review; legacy aesthetic QA/re-rendering is closed.")
     effective = settings_store.get_effective_settings(db)
     output_root = _require_output_root(effective)
     if not get_platform_campaign_variants(db, campaign.id):
@@ -1360,6 +1487,9 @@ async def submit_campaign_review(campaign_id: str, payload: ReviewActionRequest,
     if payload.action == "REQUEST_REVISION" and payload.use_ai_background and local_routing_enabled():
         raise HTTPException(400, "Local image revision is not authorized")
     campaign = _require_campaign(db, campaign_id)
+    from ..services.premium_handoff import uses_premium_handoff
+    if payload.action == "REQUEST_REVISION" and uses_premium_handoff(db, campaign):
+        raise HTTPException(409, "Reject the imported premium slide and export its external revision handoff.")
     if payload.level not in LEVELS:
         raise HTTPException(400, f"level must be one of {LEVELS}.")
     if payload.action == "APPROVE":
@@ -1588,6 +1718,9 @@ def create_campaign_publication(campaign_id: str, payload: PublicationCreate, db
             400,
             f"Campaign must be approved before logging a publication (current status: {campaign.status}).",
         )
+    from ..services.premium_handoff import uses_premium_handoff
+    if uses_premium_handoff(db, campaign):
+        _require_current_creative_qa(db, campaign)
 
     pub = Publication(
         campaign_id=campaign_id,
@@ -1671,8 +1804,18 @@ async def auto_publish_campaign(campaign_id: str, payload: AutoPublishRequest, d
                 f"{public_base_url.rstrip('/')}/api/campaigns/{campaign_id}/slides/{payload.slide_number}/image"
             )
 
+    from ..services.premium_handoff import uses_premium_handoff
+    from ..services.premium_ingestion import require_publishing_ready
+    if uses_premium_handoff(db, campaign):
+        ready = require_publishing_ready(db, campaign)
+        matches = [s for s in ready["slides"] if s["slide_number"] == payload.slide_number]
+        if len(matches) != 1:
+            raise HTTPException(409, "Premium publishing requires an unambiguous locale/channel slide.")
+        publish_path = Path(matches[0]["file_path"])
+    else:
+        publish_path = None
     slide = next((s for s in campaign.slides if s.slide_number == payload.slide_number), None)
-    if slide is None or not slide.rendered_asset_path or not Path(slide.rendered_asset_path).exists():
+    if publish_path is None and (slide is None or not slide.rendered_asset_path or not Path(slide.rendered_asset_path).exists()):
         raise HTTPException(400, f"Slide {payload.slide_number} has not been rendered yet.")
 
     campaign_copy = get_campaign_copy(db, campaign.id)
@@ -1683,7 +1826,7 @@ async def auto_publish_campaign(campaign_id: str, payload: AutoPublishRequest, d
     copy = PublishCopy(caption=caption, hashtags=hashtags)
     provider = MetaPublishingProvider(access_token, api_version=get_settings().meta_graph_api_version)
 
-    result = await provider.publish(target=target, assets=[Path(slide.rendered_asset_path)], copy=copy)
+    result = await provider.publish(target=target, assets=[publish_path or Path(slide.rendered_asset_path)], copy=copy)
     if not result.success:
         raise HTTPException(502, result.error or "Publish failed for an unknown reason.")
 

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { ComponentType } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { BASE_URL } from '../api/client'
+import PremiumCreativeHandoff from '../components/PremiumCreativeHandoff'
 import { useBrand } from '../components/BrandContext'
 import {
   useAddMetric,
@@ -201,6 +202,7 @@ export default function CampaignDetail() {
         )}
       </div>
 
+      <PremiumCreativeHandoff campaignId={campaign.id} />
       <Card className="space-y-3 p-5">
         <div className="flex items-start justify-between gap-4">
           <div>

@@ -4731,6 +4731,15 @@ async def run_visuals_stage(
     anything else.
     """
     # BUILD6R_IMMUTABLE_PRODUCT_LAYER_RUN_VISUALS_GUARD
+    from .premium_handoff import uses_premium_handoff
+    from .premium_ingestion import prepare_campaign_export
+    premium_campaign=db.get(Campaign,campaign_id)
+    if premium_campaign is not None and uses_premium_handoff(db,premium_campaign):
+        prepare_campaign_export(db,premium_campaign,config.output_root)
+        db.commit()
+        if progress:
+            progress.set_progress(100,"Premium creative handoff ready — external production and human review required")
+        return premium_campaign
     # Full AI recreation changes product/package pixels.
     # Product campaigns must generate only the scene/background
     # and composite the authentic source product afterward.
