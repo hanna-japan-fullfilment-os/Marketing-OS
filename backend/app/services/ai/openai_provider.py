@@ -91,7 +91,13 @@ def direct_images_edit_request(delivery, *, scene_edit=None) -> dict:
     from ..creative_delivery import direct_edit_prompt
     from ..hanna_creative_package import verified_image_bytes
     from ...schemas.creative_delivery import PreparedDelivery
-    delivery = PreparedDelivery.model_validate(delivery.model_dump())
+    if getattr(delivery,"native_final_size",False):
+        from ...schemas.locked_scene import NativePreparedDelivery
+        delivery = NativePreparedDelivery.model_validate(delivery.model_dump())
+        if scene_edit is None:
+            raise ValueError("Native V11 delivery requires the locked scene contract")
+    else:
+        delivery = PreparedDelivery.model_validate(delivery.model_dump())
     files = []
     for index, reference in enumerate(delivery.references):
         asset = reference.asset

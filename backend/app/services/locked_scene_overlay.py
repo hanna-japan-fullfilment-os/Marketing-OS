@@ -6,7 +6,7 @@ from pathlib import Path
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 from .hanna_creative_package import verified_image_bytes
-from .locked_scene import pixel_digest, restore_after_crop, require_product_integrity
+from .locked_scene import pixel_digest, restore_scene, require_product_integrity
 
 
 def luminance(rgb):
@@ -103,11 +103,11 @@ def canonical_logo_layer(package,guide):
     layer.paste(image,(l,t+(b-t-image.height)//2))
     return layer,{**provenance,"source_asset_id":asset.asset_id,"canonical_asset_sha256":asset.sha256,
         "final_logo_box":layer.getchannel("A").getbbox(),"logo_layer_pixel_sha256":pixel_digest(layer),
-        "rendered_after_crop":True,"no_later_crop":True}
+        "rendered_after_crop":guide.final_crop is not None,"rendered_in_final_coordinates":True,"no_later_crop":True}
 
 
 def finish_locked_scene(assets,native_bytes,*,fonts):
-    scene,canvas,product,ring=restore_after_crop(assets,native_bytes)
+    scene,canvas,product,ring=restore_scene(assets,native_bytes)
     package=assets.plan.delivery.package
     exclusion=product.getchannel("A").point(lambda n:255 if n else 0)
     exclusion=ImageChops.lighter(exclusion,ring)  # preserve environmental grounding too
@@ -135,7 +135,8 @@ def finish_locked_scene(assets,native_bytes,*,fonts):
     buffer=io.BytesIO()
     canvas.save(buffer,"PNG")
     return buffer.getvalue(),{**integrity,"text":audits,"logo":logo_audit,"final_size":[1024,1280],
-        "compositing_order":["final_crop","canonical_product_restore","deterministic_text","deterministic_logo","canonical_cta","QA"],
+        "compositing_order":["native_final_scene" if assets.plan.delivery.guide.final_crop is None else "final_crop",
+            "canonical_product_restore","deterministic_text","deterministic_logo","canonical_cta","QA"],
         "text_product_overlap_count":0,"edge_violation_count":0,"generic_rectangular_panel_fallback":False,
         "deterministic_shadow_added":False,"visual_acceptance":"NOT_ESTABLISHED_BY_PIXEL_QA"}
 

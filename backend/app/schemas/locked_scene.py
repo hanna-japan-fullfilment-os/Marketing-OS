@@ -1,8 +1,41 @@
 """Bounded V11 locked-product edit contract; not a general renderer layout."""
+from typing import Literal
+
 from pydantic import Field, model_validator
 
 from .creative_bridge import Contract, CreativeImage, CreativeReview
-from .creative_delivery import PreparedDelivery
+from .creative_delivery import PreparedDelivery, CompositionGuide, DirectEditSettings
+
+
+class NativeSunburstSettings(DirectEditSettings):
+    """Official Sunburst dimensions, not a legacy three-size enum."""
+    size: str = Field(default="1024x1280", pattern=r"^[1-9]\d*x[1-9]\d*$")
+
+    @model_validator(mode="after")
+    def provider_dimensions(self):
+        width,height=map(int,self.size.split("x"))
+        if (width%16 or height%16 or max(width,height)>3840
+                or max(width,height)>3*min(width,height)
+                or not 655360<=width*height<=8294400):
+            raise ValueError("Unsupported official Sunburst dimensions")
+        return self
+
+
+class NativeCompositionGuide(CompositionGuide):
+    generation_size: Literal["1024x1280"] = "1024x1280"
+    final_crop: None = None
+
+
+class NativePreparedDelivery(PreparedDelivery):
+    native_final_size: Literal[True] = True
+    guide: NativeCompositionGuide
+    settings: NativeSunburstSettings = NativeSunburstSettings()
+
+    @model_validator(mode="after")
+    def final_dimensions(self):
+        if self.settings.size!=self.guide.generation_size:
+            raise ValueError("Native generation must equal final canvas size")
+        return self
 
 
 class LockedSceneConfig(Contract):
@@ -18,7 +51,7 @@ class LockedSceneConfig(Contract):
 
 
 class LockedScenePlan(Contract):
-    delivery: PreparedDelivery
+    delivery: NativePreparedDelivery | PreparedDelivery
     master_asset_id: str
     master_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     source_alpha_bbox: tuple[int, int, int, int]
@@ -39,9 +72,10 @@ class SceneEditAssets(Contract):
 
     @model_validator(mode="after")
     def native(self):
+        expected=tuple(map(int,self.plan.delivery.guide.generation_size.split("x")))
         for asset in (self.base, self.environment_mask, self.product_layer,
                       self.protection_mask, self.grounding_ring):
-            if (asset.width, asset.height) != (1024,1536) or asset.mime_type != "image/png":
+            if (asset.width, asset.height) != expected or asset.mime_type != "image/png":
                 raise ValueError("Scene assets must match the native edit canvas")
         if self.base.role != "base" or self.environment_mask.role != "mask":
             raise ValueError("Base/mask roles must remain explicit")

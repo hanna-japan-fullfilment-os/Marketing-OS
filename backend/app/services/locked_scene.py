@@ -7,7 +7,8 @@ from pathlib import Path
 from PIL import Image, ImageChops
 
 from ..schemas.creative_delivery import CompositionGuide, PreparedDelivery
-from ..schemas.locked_scene import LockedSceneConfig, LockedScenePlan, SceneEditAssets
+from ..schemas.locked_scene import (LockedSceneConfig, LockedScenePlan, SceneEditAssets,
+    NativePreparedDelivery, NativeCompositionGuide, NativeSunburstSettings)
 from .hanna_creative_package import image_record, verified_image_bytes, canonical_json
 from .locked_product_pipeline import inspect_locked_product_master_candidate
 
@@ -43,6 +44,19 @@ def resolve_locked_delivery(delivery):
     return PreparedDelivery.model_validate({**delivery.model_dump(), "guide": guide})
 
 
+def native_final_size_delivery(delivery):
+    """Keep all final geometry; only remove the legacy generation/crop wrapper."""
+    guide=NativeCompositionGuide.model_validate({**delivery.guide.model_dump(),
+        "generation_size":"1024x1280","final_crop":None})
+    return NativePreparedDelivery.model_validate({**delivery.model_dump(),"native_final_size":True,
+        "guide":guide,"settings":NativeSunburstSettings()})
+
+
+def final_plane(image,delivery):
+    # Native mode performs no crop, remapping, resize or stretching.
+    return image.copy() if isinstance(delivery,NativePreparedDelivery) else image.crop(delivery.guide.final_crop)
+
+
 def canonical_product_layer(delivery, *, master_asset_id, config=None):
     """Only an existing approved RGBA master; no segmentation or reconstruction."""
     if delivery.package.text_mode!="negative_space_overlay":
@@ -65,9 +79,9 @@ def canonical_product_layer(delivery, *, master_asset_id, config=None):
     cutout = cutout.resize(size, Image.Resampling.LANCZOS)
     x,y = r-size[0], b-size[1]
     final_box=(x,y,x+size[0],y+size[1])
-    offset=delivery.guide.final_crop[1]
+    offset=0 if isinstance(delivery,NativePreparedDelivery) else delivery.guide.final_crop[1]
     native_box=(x,y+offset,x+size[0],y+size[1]+offset)
-    layer=Image.new("RGBA",(1024,1536))
+    layer=Image.new("RGBA",tuple(map(int,delivery.guide.generation_size.split("x"))))
     # Paste RGBA without applying alpha twice.
     layer.paste(cutout,(x,y+offset))
     plan=LockedScenePlan(delivery=delivery,master_asset_id=asset.asset_id, master_sha256=asset.sha256,
@@ -89,7 +103,7 @@ def scene_layers(plan,layer):
     mask=Image.new("RGBA",layer.size,(255,255,255,0))
     mask.putalpha(protected)  # opaque protects; transparent is editable
     # Fail before generation if any final deterministic region intersects alpha.
-    final_protected=ImageChops.lighter(protected,ring).crop(plan.delivery.guide.final_crop)
+    final_protected=final_plane(ImageChops.lighter(protected,ring),plan.delivery)
     reserved=[r.box for r in plan.delivery.package.text_regions]+[plan.delivery.guide.logo_region]
     for index,box in enumerate(reserved):
         if final_protected.crop(box).getbbox():
@@ -137,6 +151,8 @@ def validate_scene_assets(assets):
 
 def locked_scene_instructions(assets):
     plan=assets.plan
+    native=isinstance(plan.delivery,NativePreparedDelivery)
+    stage="in native final coordinates; no crop or resize" if native else "AFTER the final crop"
     return ("\nV11 LOCKED-PRODUCT SCENE EDIT overrides generative ownership. The FIRST image is the locked base; "
         "the mask protects the actual product silhouette. The visible canonical product already occupies "
         "its exact final position. Design the complete environment AROUND that upright product, "
@@ -146,28 +162,34 @@ def locked_scene_instructions(assets):
         "in its editable grounding ring. No generic extra drop shadow; no duplicate products/shadows. "
         "Illuminate the environment consistently with the existing real product: "+plan.config.light_direction+". "
         "Generate NO final headline, facts, CTA, brand emblem or logo wordmark. Text and logo are "
-        "deterministic AFTER the final crop. Keep their actual quiet regions useful, not empty UI cards. "
-        "Masking is guidance only; canonical product pixels will be restored by alpha AFTER crop. "
+        "deterministic "+stage+". Keep their actual quiet regions useful, not empty UI cards. "
+        "Masking is guidance only; canonical product pixels will be restored by alpha "+stage+". "
         "Do not fill silhouette holes or its transparent surroundings with replacement artwork. "
         +canonical_json({"final_product_box":plan.final_product_box,"native_product_box":plan.native_product_box,
             "native_product_dimensions":[plan.native_product_box[2]-plan.native_product_box[0],plan.native_product_box[3]-plan.native_product_box[1]],
             "orientation":"upright, no rotation", "protection_margin":plan.config.protection_margin,
             "grounding_width":plan.config.grounding_width,"final_crop":plan.delivery.guide.final_crop,
+            "generation_size":plan.delivery.guide.generation_size,"coordinate_space":"FINAL_1024x1280" if native else "FINAL_WITH_PRECOMPUTED_NATIVE_OFFSET",
             "logo_region":plan.delivery.guide.logo_region,"text_regions":[r.model_dump() for r in plan.delivery.package.text_regions]}))
 
 
-def restore_after_crop(assets,native_bytes):
+def restore_scene(assets,native_bytes):
     layer,layers=validate_scene_assets(assets)
     if not native_bytes or len(native_bytes)>32*1024*1024:
         raise ValueError("Invalid generated scene size")
     with Image.open(io.BytesIO(native_bytes)) as image:
         image.load()
-        if image.size!=(1024,1536) or image.format!="PNG":
+        if image.size!=tuple(map(int,assets.plan.delivery.guide.generation_size.split("x"))) or image.format!="PNG":
             raise ValueError("Native scene dimensions/format mismatch")
-        scene=image.convert("RGBA").crop(assets.plan.delivery.guide.final_crop)
-    final_layer=layer.crop(assets.plan.delivery.guide.final_crop)
+        scene=final_plane(image.convert("RGBA"),assets.plan.delivery)
+    final_layer=final_plane(layer,assets.plan.delivery)
     restored=Image.alpha_composite(scene,final_layer)
-    return scene,restored,final_layer,layers["grounding-ring"].crop(assets.plan.delivery.guide.final_crop)
+    return scene,restored,final_layer,final_plane(layers["grounding-ring"],assets.plan.delivery)
+
+
+def restore_after_crop(assets,native_bytes):
+    """Legacy/debug API retained; native delivery uses restore_scene directly."""
+    return restore_scene(assets,native_bytes)
 
 
 def require_product_integrity(final,scene,layer,ring):
