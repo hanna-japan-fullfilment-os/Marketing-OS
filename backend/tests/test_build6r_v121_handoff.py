@@ -9,13 +9,29 @@ import pytest
 
 from test_build6r_v101_creative_package import package
 from app.services.premium_handoff import assemble_handoff, export_handoff, uses_premium_handoff
+from app.services.marketing_claims import bind_handoff
+
+
+def approved_fixture_library(monkeypatch):
+    """Isolated reviewed catalog; never approves the production library."""
+    from app.services import marketing_claims
+    original = marketing_claims.load_library
+    def reviewed(product_id):
+        return original(product_id).model_copy(update={"owner_library_review_status": "APPROVED",
+            "brazil_market_review_status": "CLEARED", "brazil_clearance_evidence": "Isolated test-only regulatory fixture; no production approval"})
+    monkeypatch.setattr(marketing_claims, "load_library", reviewed)
+
+
+@pytest.fixture(autouse=True)
+def reviewed_catalog(monkeypatch):
+    approved_fixture_library(monkeypatch)
 
 
 def handoff(tmp_path, campaign=None):
     campaign = campaign or SimpleNamespace(id="campaign", objective="awareness", angle="Japan skincare", hook="", audience="Brazil")
-    first = package(tmp_path)
+    first = package(tmp_path, product_id="a5ea2272a1f89d743c089461bb2fb50f", product_name="LuLuLun Hydra EX Mask 7 Sheets")
     second = first.model_copy(update={"slide_id": "slide-2", "slide_role": "cta"})
-    return assemble_handoff(campaign, [(1, first), (2, second)])
+    return bind_handoff(assemble_handoff(campaign, [(1, first), (2, second)]))
 
 
 def test_full_campaign_and_individual_briefs_preserve_authority(tmp_path):

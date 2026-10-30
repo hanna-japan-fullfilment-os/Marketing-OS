@@ -21,6 +21,11 @@ class PremiumSlideBrief(Contract):
     locale: str
     channel: str
     canonical_package_sha256: str
+    approved_claim_ids: dict[str, str] = Field(default_factory=dict)
+    mandatory_qualifiers: dict[str, str] = Field(default_factory=dict)
+    benefit_hierarchy: tuple[str, ...] = ()
+    claim_library_sha256: str = ""
+    creative_brief_status: Literal["DRAFT", "CREATIVE_READY"] = "DRAFT"
 
 
 class PremiumCreativeHandoff(Contract):

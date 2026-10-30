@@ -11,6 +11,12 @@ from app.models import Brand, Campaign
 from app.schemas.premium_handoff import PremiumReviewRequest
 from app.services import premium_ingestion as service
 from test_build6r_v121_handoff import handoff
+from test_build6r_v121_handoff import approved_fixture_library
+
+
+@pytest.fixture(autouse=True)
+def reviewed_catalog(monkeypatch):
+    approved_fixture_library(monkeypatch)
 
 
 def image_bytes(color="purple", size=(120, 150)):

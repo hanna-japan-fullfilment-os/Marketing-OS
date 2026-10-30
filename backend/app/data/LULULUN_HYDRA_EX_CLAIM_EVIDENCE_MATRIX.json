@@ -1,0 +1,1585 @@
+{
+  "version": 1,
+  "product_id": "a5ea2272a1f89d743c089461bb2fb50f",
+  "product_name": "LuLuLun Hydra EX Mask 7 Sheets",
+  "variant": "EX 1FS / 7 sheets / 150 mL",
+  "jan": "4580794010660",
+  "researched_at": "2026-10-30",
+  "reviewed_by": "V12.4 evidence and Portuguese editorial review",
+  "owner_library_review_status": "PENDING",
+  "research_categories": {
+    "PRODUCT_POSITIONING": true,
+    "FORMULA": true,
+    "INGREDIENTS": true,
+    "SENSORY_FEATURES": true,
+    "MATERIAL/SHEET_TECHNOLOGY": true,
+    "USAGE": true,
+    "PACK_FACTS": true,
+    "MANUFACTURER_BENEFITS": true,
+    "WARNINGS/QUALIFIERS": true,
+    "BRAZIL_CLAIM_RISK": true,
+    "COMPARATIVE/STUDY_CLAIMS": true
+  },
+  "source_notes": {
+    "primary_product": "https://lululun.com/shop/products/hydraexs-2310",
+    "manufacturer_launch": "https://prtimes.jp/main/html/rd/p/000000182.000017608.html",
+    "manufacturer_series": "https://lululun.com/shop/pages/hydra",
+    "brazil_regulatory": "https://anvisalegis.datalegis.net/action/ActionDatalegis.php?acao=abrirTextoAto&numeroAto=00000907&tipo=RDC&valorAno=2024&orgao=RDC/DC/ANVISA/MS&seqAto=000&cod_menu=9431&cod_modulo=310&link=S",
+    "regulatory_scope": "RDC 907/2024, arts. 5, 8, 9, 12: substantiation and no misleading/therapeutic labeling. This library is not Anvisa authorization or proof of Brazilian product regularization.",
+    "packaging": "Exact owner-supplied purple 7-sheet pouch photograph and approved master; no green CX or 28-sheet benefit transfer. Existing physical award-mark permission is unchanged.",
+    "scientific_context": "Ingredient context is not used as finished-product clinical evidence. No independent exact-product trial dossier established; no efficacy extrapolation.",
+    "language_review": "Natural pt-BR editorial assessment; not represented as an independent human native-speaker certification. Owner review of the complete library and planned briefs remains pending.",
+    "human_origin_regulatory_rule": "https://anvisalegis.datalegis.net/action/ActionDatalegis.php?acao=abrirTextoAto&cod_menu=9431&cod_modulo=310&link=S&numeroAto=00000529&orgao=RDC/DC/ANVISA/MS&seqAto=000&tipo=RDC&valorAno=2021",
+    "human_origin_assessment": "Consolidated RDC 529/2021 Annex entry 416 lists cells, tissues and human-origin products. Manufacturer declares human adipose-derived exosomes. Exact-product Brazilian assessment/regularization is not established. All Brazil creative readiness remains held even after owner copy approval; no definitive legal ruling on the individual SKU is asserted here."
+  },
+  "prohibited_language": [
+    "renovação celular",
+    "regeneração celular",
+    "regenera a pele",
+    "rejuvenesce células",
+    "clareia a pele",
+    "whitening",
+    "branqueamento",
+    "elimina manchas",
+    "trata melasma",
+    "estimula produção de colágeno",
+    "reconstrói a barreira",
+    "repara a barreira",
+    "efeito imediato",
+    "resultados garantidos",
+    "cura",
+    "cicatriza",
+    "ação farmacológica",
+    "tratamento de doença",
+    "luminosidade imediata",
+    "reduz inflamação",
+    "células-tronco vivas",
+    "sem parabenos"
+  ],
+  "claims": [
+    {
+      "claim_id": "ex-hydration",
+      "source_language_text_or_meaning": "Manufacturer positions EX as moisturizing daily cosmetic care.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_LAUNCH",
+      "source_reference": "https://prtimes.jp/main/html/rd/p/000000182.000017608.html",
+      "evidence_scope": "PRODUCT_BENEFIT",
+      "claim_class": "APPROVED_DIRECT",
+      "approved_pt_br_wording": {
+        "SHORT": "Hidratação",
+        "STANDARD": "Ajuda a manter a pele hidratada.",
+        "EDITORIAL": "Cuidado diário que ajuda a manter a pele hidratada."
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "resultados garantidos",
+        "efeito imediato"
+      ],
+      "notes": "Standard wording explicitly approved by owner in the benefit-led revision exception; other strengths editorially reviewed, library owner review pending.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "hydration",
+      "benefit_priority": "PRIMARY",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "ex-softness",
+      "source_language_text_or_meaning": "Soft, conforming Melty Feel Sheet sensory positioning.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_LAUNCH",
+      "source_reference": "https://prtimes.jp/main/html/rd/p/000000182.000017608.html",
+      "evidence_scope": "PRODUCT_BENEFIT",
+      "claim_class": "APPROVED_DIRECT",
+      "approved_pt_br_wording": {
+        "SHORT": "Maciez",
+        "STANDARD": "Tecido Melty Feel Sheet com toque suave.",
+        "EDITORIAL": "O tecido Melty Feel Sheet oferece um toque suave durante o cuidado."
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "resultados garantidos",
+        "efeito imediato"
+      ],
+      "notes": "Exact EX 1FS evidence; factual presence is not finished-product efficacy.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "softness/sensory experience",
+      "benefit_priority": "SECONDARY",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "ex-radiance",
+      "source_language_text_or_meaning": "Manufacturer radiance meaning: helping prevent dull appearance attributable to dryness.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_LAUNCH",
+      "source_reference": "https://prtimes.jp/main/html/rd/p/000000182.000017608.html",
+      "evidence_scope": "PRODUCT_BENEFIT",
+      "claim_class": "APPROVED_WITH_QUALIFIER",
+      "approved_pt_br_wording": {
+        "SHORT": "Luminosidade",
+        "STANDARD": "Ajuda a prevenir a aparência opaca causada pelo ressecamento.",
+        "EDITORIAL": "Cuidado para uma aparência luminosa: ajuda a prevenir a aparência opaca causada pelo ressecamento."
+      },
+      "mandatory_qualifier": "causada pelo ressecamento",
+      "prohibited_variants": [
+        "clareia a pele",
+        "whitening",
+        "elimina manchas",
+        "luminosidade imediata"
+      ],
+      "notes": "The short title cannot stand alone: the full dryness-qualified visible supporting copy is mandatory. No whitening inference.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "radiance",
+      "benefit_priority": "PRIMARY",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "ex-hydration-radiance-heading",
+      "source_language_text_or_meaning": "Composite owner-approved heading combining moisturizing and qualified radiance.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_LAUNCH",
+      "source_reference": "https://prtimes.jp/main/html/rd/p/000000182.000017608.html",
+      "evidence_scope": "PRODUCT_BENEFIT",
+      "claim_class": "APPROVED_WITH_QUALIFIER",
+      "approved_pt_br_wording": {
+        "SHORT": "HIDRATAÇÃO E LUMINOSIDADE"
+      },
+      "mandatory_qualifier": "causada pelo ressecamento",
+      "prohibited_variants": [
+        "clareia a pele",
+        "whitening",
+        "elimina manchas",
+        "luminosidade imediata"
+      ],
+      "notes": "Owner-approved composite title. Requires visible approved dryness qualifier elsewhere in the same slide, never a freestanding unqualified effect.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "differentiation",
+      "benefit_priority": "PRIMARY",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "ex-glutathione",
+      "source_language_text_or_meaning": "Glutathione appears in the EX ingredient list.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_PRODUCT",
+      "source_reference": "https://lululun.com/shop/products/hydraexs-2310",
+      "evidence_scope": "INGREDIENT_PRESENCE",
+      "claim_class": "FACT_ONLY",
+      "approved_pt_br_wording": {
+        "STANDARD": "Com glutationa."
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "resultados garantidos",
+        "efeito imediato"
+      ],
+      "notes": "Exact EX 1FS evidence; factual presence is not finished-product efficacy.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "ingredients/formula",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "ex-arbutin",
+      "source_language_text_or_meaning": "Arbutin appears in the EX ingredient list.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_PRODUCT",
+      "source_reference": "https://lululun.com/shop/products/hydraexs-2310",
+      "evidence_scope": "INGREDIENT_PRESENCE",
+      "claim_class": "FACT_ONLY",
+      "approved_pt_br_wording": {
+        "STANDARD": "Com arbutina."
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "resultados garantidos",
+        "efeito imediato"
+      ],
+      "notes": "Exact EX 1FS evidence; factual presence is not finished-product efficacy.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "ingredients/formula",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "ex-vitamin-c",
+      "source_language_text_or_meaning": "Vitamin-C derivative is ascorbyl palmitate, not a disclosed concentration of pure ascorbic acid.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_PRODUCT",
+      "source_reference": "https://lululun.com/shop/products/hydraexs-2310",
+      "evidence_scope": "INGREDIENT_PRESENCE",
+      "claim_class": "FACT_ONLY",
+      "approved_pt_br_wording": {
+        "STANDARD": "Com palmitato de ascorbila, um derivado da vitamina C."
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "resultados garantidos",
+        "efeito imediato"
+      ],
+      "notes": "Exact EX 1FS evidence; factual presence is not finished-product efficacy.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "ingredients/formula",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "ex-exosomes",
+      "source_language_text_or_meaning": "Human adipose-derived mesenchymal-cell exosomes are listed as skin-conditioning ingredients; manufacturer excludes stem cells.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_PRODUCT",
+      "source_reference": "https://lululun.com/shop/products/hydraexs-2310",
+      "evidence_scope": "INGREDIENT_PRESENCE",
+      "claim_class": "NEEDS_REVIEW",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "não contém células-tronco",
+      "prohibited_variants": [
+        "regeneração celular",
+        "renovação celular",
+        "rejuvenesce células"
+      ],
+      "notes": "Manufacturer presence fact verified, but Brazil-facing marketing held for exact-product human-origin regulatory assessment under RDC 529/2021 Annex 416. No stem cells is not proof of regulatory permissibility.",
+      "review_status": "NEEDS_REVIEW",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "ingredients/formula",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "ex-egf",
+      "source_language_text_or_meaning": "Human recombinant oligopeptide-1 is listed; no regeneration efficacy is inferred.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_PRODUCT",
+      "source_reference": "https://lululun.com/shop/products/hydraexs-2310",
+      "evidence_scope": "INGREDIENT_PRESENCE",
+      "claim_class": "FACT_ONLY",
+      "approved_pt_br_wording": {
+        "STANDARD": "Com oligopeptídeo-1 recombinante humano (EGF)."
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "regeneração celular",
+        "renovação celular",
+        "rejuvenesce células"
+      ],
+      "notes": "Exact EX 1FS evidence; factual presence is not finished-product efficacy.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "ingredients/formula",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "ex-ceramide-ap",
+      "source_language_text_or_meaning": "Ceramide AP appears in the ingredient list.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_PRODUCT",
+      "source_reference": "https://lululun.com/shop/products/hydraexs-2310",
+      "evidence_scope": "INGREDIENT_PRESENCE",
+      "claim_class": "FACT_ONLY",
+      "approved_pt_br_wording": {
+        "STANDARD": "Com ceramida AP."
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "repara a barreira",
+        "reconstrói a barreira"
+      ],
+      "notes": "Exact EX 1FS evidence; factual presence is not finished-product efficacy.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "ingredients/formula",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "ex-ceramide-np",
+      "source_language_text_or_meaning": "Ceramide NP appears in the ingredient list.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_PRODUCT",
+      "source_reference": "https://lululun.com/shop/products/hydraexs-2310",
+      "evidence_scope": "INGREDIENT_PRESENCE",
+      "claim_class": "FACT_ONLY",
+      "approved_pt_br_wording": {
+        "STANDARD": "Com ceramida NP."
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "repara a barreira",
+        "reconstrói a barreira"
+      ],
+      "notes": "Exact EX 1FS evidence; factual presence is not finished-product efficacy.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "ingredients/formula",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "ex-hyaluronic",
+      "source_language_text_or_meaning": "Hydroxypropyltrimonium hyaluronate appears in the ingredient list.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_PRODUCT",
+      "source_reference": "https://lululun.com/shop/products/hydraexs-2310",
+      "evidence_scope": "INGREDIENT_PRESENCE",
+      "claim_class": "FACT_ONLY",
+      "approved_pt_br_wording": {
+        "STANDARD": "Com um derivado do ácido hialurônico."
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "resultados garantidos",
+        "efeito imediato"
+      ],
+      "notes": "Exact EX 1FS evidence; factual presence is not finished-product efficacy.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "ingredients/formula",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "ex-collagen",
+      "source_language_text_or_meaning": "Atelocollagen is listed; its presence does not establish collagen stimulation.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_PRODUCT",
+      "source_reference": "https://lululun.com/shop/products/hydraexs-2310",
+      "evidence_scope": "INGREDIENT_PRESENCE",
+      "claim_class": "FACT_ONLY",
+      "approved_pt_br_wording": {
+        "STANDARD": "Com atelocolágeno."
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "estimula produção de colágeno"
+      ],
+      "notes": "Exact EX 1FS evidence; factual presence is not finished-product efficacy.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "ingredients/formula",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "ex-formula",
+      "source_language_text_or_meaning": "Glutathione/arbutin and both AP/NP ceramides are present.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_PRODUCT",
+      "source_reference": "https://lululun.com/shop/products/hydraexs-2310",
+      "evidence_scope": "INGREDIENT_PRESENCE",
+      "claim_class": "FACT_ONLY",
+      "approved_pt_br_wording": {
+        "STANDARD": "Com glutationa, arbutina e ceramidas AP e NP."
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "resultados garantidos",
+        "efeito imediato"
+      ],
+      "notes": "Exact EX 1FS evidence; factual presence is not finished-product efficacy.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "ingredients/formula",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "ex-glutathione-arbutin",
+      "source_language_text_or_meaning": "Both named ingredients are listed.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_PRODUCT",
+      "source_reference": "https://lululun.com/shop/products/hydraexs-2310",
+      "evidence_scope": "INGREDIENT_PRESENCE",
+      "claim_class": "FACT_ONLY",
+      "approved_pt_br_wording": {
+        "STANDARD": "A fórmula contém glutationa e arbutina."
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "resultados garantidos",
+        "efeito imediato"
+      ],
+      "notes": "Exact EX 1FS evidence; factual presence is not finished-product efficacy.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "ingredients/formula",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [
+        "f48fa02b90f54a409b689f3ef3bef162"
+      ],
+      "study_context": {}
+    },
+    {
+      "claim_id": "ex-ceramides",
+      "source_language_text_or_meaning": "Both named ceramides are listed.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_PRODUCT",
+      "source_reference": "https://lululun.com/shop/products/hydraexs-2310",
+      "evidence_scope": "INGREDIENT_PRESENCE",
+      "claim_class": "FACT_ONLY",
+      "approved_pt_br_wording": {
+        "STANDARD": "A fórmula contém ceramidas AP e NP."
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "repara a barreira",
+        "reconstrói a barreira"
+      ],
+      "notes": "Exact EX 1FS evidence; factual presence is not finished-product efficacy.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "ingredients/formula",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [
+        "ae257f68e4c04384af6bcca303e6c692"
+      ],
+      "study_context": {}
+    },
+    {
+      "claim_id": "ex-free-fragrance",
+      "source_language_text_or_meaning": "Manufacturer explicitly lists this formulation exclusion.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_PRODUCT",
+      "source_reference": "https://lululun.com/shop/products/hydraexs-2310",
+      "evidence_scope": "PRODUCT_FACT",
+      "claim_class": "FACT_ONLY",
+      "approved_pt_br_wording": {
+        "STANDARD": "Sem fragrância."
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "resultados garantidos",
+        "efeito imediato"
+      ],
+      "notes": "Exact EX 1FS evidence; factual presence is not finished-product efficacy.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "formulation characteristics",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "ex-free-colorant",
+      "source_language_text_or_meaning": "Manufacturer explicitly lists this formulation exclusion.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_PRODUCT",
+      "source_reference": "https://lululun.com/shop/products/hydraexs-2310",
+      "evidence_scope": "PRODUCT_FACT",
+      "claim_class": "FACT_ONLY",
+      "approved_pt_br_wording": {
+        "STANDARD": "Sem corantes."
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "resultados garantidos",
+        "efeito imediato"
+      ],
+      "notes": "Exact EX 1FS evidence; factual presence is not finished-product efficacy.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "formulation characteristics",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "ex-free-mineral-oil",
+      "source_language_text_or_meaning": "Manufacturer explicitly lists this formulation exclusion.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_PRODUCT",
+      "source_reference": "https://lululun.com/shop/products/hydraexs-2310",
+      "evidence_scope": "PRODUCT_FACT",
+      "claim_class": "FACT_ONLY",
+      "approved_pt_br_wording": {
+        "STANDARD": "Sem óleo mineral."
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "resultados garantidos",
+        "efeito imediato"
+      ],
+      "notes": "Exact EX 1FS evidence; factual presence is not finished-product efficacy.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "formulation characteristics",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "ex-free-alcohol",
+      "source_language_text_or_meaning": "Manufacturer explicitly lists this formulation exclusion.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_PRODUCT",
+      "source_reference": "https://lululun.com/shop/products/hydraexs-2310",
+      "evidence_scope": "PRODUCT_FACT",
+      "claim_class": "FACT_ONLY",
+      "approved_pt_br_wording": {
+        "STANDARD": "Sem álcool."
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "resultados garantidos",
+        "efeito imediato"
+      ],
+      "notes": "Exact EX 1FS evidence; factual presence is not finished-product efficacy.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "formulation characteristics",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "ex-sheet",
+      "source_language_text_or_meaning": "Manufacturer names the sheet Melty Feel Sheet.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_PRODUCT",
+      "source_reference": "https://lululun.com/shop/products/hydraexs-2310",
+      "evidence_scope": "PRODUCT_FACT",
+      "claim_class": "FACT_ONLY",
+      "approved_pt_br_wording": {
+        "STANDARD": "Com tecido Melty Feel Sheet."
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "resultados garantidos",
+        "efeito imediato"
+      ],
+      "notes": "Exact EX 1FS evidence; factual presence is not finished-product efficacy.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "sheet technology",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [
+        "3e153aa74a8e45b7b2495585fb93af45"
+      ],
+      "study_context": {}
+    },
+    {
+      "claim_id": "ex-sheet-layers",
+      "source_language_text_or_meaning": "Manufacturer launch describes a three-layer sheet construction.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_LAUNCH",
+      "source_reference": "https://prtimes.jp/main/html/rd/p/000000182.000017608.html",
+      "evidence_scope": "PRODUCT_FACT",
+      "claim_class": "FACT_ONLY",
+      "approved_pt_br_wording": {
+        "STANDARD": "Tecido com estrutura em três camadas."
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "resultados garantidos",
+        "efeito imediato"
+      ],
+      "notes": "Exact EX 1FS evidence; factual presence is not finished-product efficacy.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "sheet technology",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "ex-daily",
+      "source_language_text_or_meaning": "Manufacturer positions the product for daily morning/evening use.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_PRODUCT",
+      "source_reference": "https://lululun.com/shop/products/hydraexs-2310",
+      "evidence_scope": "PRODUCT_FACT",
+      "claim_class": "FACT_ONLY",
+      "approved_pt_br_wording": {
+        "STANDARD": "Pode ser usada pela manhã e à noite."
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "resultados garantidos",
+        "efeito imediato"
+      ],
+      "notes": "Exact EX 1FS evidence; factual presence is not finished-product efficacy.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "use/routine",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [
+        "653512e42c9749d9824bf880f00ad8b8"
+      ],
+      "study_context": {}
+    },
+    {
+      "claim_id": "ex-toner",
+      "source_language_text_or_meaning": "Manufacturer describes use in place of cosmetic lotion/toner.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_PRODUCT",
+      "source_reference": "https://lululun.com/shop/products/hydraexs-2310",
+      "evidence_scope": "PRODUCT_FACT",
+      "claim_class": "FACT_ONLY",
+      "approved_pt_br_wording": {
+        "STANDARD": "Pode ser usada no lugar do tônico facial."
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "resultados garantidos",
+        "efeito imediato"
+      ],
+      "notes": "Exact EX 1FS evidence; factual presence is not finished-product efficacy.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "use/routine",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [
+        "2d068cffcf4a4bd999777838c93df4b8"
+      ],
+      "study_context": {}
+    },
+    {
+      "claim_id": "ex-pack",
+      "source_language_text_or_meaning": "Official EX 1FS identity specifies seven sheets and 150 mL essence.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_PRODUCT",
+      "source_reference": "https://lululun.com/shop/products/hydraexs-2310",
+      "evidence_scope": "PRODUCT_FACT",
+      "claim_class": "FACT_ONLY",
+      "approved_pt_br_wording": {
+        "STANDARD": "Embalagem com 7 máscaras e 150 mL de essência."
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "resultados garantidos",
+        "efeito imediato"
+      ],
+      "notes": "Exact EX 1FS evidence; factual presence is not finished-product efficacy.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "pack/value facts",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [
+        "7394fc26b37041c99821964620020a21"
+      ],
+      "study_context": {}
+    },
+    {
+      "claim_id": "ex-apply",
+      "source_language_text_or_meaning": "Manufacturer directs unfolding and positioning at eyes and mouth.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_PRODUCT",
+      "source_reference": "https://lululun.com/shop/products/hydraexs-2310",
+      "evidence_scope": "PRODUCT_FACT",
+      "claim_class": "FACT_ONLY",
+      "approved_pt_br_wording": {
+        "STANDARD": "Desdobre a máscara e ajuste-a ao redor dos olhos e da boca."
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "resultados garantidos",
+        "efeito imediato"
+      ],
+      "notes": "Exact EX 1FS evidence; factual presence is not finished-product efficacy.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "use/routine",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [
+        "e2f74d454a0c4049bfc48252fb5f86f1"
+      ],
+      "study_context": {}
+    },
+    {
+      "claim_id": "ex-after",
+      "source_language_text_or_meaning": "Manufacturer recommends emulsion or cream after the sheet mask.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_PRODUCT",
+      "source_reference": "https://lululun.com/shop/products/hydraexs-2310",
+      "evidence_scope": "PRODUCT_FACT",
+      "claim_class": "FACT_ONLY",
+      "approved_pt_br_wording": {
+        "STANDARD": "Após a máscara, o fabricante recomenda uma emulsão ou um creme."
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "resultados garantidos",
+        "efeito imediato"
+      ],
+      "notes": "Exact EX 1FS evidence; factual presence is not finished-product efficacy.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "use/routine",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [
+        "407b6a80e3d4485a9c1cc0bd6d3e8e7c"
+      ],
+      "study_context": {}
+    },
+    {
+      "claim_id": "review-elasticity",
+      "source_language_text_or_meaning": "Manufacturer advertises cosmetic elasticity; no product clinical dossier or Brazil-specific interpretation reviewed.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_PRODUCT",
+      "source_reference": "https://lululun.com/shop/products/hydraexs-2310",
+      "evidence_scope": "PRODUCT_BENEFIT",
+      "claim_class": "NEEDS_REVIEW",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "resultados garantidos",
+        "efeito imediato"
+      ],
+      "notes": "Excluded from creative library; not a conclusion that the product lacks this property. Exact evidence/qualification and review required.",
+      "review_status": "NEEDS_REVIEW",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "elasticity/age-related care",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "review-age-care",
+      "source_language_text_or_meaning": "Manufacturer defines age-related care through moisture/elasticity; not reversal of cellular aging.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_PRODUCT",
+      "source_reference": "https://lululun.com/shop/products/hydraexs-2310",
+      "evidence_scope": "PRODUCT_BENEFIT",
+      "claim_class": "NEEDS_REVIEW",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "resultados garantidos",
+        "efeito imediato"
+      ],
+      "notes": "Excluded from creative library; not a conclusion that the product lacks this property. Exact evidence/qualification and review required.",
+      "review_status": "NEEDS_REVIEW",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "elasticity/age-related care",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "review-award",
+      "source_language_text_or_meaning": "Current product artwork mentions multiple awards; date/category/exact-SKU scope not established for a new standalone badge.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_PRODUCT",
+      "source_reference": "https://lululun.com/shop/products/hydraexs-2310",
+      "evidence_scope": "UNSUPPORTED",
+      "claim_class": "NEEDS_REVIEW",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "resultados garantidos",
+        "efeito imediato"
+      ],
+      "notes": "Excluded from creative library; not a conclusion that the product lacks this property. Exact evidence/qualification and review required.",
+      "review_status": "NEEDS_REVIEW",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "differentiation",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "review-ranking",
+      "source_language_text_or_meaning": "Historical brand rankings do not establish current exact-SKU bestseller status.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_PRODUCT",
+      "source_reference": "https://lululun.com/shop/products/hydraexs-2310",
+      "evidence_scope": "UNSUPPORTED",
+      "claim_class": "NEEDS_REVIEW",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "resultados garantidos",
+        "efeito imediato"
+      ],
+      "notes": "Excluded from creative library; not a conclusion that the product lacks this property. Exact evidence/qualification and review required.",
+      "review_status": "NEEDS_REVIEW",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "differentiation",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "review-138-percent",
+      "source_language_text_or_meaning": "Launch comparison refers to a previous manufacturer product; current exact comparison dossier absent.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_LAUNCH",
+      "source_reference": "https://prtimes.jp/main/html/rd/p/000000182.000017608.html",
+      "evidence_scope": "UNSUPPORTED",
+      "claim_class": "NEEDS_REVIEW",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "resultados garantidos",
+        "efeito imediato"
+      ],
+      "notes": "Excluded from creative library; not a conclusion that the product lacks this property. Exact evidence/qualification and review required.",
+      "review_status": "NEEDS_REVIEW",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "differentiation",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "review-clinical",
+      "source_language_text_or_meaning": "No exact-product clinical efficacy study underlying a numerical or clinical advertising claim inspected.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_PRODUCT",
+      "source_reference": "https://lululun.com/shop/products/hydraexs-2310",
+      "evidence_scope": "UNSUPPORTED",
+      "claim_class": "NEEDS_REVIEW",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "resultados garantidos",
+        "efeito imediato"
+      ],
+      "notes": "Excluded from creative library; not a conclusion that the product lacks this property. Exact evidence/qualification and review required.",
+      "review_status": "NEEDS_REVIEW",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "differentiation",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "review-sensitive",
+      "source_language_text_or_meaning": "No exact-product hypoallergenic or dermatological-test dossier inspected.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_PRODUCT",
+      "source_reference": "https://lululun.com/shop/products/hydraexs-2310",
+      "evidence_scope": "UNSUPPORTED",
+      "claim_class": "NEEDS_REVIEW",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "resultados garantidos",
+        "efeito imediato"
+      ],
+      "notes": "Excluded from creative library; not a conclusion that the product lacks this property. Exact evidence/qualification and review required.",
+      "review_status": "NEEDS_REVIEW",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "differentiation",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "review-cruelty",
+      "source_language_text_or_meaning": "No exact-product cruelty-free verification inspected.",
+      "source_publisher": "Dr. LuLuLun",
+      "source_type": "MANUFACTURER_PRODUCT",
+      "source_reference": "https://lululun.com/shop/products/hydraexs-2310",
+      "evidence_scope": "UNSUPPORTED",
+      "claim_class": "NEEDS_REVIEW",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "resultados garantidos",
+        "efeito imediato"
+      ],
+      "notes": "Excluded from creative library; not a conclusion that the product lacks this property. Exact evidence/qualification and review required.",
+      "review_status": "NEEDS_REVIEW",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "differentiation",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "blocked-01",
+      "source_language_text_or_meaning": "renovação celular",
+      "source_publisher": "Anvisa",
+      "source_type": "REGULATOR",
+      "source_reference": "https://anvisalegis.datalegis.net/action/ActionDatalegis.php?acao=abrirTextoAto&numeroAto=00000907&tipo=RDC&valorAno=2024&orgao=RDC/DC/ANVISA/MS&seqAto=000&cod_menu=9431&cod_modulo=310&link=S",
+      "evidence_scope": "UNSUPPORTED",
+      "claim_class": "PROHIBITED_UNSUPPORTED",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "renovação celular"
+      ],
+      "notes": "No exact-product substantiation in inspected evidence; therapeutic wording additionally conflicts with cosmetic scope. Paraben-free contradicts listed methylparaben. Keep out of creative copy.",
+      "review_status": "PROHIBITED",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "prohibited",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "blocked-02",
+      "source_language_text_or_meaning": "regeneração celular",
+      "source_publisher": "Anvisa",
+      "source_type": "REGULATOR",
+      "source_reference": "https://anvisalegis.datalegis.net/action/ActionDatalegis.php?acao=abrirTextoAto&numeroAto=00000907&tipo=RDC&valorAno=2024&orgao=RDC/DC/ANVISA/MS&seqAto=000&cod_menu=9431&cod_modulo=310&link=S",
+      "evidence_scope": "UNSUPPORTED",
+      "claim_class": "PROHIBITED_UNSUPPORTED",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "regeneração celular"
+      ],
+      "notes": "No exact-product substantiation in inspected evidence; therapeutic wording additionally conflicts with cosmetic scope. Paraben-free contradicts listed methylparaben. Keep out of creative copy.",
+      "review_status": "PROHIBITED",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "prohibited",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "blocked-03",
+      "source_language_text_or_meaning": "regenera a pele",
+      "source_publisher": "Anvisa",
+      "source_type": "REGULATOR",
+      "source_reference": "https://anvisalegis.datalegis.net/action/ActionDatalegis.php?acao=abrirTextoAto&numeroAto=00000907&tipo=RDC&valorAno=2024&orgao=RDC/DC/ANVISA/MS&seqAto=000&cod_menu=9431&cod_modulo=310&link=S",
+      "evidence_scope": "UNSUPPORTED",
+      "claim_class": "PROHIBITED_UNSUPPORTED",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "regenera a pele"
+      ],
+      "notes": "No exact-product substantiation in inspected evidence; therapeutic wording additionally conflicts with cosmetic scope. Paraben-free contradicts listed methylparaben. Keep out of creative copy.",
+      "review_status": "PROHIBITED",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "prohibited",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "blocked-04",
+      "source_language_text_or_meaning": "rejuvenesce células",
+      "source_publisher": "Anvisa",
+      "source_type": "REGULATOR",
+      "source_reference": "https://anvisalegis.datalegis.net/action/ActionDatalegis.php?acao=abrirTextoAto&numeroAto=00000907&tipo=RDC&valorAno=2024&orgao=RDC/DC/ANVISA/MS&seqAto=000&cod_menu=9431&cod_modulo=310&link=S",
+      "evidence_scope": "UNSUPPORTED",
+      "claim_class": "PROHIBITED_UNSUPPORTED",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "rejuvenesce células"
+      ],
+      "notes": "No exact-product substantiation in inspected evidence; therapeutic wording additionally conflicts with cosmetic scope. Paraben-free contradicts listed methylparaben. Keep out of creative copy.",
+      "review_status": "PROHIBITED",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "prohibited",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "blocked-05",
+      "source_language_text_or_meaning": "clareia a pele",
+      "source_publisher": "Anvisa",
+      "source_type": "REGULATOR",
+      "source_reference": "https://anvisalegis.datalegis.net/action/ActionDatalegis.php?acao=abrirTextoAto&numeroAto=00000907&tipo=RDC&valorAno=2024&orgao=RDC/DC/ANVISA/MS&seqAto=000&cod_menu=9431&cod_modulo=310&link=S",
+      "evidence_scope": "UNSUPPORTED",
+      "claim_class": "PROHIBITED_UNSUPPORTED",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "clareia a pele"
+      ],
+      "notes": "No exact-product substantiation in inspected evidence; therapeutic wording additionally conflicts with cosmetic scope. Paraben-free contradicts listed methylparaben. Keep out of creative copy.",
+      "review_status": "PROHIBITED",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "prohibited",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "blocked-06",
+      "source_language_text_or_meaning": "whitening",
+      "source_publisher": "Anvisa",
+      "source_type": "REGULATOR",
+      "source_reference": "https://anvisalegis.datalegis.net/action/ActionDatalegis.php?acao=abrirTextoAto&numeroAto=00000907&tipo=RDC&valorAno=2024&orgao=RDC/DC/ANVISA/MS&seqAto=000&cod_menu=9431&cod_modulo=310&link=S",
+      "evidence_scope": "UNSUPPORTED",
+      "claim_class": "PROHIBITED_UNSUPPORTED",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "whitening"
+      ],
+      "notes": "No exact-product substantiation in inspected evidence; therapeutic wording additionally conflicts with cosmetic scope. Paraben-free contradicts listed methylparaben. Keep out of creative copy.",
+      "review_status": "PROHIBITED",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "prohibited",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "blocked-07",
+      "source_language_text_or_meaning": "branqueamento",
+      "source_publisher": "Anvisa",
+      "source_type": "REGULATOR",
+      "source_reference": "https://anvisalegis.datalegis.net/action/ActionDatalegis.php?acao=abrirTextoAto&numeroAto=00000907&tipo=RDC&valorAno=2024&orgao=RDC/DC/ANVISA/MS&seqAto=000&cod_menu=9431&cod_modulo=310&link=S",
+      "evidence_scope": "UNSUPPORTED",
+      "claim_class": "PROHIBITED_UNSUPPORTED",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "branqueamento"
+      ],
+      "notes": "No exact-product substantiation in inspected evidence; therapeutic wording additionally conflicts with cosmetic scope. Paraben-free contradicts listed methylparaben. Keep out of creative copy.",
+      "review_status": "PROHIBITED",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "prohibited",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "blocked-08",
+      "source_language_text_or_meaning": "elimina manchas",
+      "source_publisher": "Anvisa",
+      "source_type": "REGULATOR",
+      "source_reference": "https://anvisalegis.datalegis.net/action/ActionDatalegis.php?acao=abrirTextoAto&numeroAto=00000907&tipo=RDC&valorAno=2024&orgao=RDC/DC/ANVISA/MS&seqAto=000&cod_menu=9431&cod_modulo=310&link=S",
+      "evidence_scope": "UNSUPPORTED",
+      "claim_class": "PROHIBITED_UNSUPPORTED",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "elimina manchas"
+      ],
+      "notes": "No exact-product substantiation in inspected evidence; therapeutic wording additionally conflicts with cosmetic scope. Paraben-free contradicts listed methylparaben. Keep out of creative copy.",
+      "review_status": "PROHIBITED",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "prohibited",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "blocked-09",
+      "source_language_text_or_meaning": "trata melasma",
+      "source_publisher": "Anvisa",
+      "source_type": "REGULATOR",
+      "source_reference": "https://anvisalegis.datalegis.net/action/ActionDatalegis.php?acao=abrirTextoAto&numeroAto=00000907&tipo=RDC&valorAno=2024&orgao=RDC/DC/ANVISA/MS&seqAto=000&cod_menu=9431&cod_modulo=310&link=S",
+      "evidence_scope": "UNSUPPORTED",
+      "claim_class": "PROHIBITED_UNSUPPORTED",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "trata melasma"
+      ],
+      "notes": "No exact-product substantiation in inspected evidence; therapeutic wording additionally conflicts with cosmetic scope. Paraben-free contradicts listed methylparaben. Keep out of creative copy.",
+      "review_status": "PROHIBITED",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "prohibited",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "blocked-10",
+      "source_language_text_or_meaning": "estimula produção de colágeno",
+      "source_publisher": "Anvisa",
+      "source_type": "REGULATOR",
+      "source_reference": "https://anvisalegis.datalegis.net/action/ActionDatalegis.php?acao=abrirTextoAto&numeroAto=00000907&tipo=RDC&valorAno=2024&orgao=RDC/DC/ANVISA/MS&seqAto=000&cod_menu=9431&cod_modulo=310&link=S",
+      "evidence_scope": "UNSUPPORTED",
+      "claim_class": "PROHIBITED_UNSUPPORTED",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "estimula produção de colágeno"
+      ],
+      "notes": "No exact-product substantiation in inspected evidence; therapeutic wording additionally conflicts with cosmetic scope. Paraben-free contradicts listed methylparaben. Keep out of creative copy.",
+      "review_status": "PROHIBITED",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "prohibited",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "blocked-11",
+      "source_language_text_or_meaning": "reconstrói a barreira",
+      "source_publisher": "Anvisa",
+      "source_type": "REGULATOR",
+      "source_reference": "https://anvisalegis.datalegis.net/action/ActionDatalegis.php?acao=abrirTextoAto&numeroAto=00000907&tipo=RDC&valorAno=2024&orgao=RDC/DC/ANVISA/MS&seqAto=000&cod_menu=9431&cod_modulo=310&link=S",
+      "evidence_scope": "UNSUPPORTED",
+      "claim_class": "PROHIBITED_UNSUPPORTED",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "reconstrói a barreira"
+      ],
+      "notes": "No exact-product substantiation in inspected evidence; therapeutic wording additionally conflicts with cosmetic scope. Paraben-free contradicts listed methylparaben. Keep out of creative copy.",
+      "review_status": "PROHIBITED",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "prohibited",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "blocked-12",
+      "source_language_text_or_meaning": "repara a barreira",
+      "source_publisher": "Anvisa",
+      "source_type": "REGULATOR",
+      "source_reference": "https://anvisalegis.datalegis.net/action/ActionDatalegis.php?acao=abrirTextoAto&numeroAto=00000907&tipo=RDC&valorAno=2024&orgao=RDC/DC/ANVISA/MS&seqAto=000&cod_menu=9431&cod_modulo=310&link=S",
+      "evidence_scope": "UNSUPPORTED",
+      "claim_class": "PROHIBITED_UNSUPPORTED",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "repara a barreira"
+      ],
+      "notes": "No exact-product substantiation in inspected evidence; therapeutic wording additionally conflicts with cosmetic scope. Paraben-free contradicts listed methylparaben. Keep out of creative copy.",
+      "review_status": "PROHIBITED",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "prohibited",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "blocked-13",
+      "source_language_text_or_meaning": "efeito imediato",
+      "source_publisher": "Anvisa",
+      "source_type": "REGULATOR",
+      "source_reference": "https://anvisalegis.datalegis.net/action/ActionDatalegis.php?acao=abrirTextoAto&numeroAto=00000907&tipo=RDC&valorAno=2024&orgao=RDC/DC/ANVISA/MS&seqAto=000&cod_menu=9431&cod_modulo=310&link=S",
+      "evidence_scope": "UNSUPPORTED",
+      "claim_class": "PROHIBITED_UNSUPPORTED",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "efeito imediato"
+      ],
+      "notes": "No exact-product substantiation in inspected evidence; therapeutic wording additionally conflicts with cosmetic scope. Paraben-free contradicts listed methylparaben. Keep out of creative copy.",
+      "review_status": "PROHIBITED",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "prohibited",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "blocked-14",
+      "source_language_text_or_meaning": "resultados garantidos",
+      "source_publisher": "Anvisa",
+      "source_type": "REGULATOR",
+      "source_reference": "https://anvisalegis.datalegis.net/action/ActionDatalegis.php?acao=abrirTextoAto&numeroAto=00000907&tipo=RDC&valorAno=2024&orgao=RDC/DC/ANVISA/MS&seqAto=000&cod_menu=9431&cod_modulo=310&link=S",
+      "evidence_scope": "UNSUPPORTED",
+      "claim_class": "PROHIBITED_UNSUPPORTED",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "resultados garantidos"
+      ],
+      "notes": "No exact-product substantiation in inspected evidence; therapeutic wording additionally conflicts with cosmetic scope. Paraben-free contradicts listed methylparaben. Keep out of creative copy.",
+      "review_status": "PROHIBITED",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "prohibited",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "blocked-15",
+      "source_language_text_or_meaning": "cura",
+      "source_publisher": "Anvisa",
+      "source_type": "REGULATOR",
+      "source_reference": "https://anvisalegis.datalegis.net/action/ActionDatalegis.php?acao=abrirTextoAto&numeroAto=00000907&tipo=RDC&valorAno=2024&orgao=RDC/DC/ANVISA/MS&seqAto=000&cod_menu=9431&cod_modulo=310&link=S",
+      "evidence_scope": "UNSUPPORTED",
+      "claim_class": "PROHIBITED_UNSUPPORTED",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "cura"
+      ],
+      "notes": "No exact-product substantiation in inspected evidence; therapeutic wording additionally conflicts with cosmetic scope. Paraben-free contradicts listed methylparaben. Keep out of creative copy.",
+      "review_status": "PROHIBITED",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "prohibited",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "blocked-16",
+      "source_language_text_or_meaning": "cicatriza",
+      "source_publisher": "Anvisa",
+      "source_type": "REGULATOR",
+      "source_reference": "https://anvisalegis.datalegis.net/action/ActionDatalegis.php?acao=abrirTextoAto&numeroAto=00000907&tipo=RDC&valorAno=2024&orgao=RDC/DC/ANVISA/MS&seqAto=000&cod_menu=9431&cod_modulo=310&link=S",
+      "evidence_scope": "UNSUPPORTED",
+      "claim_class": "PROHIBITED_UNSUPPORTED",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "cicatriza"
+      ],
+      "notes": "No exact-product substantiation in inspected evidence; therapeutic wording additionally conflicts with cosmetic scope. Paraben-free contradicts listed methylparaben. Keep out of creative copy.",
+      "review_status": "PROHIBITED",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "prohibited",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "blocked-17",
+      "source_language_text_or_meaning": "ação farmacológica",
+      "source_publisher": "Anvisa",
+      "source_type": "REGULATOR",
+      "source_reference": "https://anvisalegis.datalegis.net/action/ActionDatalegis.php?acao=abrirTextoAto&numeroAto=00000907&tipo=RDC&valorAno=2024&orgao=RDC/DC/ANVISA/MS&seqAto=000&cod_menu=9431&cod_modulo=310&link=S",
+      "evidence_scope": "UNSUPPORTED",
+      "claim_class": "PROHIBITED_UNSUPPORTED",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "ação farmacológica"
+      ],
+      "notes": "No exact-product substantiation in inspected evidence; therapeutic wording additionally conflicts with cosmetic scope. Paraben-free contradicts listed methylparaben. Keep out of creative copy.",
+      "review_status": "PROHIBITED",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "prohibited",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "blocked-18",
+      "source_language_text_or_meaning": "tratamento de doença",
+      "source_publisher": "Anvisa",
+      "source_type": "REGULATOR",
+      "source_reference": "https://anvisalegis.datalegis.net/action/ActionDatalegis.php?acao=abrirTextoAto&numeroAto=00000907&tipo=RDC&valorAno=2024&orgao=RDC/DC/ANVISA/MS&seqAto=000&cod_menu=9431&cod_modulo=310&link=S",
+      "evidence_scope": "UNSUPPORTED",
+      "claim_class": "PROHIBITED_UNSUPPORTED",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "tratamento de doença"
+      ],
+      "notes": "No exact-product substantiation in inspected evidence; therapeutic wording additionally conflicts with cosmetic scope. Paraben-free contradicts listed methylparaben. Keep out of creative copy.",
+      "review_status": "PROHIBITED",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "prohibited",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "blocked-19",
+      "source_language_text_or_meaning": "luminosidade imediata",
+      "source_publisher": "Anvisa",
+      "source_type": "REGULATOR",
+      "source_reference": "https://anvisalegis.datalegis.net/action/ActionDatalegis.php?acao=abrirTextoAto&numeroAto=00000907&tipo=RDC&valorAno=2024&orgao=RDC/DC/ANVISA/MS&seqAto=000&cod_menu=9431&cod_modulo=310&link=S",
+      "evidence_scope": "UNSUPPORTED",
+      "claim_class": "PROHIBITED_UNSUPPORTED",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "luminosidade imediata"
+      ],
+      "notes": "No exact-product substantiation in inspected evidence; therapeutic wording additionally conflicts with cosmetic scope. Paraben-free contradicts listed methylparaben. Keep out of creative copy.",
+      "review_status": "PROHIBITED",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "prohibited",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "blocked-20",
+      "source_language_text_or_meaning": "reduz inflamação",
+      "source_publisher": "Anvisa",
+      "source_type": "REGULATOR",
+      "source_reference": "https://anvisalegis.datalegis.net/action/ActionDatalegis.php?acao=abrirTextoAto&numeroAto=00000907&tipo=RDC&valorAno=2024&orgao=RDC/DC/ANVISA/MS&seqAto=000&cod_menu=9431&cod_modulo=310&link=S",
+      "evidence_scope": "UNSUPPORTED",
+      "claim_class": "PROHIBITED_UNSUPPORTED",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "reduz inflamação"
+      ],
+      "notes": "No exact-product substantiation in inspected evidence; therapeutic wording additionally conflicts with cosmetic scope. Paraben-free contradicts listed methylparaben. Keep out of creative copy.",
+      "review_status": "PROHIBITED",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "prohibited",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "blocked-21",
+      "source_language_text_or_meaning": "células-tronco vivas",
+      "source_publisher": "Anvisa",
+      "source_type": "REGULATOR",
+      "source_reference": "https://anvisalegis.datalegis.net/action/ActionDatalegis.php?acao=abrirTextoAto&numeroAto=00000907&tipo=RDC&valorAno=2024&orgao=RDC/DC/ANVISA/MS&seqAto=000&cod_menu=9431&cod_modulo=310&link=S",
+      "evidence_scope": "UNSUPPORTED",
+      "claim_class": "PROHIBITED_UNSUPPORTED",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "células-tronco vivas"
+      ],
+      "notes": "No exact-product substantiation in inspected evidence; therapeutic wording additionally conflicts with cosmetic scope. Paraben-free contradicts listed methylparaben. Keep out of creative copy.",
+      "review_status": "PROHIBITED",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "prohibited",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "blocked-22",
+      "source_language_text_or_meaning": "sem parabenos",
+      "source_publisher": "Anvisa",
+      "source_type": "REGULATOR",
+      "source_reference": "https://anvisalegis.datalegis.net/action/ActionDatalegis.php?acao=abrirTextoAto&numeroAto=00000907&tipo=RDC&valorAno=2024&orgao=RDC/DC/ANVISA/MS&seqAto=000&cod_menu=9431&cod_modulo=310&link=S",
+      "evidence_scope": "UNSUPPORTED",
+      "claim_class": "PROHIBITED_UNSUPPORTED",
+      "approved_pt_br_wording": {},
+      "mandatory_qualifier": "",
+      "prohibited_variants": [
+        "sem parabenos"
+      ],
+      "notes": "No exact-product substantiation in inspected evidence; therapeutic wording additionally conflicts with cosmetic scope. Paraben-free contradicts listed methylparaben. Keep out of creative copy.",
+      "review_status": "PROHIBITED",
+      "language_review": "PENDING",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "prohibited",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "editorial-1",
+      "source_language_text_or_meaning": "Previously approved non-product-claim label.",
+      "source_publisher": "Marketing OS editorial review",
+      "source_type": "OWNER_EDITORIAL",
+      "source_reference": "V12.4 non-efficacy editorial vocabulary; complete library awaits owner review",
+      "evidence_scope": "EDITORIAL",
+      "claim_class": "APPROVED_DIRECT",
+      "approved_pt_br_wording": {
+        "SHORT": "Descubra"
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [],
+      "notes": "Reviewed neutral editorial label, not product evidence or automatic campaign approval. Exact final campaign wording still requires the owner-reviewed library and normal campaign governance.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "editorial",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "editorial-2",
+      "source_language_text_or_meaning": "Previously approved non-product-claim label.",
+      "source_publisher": "Marketing OS editorial review",
+      "source_type": "OWNER_EDITORIAL",
+      "source_reference": "V12.4 non-efficacy editorial vocabulary; complete library awaits owner review",
+      "evidence_scope": "EDITORIAL",
+      "claim_class": "APPROVED_DIRECT",
+      "approved_pt_br_wording": {
+        "SHORT": "Saiba mais"
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [],
+      "notes": "Reviewed neutral editorial label, not product evidence or automatic campaign approval. Exact final campaign wording still requires the owner-reviewed library and normal campaign governance.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "editorial",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "editorial-3",
+      "source_language_text_or_meaning": "Previously approved non-product-claim label.",
+      "source_publisher": "Marketing OS editorial review",
+      "source_type": "OWNER_EDITORIAL",
+      "source_reference": "V12.4 non-efficacy editorial vocabulary; complete library awaits owner review",
+      "evidence_scope": "EDITORIAL",
+      "claim_class": "APPROVED_DIRECT",
+      "approved_pt_br_wording": {
+        "SHORT": "Detalhes"
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [],
+      "notes": "Reviewed neutral editorial label, not product evidence or automatic campaign approval. Exact final campaign wording still requires the owner-reviewed library and normal campaign governance.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "editorial",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "editorial-4",
+      "source_language_text_or_meaning": "Previously approved non-product-claim label.",
+      "source_publisher": "Marketing OS editorial review",
+      "source_type": "OWNER_EDITORIAL",
+      "source_reference": "V12.4 non-efficacy editorial vocabulary; complete library awaits owner review",
+      "evidence_scope": "EDITORIAL",
+      "claim_class": "APPROVED_DIRECT",
+      "approved_pt_br_wording": {
+        "SHORT": "Explore"
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [],
+      "notes": "Reviewed neutral editorial label, not product evidence or automatic campaign approval. Exact final campaign wording still requires the owner-reviewed library and normal campaign governance.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "editorial",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "editorial-5",
+      "source_language_text_or_meaning": "Previously approved non-product-claim label.",
+      "source_publisher": "Marketing OS editorial review",
+      "source_type": "OWNER_EDITORIAL",
+      "source_reference": "V12.4 non-efficacy editorial vocabulary; complete library awaits owner review",
+      "evidence_scope": "EDITORIAL",
+      "claim_class": "APPROVED_DIRECT",
+      "approved_pt_br_wording": {
+        "SHORT": "Conheça a coleção"
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [],
+      "notes": "Reviewed neutral editorial label, not product evidence or automatic campaign approval. Exact final campaign wording still requires the owner-reviewed library and normal campaign governance.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "editorial",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "editorial-6",
+      "source_language_text_or_meaning": "Previously approved non-product-claim label.",
+      "source_publisher": "Marketing OS editorial review",
+      "source_type": "OWNER_EDITORIAL",
+      "source_reference": "V12.4 non-efficacy editorial vocabulary; complete library awaits owner review",
+      "evidence_scope": "EDITORIAL",
+      "claim_class": "APPROVED_DIRECT",
+      "approved_pt_br_wording": {
+        "SHORT": "Conheça"
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [],
+      "notes": "Reviewed neutral editorial label, not product evidence or automatic campaign approval. Exact final campaign wording still requires the owner-reviewed library and normal campaign governance.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "editorial",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    },
+    {
+      "claim_id": "editorial-7",
+      "source_language_text_or_meaning": "Previously approved non-product-claim label.",
+      "source_publisher": "Marketing OS editorial review",
+      "source_type": "OWNER_EDITORIAL",
+      "source_reference": "V12.4 non-efficacy editorial vocabulary; complete library awaits owner review",
+      "evidence_scope": "EDITORIAL",
+      "claim_class": "APPROVED_DIRECT",
+      "approved_pt_br_wording": {
+        "SHORT": "FÓRMULA EM DESTAQUE"
+      },
+      "mandatory_qualifier": "",
+      "prohibited_variants": [],
+      "notes": "Reviewed neutral editorial label, not product evidence or automatic campaign approval. Exact final campaign wording still requires the owner-reviewed library and normal campaign governance.",
+      "review_status": "APPROVED",
+      "language_review": "VERIFIED",
+      "language_reviewer": "V12.4 editorial evidence/pt-BR review; not a claim of independent native-speaker or regulatory certification",
+      "group": "editorial",
+      "benefit_priority": "SUPPORTING",
+      "legacy_claim_ids": [],
+      "study_context": {}
+    }
+  ],
+  "brazil_market_review_status": "REVIEW_REQUIRED",
+  "brazil_clearance_evidence": ""
+}

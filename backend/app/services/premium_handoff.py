@@ -98,7 +98,8 @@ def build_campaign_handoff(db,campaign):
                     prohibited_claims=tuple(brand.disallowed_terms or ())+("No unsupported product claims",),
                     visual_objective="External premium creative production",width=fmt.width,height=fmt.height)
                 packages.append((index,package))
-    return assemble_handoff(campaign,packages)
+    from .marketing_claims import bind_handoff
+    return bind_handoff(assemble_handoff(campaign,packages))
 
 
 def _public_asset(asset):
@@ -112,6 +113,8 @@ def _public_asset(asset):
 
 def export_handoff(handoff,directory,*,revision=None):
     """New bundle only. Asset bytes are copied, never altered; no registry writes."""
+    from .marketing_claims import require_ready, approved_library
+    library=require_ready(handoff)
     directory=Path(directory)
     directory.mkdir(parents=True,exist_ok=False)
     (directory/"assets").mkdir()
@@ -123,6 +126,8 @@ def export_handoff(handoff,directory,*,revision=None):
     public=handoff.model_dump(mode="json")
     public["assets"]=manifest
     public["handoff_sha256"]=handoff.digest()
+    public["approved_claim_library"]=approved_library(library)
+    public["creative_model_claim_invention_allowed"]=False
     if revision:
         public["revision"]=revision
     files={"HANNA_CAMPAIGN_HANDOFF.json":public,"HANNA_CAMPAIGN_ASSETS.json":{
@@ -130,7 +135,7 @@ def export_handoff(handoff,directory,*,revision=None):
     for name,payload in files.items():
         with (directory/name).open("x",encoding="utf-8") as stream:
             json.dump(payload,stream,ensure_ascii=False,indent=2)
-    instruction=CHATGPT_INSTRUCTION+("\nREVISION: change only the rejected slide according to the attached exact feedback. Facts/copy stay unchanged." if revision else "")
+    instruction=CHATGPT_INSTRUCTION+"\nUse only the approved_copy and approved_claim_ids. Keep every mandatory_qualifier in visible copy. Follow benefit_hierarchy and prohibited_elements. Never invent or strengthen a benefit."+("\nREVISION: change only the rejected slide according to the attached exact feedback. Facts/copy stay unchanged." if revision else "")
     (directory/"CHATGPT_READY_INSTRUCTION.txt").write_text(instruction,encoding="utf-8")
     lines=["# Hanna premium campaign handoff",instruction,"## Campaign",json.dumps({k:v for k,v in public.items() if k not in ("slides","assets")},ensure_ascii=False,indent=2)]
     for slide in handoff.slides:
