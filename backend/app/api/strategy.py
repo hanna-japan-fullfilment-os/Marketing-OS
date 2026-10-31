@@ -10,6 +10,20 @@ from ..schemas.strategy import StrategyFamilyWithTypes, StrategyTypeOut
 router = APIRouter(prefix="/api/strategy-library", tags=["strategy-library"])
 
 
+from ..schemas.campaign_creative_strategy import CampaignCreativeStrategyRequest
+
+
+@router.post('/premium-campaign-plan')
+def premium_campaign_plan(request: CampaignCreativeStrategyRequest):
+    """Read-only, provider-free planning; never launches creative production."""
+    from ..services.marketing_claims import load_library
+    from ..services.campaign_creative_strategy import plan_campaign
+    try:
+        return plan_campaign(request, load_library(request.product_id))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 @router.get("", response_model=list[StrategyFamilyWithTypes])
 def list_strategy_library(db: Session = Depends(get_db)):
     families = db.query(CampaignStrategyFamily).order_by(CampaignStrategyFamily.sort_order).all()

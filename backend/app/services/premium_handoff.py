@@ -30,6 +30,32 @@ def uses_premium_handoff(db,campaign):
     return bool(brand and (brand.slug=="hanna-japan" or (brand.campaign_rules or {}).get("premium_creative_workflow")=="external_chatgpt"))
 
 
+def export_strategy_planning_package(plan, library, directory):
+    """Export reviewed strategy-derived briefs, never an executable image job.
+
+    This planning export does not bypass production/human review on an existing
+    handoff or assert commercial clearance. No production state is touched.
+    """
+    from .campaign_creative_strategy import validate_plan
+    validate_plan(plan, library)
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=False)
+    with (directory / 'CAMPAIGN_STRATEGY_CREATIVE_PLAN.json').open('x', encoding='utf-8') as stream:
+        json.dump(plan, stream, ensure_ascii=False, indent=2)
+    with (directory / 'PROPOSED_MESSAGE_USAGE.json').open('x', encoding='utf-8') as stream:
+        json.dump({'usage': plan['message_usage_snapshot'], 'status': plan['message_usage_snapshot_status']},
+                  stream, ensure_ascii=False, indent=2)
+    instructions = (
+        'PLANNING ONLY — OWNER REVIEW REQUIRED. Do not generate artwork from this export automatically.\n'
+        'Only approved_copy is visible advertising text. Strategy metadata, hypotheses and visual intent are not copy.\n'
+        'Keep exact claim bindings/qualifiers and prohibited wording. Never invent claims.\n'
+        'Use the visual benchmark for quality, not its layout/product/claims; it is not approval evidence.\n'
+        'All future images require product fidelity and explicit visual/human approval.\n'
+    )
+    (directory / 'PREMIUM_CREATIVE_PLANNING_INSTRUCTION.txt').write_text(instructions, encoding='utf-8')
+    return directory
+
+
 def assemble_handoff(campaign,packages):
     if not packages:
         raise ValueError("Complete canonical slide plans required")
