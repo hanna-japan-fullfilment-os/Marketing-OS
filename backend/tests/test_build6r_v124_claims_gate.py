@@ -95,11 +95,12 @@ def test_owner_review_pending_blocks_creative_export(tmp_path, library):
     assert not (tmp_path / "not-authorized").exists()
 
 
-def test_owner_approval_alone_cannot_clear_product_regulatory_hold(tmp_path, library, monkeypatch):
+def test_unresolved_market_clearance_does_not_block_creative_use(tmp_path, library, monkeypatch):
     held = library.model_copy(update={"owner_library_review_status": "APPROVED"})
     monkeypatch.setattr(gate, "load_library", lambda product_id: held)
-    with pytest.raises(ValueError, match="regulatory assessment"):
-        gate.bind_handoff(draft(tmp_path))
+    result = gate.bind_handoff(draft(tmp_path))
+    assert result.slides[0].creative_brief_status == "CREATIVE_READY"
+    gate.require_ready(result)
     assert next(c for c in library.claims if c.claim_id == "ex-exosomes").claim_class == "NEEDS_REVIEW"
 
 

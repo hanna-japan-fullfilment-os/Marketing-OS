@@ -1839,12 +1839,16 @@ class OpenAIProvider:
         raise HardBudgetExceededError("HARD_BUDGET_UNKNOWN_MULTIMODAL_MAXIMUM")
 
     async def compose_creative(self, *, package, options) -> bytes:
+        from ..product_creative_eligibility import require_creative_eligibility
+        require_creative_eligibility(package.product_id)
         request = creative_director_request(package, options)
         self._require_creative_budget()
         response = await self._require_client().responses.create(**request)
         return decode_creative_response(response)
 
     async def compose_direct_creative(self, *, delivery, scene_edit=None) -> bytes:
+        from ..product_creative_eligibility import require_creative_eligibility
+        require_creative_eligibility(delivery.package.product_id)
         from ..multimodal_cost import estimate_multimodal_cost
         from decimal import Decimal
         request = direct_images_edit_request(delivery,scene_edit=scene_edit)

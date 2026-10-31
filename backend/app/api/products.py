@@ -16,6 +16,14 @@ from ..services.product_facts import get_or_none, resolve_verified_product_facts
 router = APIRouter(prefix="/api/products", tags=["products"])
 
 
+@router.get("/{product_id}/creative-eligibility")
+def get_product_creative_eligibility(product_id: str, db: Session = Depends(get_db)):
+    if db.get(Product, product_id) is None:
+        raise HTTPException(404, "Product not found.")
+    from ..services.product_creative_eligibility import creative_eligibility
+    return creative_eligibility(product_id)
+
+
 @router.get("/{product_id}/verified-facts", response_model=VerifiedProductFactsOut)
 def get_verified_product_facts(product_id: str, db: Session = Depends(get_db)):
     product = db.get(Product, product_id)

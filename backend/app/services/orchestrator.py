@@ -1671,6 +1671,9 @@ def _load_campaign_context(db: Session, campaign_id: str) -> tuple[Campaign, Bra
         raise ValueError("Brand not found for this campaign.")
     category = db.get(Category, campaign.category_id) if campaign.category_id else None
     product = db.get(Product, campaign.product_id) if campaign.product_id else None
+    if product is not None:
+        from .product_creative_eligibility import require_creative_eligibility
+        require_creative_eligibility(product.id)
     return campaign, brand, category, product
 
 

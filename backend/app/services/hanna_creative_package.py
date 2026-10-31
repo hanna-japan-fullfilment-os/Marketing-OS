@@ -87,6 +87,8 @@ def build_hanna_creative_package(db, campaign, plan, *, campaign_plans, locale, 
     category = db.get(Category, product.category_id) if product.category_id else None
     facts = resolve_verified_product_facts(db, product)
     facts = facts.model_dump(mode="json") if hasattr(facts, "model_dump") else facts
+    from .product_creative_eligibility import require_creative_eligibility
+    eligibility = require_creative_eligibility(product.id)
     images = []
     source = selected
     if selected.image_role == "product_master_approved":
@@ -120,6 +122,7 @@ def build_hanna_creative_package(db, campaign, plan, *, campaign_plans, locale, 
         product_id=product.id, product_name=product.name, category=category.name if category else "Uncategorized",
         slide_id=plan.slide_id, slide_role=plan.purpose, locale=locale, channel=channel,
         approved_facts_json=canonical_json({"verified_product_facts": facts, "claim_evidence": claims,
+            "creative_eligibility": eligibility,
             "asset_scoped_package_mark_permission": permission.model_dump(mode="json") if permission else None}),
         slide_contract_json=canonical_json({"plan": plan.model_dump(mode="json"), "text": contract}),
         approved_copy=tuple(CopyField(key=k, text=v) for k, v in fields.items()),

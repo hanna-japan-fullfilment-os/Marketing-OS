@@ -141,6 +141,8 @@ def export_handoff(handoff,directory,*,revision=None):
     """New bundle only. Asset bytes are copied, never altered; no registry writes."""
     from .marketing_claims import require_ready, approved_library
     library=require_ready(handoff)
+    from .product_creative_eligibility import require_creative_eligibility
+    eligibility=require_creative_eligibility(handoff.product_id)
     directory=Path(directory)
     directory.mkdir(parents=True,exist_ok=False)
     (directory/"assets").mkdir()
@@ -154,6 +156,7 @@ def export_handoff(handoff,directory,*,revision=None):
     public["handoff_sha256"]=handoff.digest()
     public["approved_claim_library"]=approved_library(library)
     public["creative_model_claim_invention_allowed"]=False
+    public["creative_eligibility"]=eligibility
     if revision:
         public["revision"]=revision
     files={"HANNA_CAMPAIGN_HANDOFF.json":public,"HANNA_CAMPAIGN_ASSETS.json":{

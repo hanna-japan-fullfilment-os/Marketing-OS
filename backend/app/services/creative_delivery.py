@@ -145,6 +145,8 @@ def crop_and_treat(delivery: PreparedDelivery, native_bytes: bytes, *, fonts=Non
 
 async def deliver_candidate(delivery, provider, *, fonts=None):
     """One direct edit attempt; product/copy/visual acceptance is still mandatory."""
+    from .product_creative_eligibility import require_creative_eligibility
+    require_creative_eligibility(delivery.package.product_id)
     native = await provider.compose_direct_creative(delivery=delivery)
     return crop_and_treat(delivery, native, fonts=fonts)
 

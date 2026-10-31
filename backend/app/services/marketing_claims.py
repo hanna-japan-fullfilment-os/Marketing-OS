@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 import unicodedata
 from ..schemas.marketing_claims import ClaimLibrary
+from .product_creative_eligibility import require_creative_eligibility
 
 RESEARCH_CATEGORIES = frozenset({"PRODUCT_POSITIONING", "FORMULA", "INGREDIENTS", "SENSORY_FEATURES",
     "MATERIAL/SHEET_TECHNOLOGY", "USAGE", "PACK_FACTS", "MANUFACTURER_BENEFITS",
@@ -92,11 +93,10 @@ def validate_brief(library, brief):
 
 
 def bind_handoff(handoff):
+    require_creative_eligibility(handoff.product_id)
     library = load_library(handoff.product_id)
     if library.owner_library_review_status != "APPROVED":
         raise ValueError("Complete claim library awaits owner review; creative production remains paused")
-    if library.brazil_market_review_status != "CLEARED" or not library.brazil_clearance_evidence:
-        raise ValueError("Brazil exact-product regulatory assessment unresolved; creative gate blocked")
     slides = []
     by_id = {c.claim_id: c for c in library.claims}
     for brief in handoff.slides:
@@ -113,11 +113,10 @@ def bind_handoff(handoff):
 
 
 def require_ready(handoff):
+    require_creative_eligibility(handoff.product_id)
     library = load_library(handoff.product_id)
     if library.owner_library_review_status != "APPROVED":
         raise ValueError("Claim library owner approval is required before creative export")
-    if library.brazil_market_review_status != "CLEARED" or not library.brazil_clearance_evidence:
-        raise ValueError("Brazil exact-product regulatory assessment required")
     for brief in handoff.slides:
         validate_brief(library, brief)
         if brief.creative_brief_status != "CREATIVE_READY" or brief.claim_library_sha256 != library.digest():

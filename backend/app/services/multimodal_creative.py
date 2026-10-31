@@ -91,6 +91,8 @@ def overlay_canonical_copy(package: HannaCreativePackage, clean_canvas: bytes, *
 
 async def compose_candidate(package, provider, options):
     """One explicit attempt. Exceptions propagate; no implicit alternate backend."""
+    from .product_creative_eligibility import require_creative_eligibility
+    require_creative_eligibility(package.product_id)
     native = tuple(int(n) for n in options.image_size.split("x"))
     if native[0] * package.height != native[1] * package.width:
         raise ValueError("Native generation aspect differs from final handoff")

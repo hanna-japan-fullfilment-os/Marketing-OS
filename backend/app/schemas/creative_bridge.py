@@ -74,6 +74,8 @@ class HannaCreativePackage(Contract):
 
     @model_validator(mode="after")
     def complete(self):
+        from ..services.product_creative_eligibility import require_creative_eligibility
+        require_creative_eligibility(self.product_id)
         roles = [a.role for a in self.images]
         if "product_source" not in roles or "visual_reference" not in roles:
             raise ValueError("Actual source product and approved reference images are required")

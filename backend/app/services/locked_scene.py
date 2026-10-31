@@ -211,5 +211,7 @@ def require_product_integrity(final,scene,layer,ring):
 
 
 async def generate_locked_scene(assets,provider):
+    from .product_creative_eligibility import require_creative_eligibility
+    require_creative_eligibility(assets.plan.delivery.package.product_id)
     validate_scene_assets(assets)
     return await provider.compose_direct_creative(delivery=assets.plan.delivery,scene_edit=assets)
