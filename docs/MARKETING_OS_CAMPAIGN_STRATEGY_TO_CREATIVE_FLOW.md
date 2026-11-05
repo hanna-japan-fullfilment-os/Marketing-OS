@@ -1,5 +1,32 @@
 # Campaign strategy to premium creative — V12.8
 
+## BUILD6R-EXEC-0001 opt-in planning
+
+`plan_campaign(request, library, execution_contract=True)` adds purpose-aware
+execution proposals while preserving exact approved copy, claims and qualifiers.
+The default remains the legacy plan for backward compatibility. `validate_plan`
+rebuilds the corresponding mode; altered proposals or unsupported versions fail.
+The existing API/schema is unchanged; opt-in is an offline Python service call.
+
+Composition families follow communication jobs, not slide number: product
+recognition/benefits use product_hero; factual formula/construction information
+uses editorial_detail without material diagrams; usage/routine uses ritual_context
+with motivated lighting and a grounded product. Unknown jobs require preparation.
+Legacy Reel/paid action text is not allowed to override the opt-in safe mechanism.
+The existing format/copy/timing/coverage contracts remain authoritative.
+
+These proposals are PENDING, planning-only and never production-ready themselves.
+The operator supplies full camera, spatial, light, typography, product and approved
+reference requirements through the version-2 handoff contract documented in
+BUILD6R_V121_PREMIUM_HANDOFF.md. A nonblank benchmark string is not reference
+approval. Exact actual asset hashes and owner-approved reference authority are
+checked at the production-handoff boundary.
+
+Structural completeness, plan owner review, image technical QA and final visual
+owner acceptance are separate gates. No 9.0 aesthetic approval is inferred.
+This implementation neither creates new reference approvals nor changes campaign
+copy, artwork, renderer/typography capabilities, ComfyUI or paid-call guards.
+
 ## Entry points
 
 `POST /api/strategy-library/premium-campaign-plan` accepts the typed

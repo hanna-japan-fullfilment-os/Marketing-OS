@@ -10,6 +10,46 @@ from app.services.premium_handoff import export_strategy_planning_package
 PRODUCT = 'a5ea2272a1f89d743c089461bb2fb50f'
 
 
+def test_execution_contract_selects_by_purpose_and_keeps_copy(library):
+    legacy = strategy.plan_campaign(request(), library)
+    current = strategy.plan_campaign(request(), library, execution_contract=True)
+    strategy.validate_plan(current, library)
+    for fmt, result in current['formats'].items():
+        for before, after in zip(legacy['formats'][fmt]['assets'], result['assets']):
+            assert before['approved_copy'] == after['approved_copy']
+            assert before['approved_claim_ids'] == after['approved_claim_ids']
+            assert before['mandatory_qualifiers'] == after['mandatory_qualifiers']
+            assert after['execution_proposal']['owner_review_status'] == 'PENDING'
+            assert after['layout_family'] == strategy.composition_for_purpose(
+                after['role'], after['primary_message'])['composition_family']
+    assert current['creative_release_allowed'] is False
+    assert 'execution_contract_version' not in legacy
+    assert strategy.composition_for_purpose('application', 'Approved instruction')['composition_family'] == 'ritual_context'
+    assert strategy.composition_for_purpose('selected_formula', 'Approved ingredients')['composition_family'] == 'editorial_detail'
+
+
+@pytest.mark.parametrize('role,message', [('unknown', 'Exact copy'), ('cover', ' ')])
+def test_unprepared_execution_purpose_fails(role, message):
+    with pytest.raises(ValueError):
+        strategy.composition_for_purpose(role, message)
+
+
+def test_execution_proposal_mutation_fails_rebuild(library):
+    plan = strategy.plan_campaign(request(), library, execution_contract=True)
+    first = next(iter(plan['formats'].values()))['assets'][0]
+    first['execution_proposal']['visual_mechanism'] = 'Generic blank background'
+    with pytest.raises(ValueError, match='changed'):
+        strategy.validate_plan(plan, library)
+
+
+def test_execution_planning_export_preserves_proposal(tmp_path, library):
+    plan = strategy.plan_campaign(request(), library, execution_contract=True)
+    export_strategy_planning_package(plan, library, tmp_path / 'execution')
+    exported = json.loads((tmp_path / 'execution/CAMPAIGN_STRATEGY_CREATIVE_PLAN.json').read_text(encoding='utf-8'))
+    assert exported == plan
+    strategy.validate_plan(exported, library)
+
+
 def request(**changes):
     categories = [('hydration', 'principal_benefit', 'ex-hydration'),
                   ('softness', 'secondary_benefit', 'ex-softness'),

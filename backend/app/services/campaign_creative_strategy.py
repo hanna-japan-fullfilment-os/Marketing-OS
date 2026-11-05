@@ -113,7 +113,47 @@ def recommend_tactics(request, library):
     return sorted(suggestions, key=lambda t: (-t['score'], t['tactic_key']))
 
 
-def plan_campaign(request: CampaignCreativeStrategyRequest, library):
+def composition_for_purpose(role, message):
+    """Existing families selected by communication job, never position in a deck.
+
+    This is a proposal, not permission to depict product behavior or materials.
+    Unknown roles require preparation rather than a generic fallback.
+    """
+    if not message.strip():
+        raise ValueError('A concrete approved message is required')
+    routine = {'usage', 'application', 'routine_aftercare', 'routine_decision_cta', 'routine_fit', 'application_action'}
+    detail = {'sheet_construction', 'sheet_detail', 'technology', 'formula_pack', 'selected_formula',
+              'formulation_choice', 'formula', 'ingredients', 'proof', 'pack', 'origin',
+              'selection_criteria', 'criterion', 'verified_contrast', 'comparison_scope'}
+    hero = {'cover', 'cta', 'product_identity', 'hydration', 'qualified_radiance', 'tactile_experience',
+            'tactile_proposition', 'core_benefits', 'principal_benefit', 'secondary_benefit', 'context',
+            'selection_question', 'question', 'story_hook', 'discovery_hook', 'desire_hook',
+            'decision_cta', 'discovery_cta', 'learning_cta', 'single_message_cta', 'story_cta',
+            'benefit', 'ad_cta', 'video_cta', 'material_motion_hook', 'tactile_handling', 'product_reveal'}
+    if role in routine:
+        family = 'ritual_context'
+        mechanism = ('Place the exact pouch on a real supporting surface; motivated warm/cool light '
+                     'communicates routine context while the approved usage copy carries the instruction. '
+                     'No simulated application or product performance demonstration.')
+    elif role in detail:
+        family = 'editorial_detail'
+        mechanism = ('Pair the exact pouch with an editorial hierarchy of the supplied factual copy; '
+                     'use controlled geometric accents to connect the information to the hero. '
+                     'Do not visualize ingredients, physical layers or efficacy as evidence.')
+    elif role in hero:
+        family = 'product_hero'
+        mechanism = ('Ground the exact pouch as the dominant subject; direct the light and copy reading '
+                     'path toward it, with supporting text subordinate to the product. '
+                     'Communicate the benefit through approved copy, not invented results.')
+    else:
+        raise ValueError(f'Unprepared communication purpose: {role}')
+    return {'composition_family': family, 'communication_objective': message,
+            'visual_mechanism': mechanism,
+            'composition_rationale': f'{family} supports the {role} communication job and its approved message',
+            'owner_review_status': 'PENDING'}
+
+
+def plan_campaign(request: CampaignCreativeStrategyRequest, library, *, execution_contract=False):
     if request.product_id != library.product_id:
         raise ValueError('Exact-product strategy/library mismatch')
     profile, archetype = _profile(request)
@@ -323,6 +363,21 @@ def plan_campaign(request: CampaignCreativeStrategyRequest, library):
                                  recommended_formats=['INSTAGRAM_STATIC', 'FACEBOOK_STATIC', 'INSTAGRAM_STORIES'],
                                  measurement=['outbound CTR', 'landing-page conversion', 'ROAS after sufficient attributable purchases'])
                         assets.append(a)
+        if execution_contract:
+            for a in assets:
+                proposal = composition_for_purpose(a['role'], a['primary_message'])
+                a['execution_proposal'] = proposal
+                a['layout_family'] = proposal['composition_family']
+                a['visual_intent'] = proposal['visual_mechanism']
+                # Do not leak legacy material/action concepts into the new safe
+                # execution proposal. Visible copy and timing remain untouched.
+                for field in ('visual_execution', 'visual_concept', 'visual_action'):
+                    if field in a:
+                        a[field] = proposal['visual_mechanism']
+                if 'voiceover_or_audio_role' in a:
+                    a['voiceover_or_audio_role'] = 'Read exact approved copy; no simulated product/material sounds'
+                    a['first_seconds_visual'] = proposal['visual_mechanism'] if a['time_seconds'][0] == 0 else ''
+                    a['transitions'] = a['transition_reason'] = 'Motivated change of framing around the same exact product; no material demonstration'
         used = {c for a in assets for c in a['approved_claim_ids'].values()}
         coverage = []
         for c in request.coverage:
@@ -352,7 +407,7 @@ def plan_campaign(request: CampaignCreativeStrategyRequest, library):
     usage_snapshot = {'tactic_key': request.tactic_key, 'hook_claim_id': request.hook_claim_id,
                       'angle': request.angle, 'primary_claim_id': request.primary_claim_id,
                       'layout_family': layout_families[0]}
-    return {'version': 1, 'product_id': library.product_id, 'jan': library.jan,
+    result = {'version': 1, 'product_id': library.product_id, 'jan': library.jan,
             'claim_library_sha256': library.digest(), 'canonical_strategy': request.model_dump(mode='json'),
             'selected_tactic_name': TACTICS[request.tactic_key]['name'], 'archetype': archetype,
             'tactic_selection_rationale': {'selected_by': 'operator', 'objective': request.objective,
@@ -369,11 +424,23 @@ def plan_campaign(request: CampaignCreativeStrategyRequest, library):
             'current_slide_2_reuse_decision': 'QUALITY_REFERENCE_ONLY',
             'existing_artwork_does_not_determine_roles': True,
             'message_usage_snapshot_status': 'PROPOSED_NOT_EXECUTED; add to history only after owner adoption'}
+    if execution_contract:
+        result['execution_contract_version'] = 1
+        actual_family = next(iter(formats.values()))['assets'][0]['layout_family']
+        result['message_usage_snapshot']['layout_family'] = actual_family
+        result['diversity']['repetition_counts']['layout_family'] = sum(
+            h.layout_family == actual_family for h in request.history)
+        result['diversity']['recommendations'] = [
+            f'Diversify {k}: repeated {n} times in supplied history'
+            for k, n in result['diversity']['repetition_counts'].items() if n >= 2]
+    return result
 
 
 def validate_plan(plan, library):
     """Rebuild from trusted inputs; rejects edited copy, roles, coverage or gates."""
     request = CampaignCreativeStrategyRequest.model_validate(plan['canonical_strategy'])
-    if plan != plan_campaign(request, library):
+    if 'execution_contract_version' in plan and plan['execution_contract_version'] != 1:
+        raise ValueError('Unsupported execution contract version')
+    if plan != plan_campaign(request, library, execution_contract='execution_contract_version' in plan):
         raise ValueError('Strategy/claim/coverage plan changed; rebuild and review')
     return plan

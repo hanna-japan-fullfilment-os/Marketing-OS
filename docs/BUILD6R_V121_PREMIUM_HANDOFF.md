@@ -1,5 +1,50 @@
 # Hanna premium creative production
 
+## BUILD6R-EXEC-0001: purpose-aware execution contract
+
+New executions may explicitly adopt `PremiumExecutionHandoff` (version 2).
+Existing version-1 handoffs, serialization, digests and reviews are unchanged;
+the application does not silently upgrade campaigns or rewrite approved artwork.
+This build provides a Python service contract, not a new frontend/API editor.
+
+1. Keep the existing canonical claim-bound handoff as the authoritative brief.
+2. Prepare one `CreativeExecutionPlan` per exact slide key. Use
+   `campaign_creative_strategy.composition_for_purpose(role, primary_message)`
+   for a purpose-based proposal. Fill the concrete camera/spatial relationship,
+   product role, lighting/contact integration, campaign typography requirements,
+   prohibited imagery and rationale for every supplied approved reference.
+3. Bind `brief_sha256` to the unmodified version-1 slide brief's `digest()`.
+   Reference IDs/hashes must match its actual approved reference assets. Only
+   composition, lighting, palette, hierarchy and finish may transfer; never
+   reference product identity, packaging, copy or claims.
+4. Use `prepare_execution_handoff(handoff, plans)` to prepare the complete v2
+   contract in memory. PENDING/REJECTED plans can be prepared for owner inspection,
+   but production export refuses them. No canonical campaign/registry write occurs.
+5. An explicitly named owner reviews the actual plan. Record APPROVED and bind
+   `reviewed_content_sha256` to `plan.content_digest()`; any content/brief/reference
+   change requires fresh review. These fields use the existing trusted-operator
+   model, not authentication or cryptographic proof of a human identity.
+6. `export_handoff` and ingestion boundaries revalidate the full v2 contract,
+   including model-copy/construct inputs, before writing files or state.
+   Service callers must explicitly supply this v2 handoff to export/import/review/
+   readiness operations; existing routes continue their legacy behavior.
+
+The supported families are existing product_hero, editorial_detail and
+ritual_context. Unknown purposes fail rather than rotate by slide index.
+Material/physical-layer demonstrations are not supplied by this contract. Human
+context may be planned only without application/results demonstrations. The
+required prohibitions protect against invented packaging, unsupported claims and
+misleading demonstrations. Free-text requirements still need owner inspection;
+structural validation cannot prove the truth or quality of an arbitrary sentence.
+
+Execution approval is independent of returned-artwork approval. Import remains
+PENDING_REVIEW; a named human must inspect product fidelity, exact visible copy
+and visual quality. No numerical aesthetic score, automatic approval, image job,
+retry, runtime activation or paid-provider permission is introduced.
+Adopting a changed v2 handoff requires an explicit new export and fresh reviews;
+preparing it alone leaves historical v1 approvals intact. Frozen assets must not
+be exported/replaced as a side effect of adoption.
+
 Automated premium image generation is stopped. V11 final acceptance remains FAIL;
 V11.3 is not authorized. V12.1 introduces no image model, provider, Custom GPT API,
 renderer redesign, migration or environment key.

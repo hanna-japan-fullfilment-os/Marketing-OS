@@ -12,6 +12,119 @@ from app.services.premium_handoff import assemble_handoff, export_handoff, uses_
 from app.services.marketing_claims import bind_handoff
 
 
+def execution_handoff(tmp_path, *, approved=True, legacy=None):
+    from app.schemas.premium_handoff import CreativeExecutionPlan
+    from app.services.premium_handoff import prepare_execution_handoff
+    from app.services.campaign_creative_strategy import composition_for_purpose
+    h = legacy or handoff(tmp_path)
+    # Mirror the real approved-reference label, without altering production data.
+    h = h.model_copy(update={'assets': tuple(
+        a.model_copy(update={'authority': 'owner-approved-target'}) if a.role == 'visual_reference' else a
+        for a in h.assets)})
+    plans = {}
+    for slide in h.slides:
+        proposal = composition_for_purpose(slide.slide_role, slide.primary_message)
+        plan = CreativeExecutionPlan(
+            slide_key=slide.key, brief_sha256=slide.digest(), **proposal,
+            product_role='dominant_hero',
+            references=tuple(dict(asset_id=a.asset_id, sha256=a.sha256,
+                rationale='Use the reference light direction and focal hierarchy, never its product or claims',
+                permitted_influences=('lighting', 'hierarchy')) for a in h.assets if a.role == 'visual_reference'),
+            camera_relationship='Eye-level camera, full pouch visible and proportional',
+            spatial_relationship='Pouch rests on the foreground surface; copy sits beside it without overlap',
+            lighting_integration='Shared warm key light and contact shadow on the supporting surface',
+            typography_requirements='Reuse approved campaign typefaces and hierarchy; exact copy, no new labels',
+            prohibited_imagery=('invented packaging', 'unsupported claims', 'misleading demonstrations', 'physical layer diagrams'))
+        if approved:
+            plan = plan.model_copy(update={'owner_review_status': 'APPROVED', 'owner_reviewer': 'Test owner',
+                'reviewed_content_sha256': plan.content_digest()})
+        plans[slide.key] = plan
+    return prepare_execution_handoff(h, plans)
+
+
+def test_legacy_digest_and_serialization_unchanged(tmp_path):
+    from app.schemas.premium_handoff import PremiumCreativeHandoff
+    h = handoff(tmp_path)
+    payload = h.model_dump(mode='json')
+    assert all('execution_plan' not in s for s in payload['slides'])
+    expected = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(',', ':'),
+        ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+    assert PremiumCreativeHandoff.model_validate(payload).digest() == h.digest() == expected
+
+
+def test_execution_export_keeps_full_plan_and_separate_approval(tmp_path):
+    h = execution_handoff(tmp_path)
+    archive = export_handoff(h, tmp_path / 'execution_export')
+    with zipfile.ZipFile(archive) as z:
+        data = json.loads(z.read('HANNA_CAMPAIGN_HANDOFF.json'))
+        assert data['version'] == 2
+        assert data['slides'][0]['execution_plan'] == h.slides[0].execution_plan.model_dump(mode='json')
+        assert 'execution_plan' in z.read('HANNA_CAMPAIGN_HANDOFF.md').decode()
+        assert 'not artwork acceptance' in z.read('CHATGPT_READY_INSTRUCTION.txt').decode()
+        for asset, record in zip(h.assets, data['assets']):
+            assert z.read(record['file']) == Path(asset.path).read_bytes()
+
+
+def test_execution_revalidates_reference_bytes_before_export(tmp_path):
+    h = execution_handoff(tmp_path)
+    reference = next(a for a in h.assets if a.role == 'visual_reference')
+    Path(reference.path).write_bytes(b'altered reference')
+    target = tmp_path / 'no_export'
+    with pytest.raises(ValueError, match='changed'):
+        export_handoff(h, target)
+    assert not target.exists()
+
+
+@pytest.mark.parametrize('field', ['visual_mechanism', 'camera_relationship', 'spatial_relationship',
+    'lighting_integration', 'typography_requirements', 'composition_rationale'])
+def test_incomplete_execution_plan_fails(tmp_path, field):
+    from app.schemas.premium_handoff import CreativeExecutionPlan
+    plan = execution_handoff(tmp_path).slides[0].execution_plan.model_dump()
+    plan[field] = ' '
+    with pytest.raises(ValueError):
+        CreativeExecutionPlan.model_validate(plan)
+
+
+@pytest.mark.parametrize('case', ['pending', 'rejected', 'stale', 'wrong_brief', 'wrong_slide',
+    'wrong_family', 'reference_hash', 'missing_reference', 'untrusted_reference', 'missing_product',
+    'duplicate_reference', 'physical_demo', 'missing_prohibitions', 'blank_reviewer', 'version', 'copy_change', 'claim_transfer'])
+def test_execution_failures_rejected_before_export_writes(tmp_path, case):
+    h = execution_handoff(tmp_path)
+    payload = h.model_dump(mode='json')
+    plan = payload['slides'][0]['execution_plan']
+    if case == 'pending': plan['owner_review_status'] = 'PENDING'
+    elif case == 'rejected': plan['owner_review_status'] = 'REJECTED'
+    elif case == 'stale': plan['lighting_integration'] = 'Changed lighting'
+    elif case == 'wrong_brief': plan['brief_sha256'] = '0' * 64
+    elif case == 'wrong_slide': plan['slide_key'] = 'other'
+    elif case == 'wrong_family': plan['composition_family'] = 'ritual_context'
+    elif case == 'reference_hash': plan['references'][0]['sha256'] = '0' * 64
+    elif case == 'missing_reference': plan['references'] = []
+    elif case == 'untrusted_reference':
+        next(a for a in payload['assets'] if a['role'] == 'visual_reference')['authority'] = 'unapproved'
+    elif case == 'missing_product': payload['slides'][0]['product_asset_ids'] = []
+    elif case == 'duplicate_reference': plan['references'].append(plan['references'][0])
+    elif case == 'physical_demo': plan['imagery_mode'] = 'application_demonstration'
+    elif case == 'missing_prohibitions': plan['prohibited_imagery'] = ['random props']
+    elif case == 'blank_reviewer': plan['owner_reviewer'] = ' '
+    elif case == 'version': payload['version'] = 3
+    elif case == 'copy_change': payload['slides'][0]['approved_copy'][0]['text'] = 'Unsupported stronger copy'
+    elif case == 'claim_transfer': plan['references'][0]['permitted_influences'] = ['claims']
+    # Re-sign structurally valid but scope-incompatible plans to prove the
+    # service checks more than stale approval. This is isolated test authority.
+    if case in ('wrong_brief', 'wrong_slide', 'wrong_family', 'reference_hash'):
+        from app.schemas.premium_handoff import CreativeExecutionPlan
+        pending = CreativeExecutionPlan.model_validate({**plan, 'owner_review_status': 'PENDING'})
+        plan['reviewed_content_sha256'] = pending.content_digest()
+    from app.schemas.premium_handoff import PremiumExecutionHandoff
+    # Construct bypass demonstrates the service boundary also revalidates inputs.
+    forged = PremiumExecutionHandoff.model_construct(**payload)
+    target = tmp_path / 'must_not_exist'
+    with pytest.raises(ValueError):
+        export_handoff(forged, target)
+    assert not target.exists()
+
+
 def approved_fixture_library(monkeypatch):
     """Isolated reviewed catalog; never approves the production library."""
     from app.services import marketing_claims

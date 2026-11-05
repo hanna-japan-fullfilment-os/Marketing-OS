@@ -8,6 +8,71 @@ import zipfile
 from ..schemas.premium_handoff import PremiumCreativeHandoff,PremiumSlideBrief
 from .hanna_creative_package import verified_image_bytes
 
+
+def validate_execution_handoff(handoff, *, require_approval=True):
+    """Revalidate even model_copy/construct inputs before any file/state writes.
+
+    V1 remains an explicitly legacy workflow, never implicitly upgraded.
+    """
+    from ..schemas.premium_handoff import PremiumExecutionHandoff, PremiumSlideBrief
+    from .campaign_creative_strategy import composition_for_purpose
+    if handoff.version == 1:
+        return PremiumCreativeHandoff.model_validate(handoff.model_dump(mode="json"))
+    if handoff.version != 2:
+        raise ValueError("Unsupported premium execution handoff version")
+    handoff = PremiumExecutionHandoff.model_validate(handoff.model_dump(mode="json"))
+    if not handoff.slides or handoff.expected_slide_count != len(handoff.slides):
+        raise ValueError("Complete execution slide set required")
+    if len({s.key for s in handoff.slides}) != len(handoff.slides):
+        raise ValueError("Duplicate execution slide")
+    assets = {a.asset_id: a for a in handoff.assets}
+    if len(assets) != len(handoff.assets):
+        raise ValueError("Duplicate execution asset identity")
+    for slide in handoff.slides:
+        plan = slide.execution_plan
+        brief = PremiumSlideBrief.model_validate(slide.model_dump(exclude={"execution_plan"}))
+        if plan.slide_key != slide.key or plan.brief_sha256 != brief.digest():
+            raise ValueError("Execution plan is stale or belongs to a different slide")
+        expected = composition_for_purpose(slide.slide_role, slide.primary_message)
+        if plan.composition_family != expected['composition_family']:
+            raise ValueError("Composition family incompatible with communication purpose")
+        if plan.communication_objective != slide.primary_message:
+            raise ValueError("Execution objective must preserve the approved primary message")
+        if {r.asset_id for r in plan.references} != set(slide.reference_asset_ids):
+            raise ValueError("Every approved slide reference needs an execution rationale")
+        for ref in plan.references:
+            asset = assets.get(ref.asset_id)
+            if (asset is None or asset.role != "visual_reference" or asset.sha256 != ref.sha256
+                    or asset.authority not in ("owner-approved-target", "approved-custom-gpt-quality-benchmark")):
+                raise ValueError("Execution reference lacks exact approved asset authority")
+            verified_image_bytes(asset)
+        products = [assets.get(key) for key in slide.product_asset_ids]
+        if not products or any(a is None or a.role not in ("product_source", "product_master") for a in products):
+            raise ValueError("Execution plan requires exact canonical product assets")
+        for asset in products:
+            verified_image_bytes(asset)
+        if require_approval and plan.owner_review_status != "APPROVED":
+            raise ValueError("Owner execution-plan approval required; structural validity is insufficient")
+    return handoff
+
+
+def prepare_execution_handoff(handoff, plans):
+    """Explicit, in-memory v1 -> v2 adoption; never writes canonical campaign data.
+
+    Draft plans may be prepared for owner review. Production export requires
+    named owner approval of the exact content, using the existing operator trust model.
+    """
+    from ..schemas.premium_handoff import PremiumExecutionHandoff
+    if handoff.version != 1 or set(plans) != {s.key for s in handoff.slides}:
+        raise ValueError("Explicit legacy handoff and exact complete execution-plan keys required")
+    payload = handoff.model_dump(mode="json")
+    payload['version'] = 2
+    for slide in payload['slides']:
+        plan = plans[slide['key']]
+        slide['execution_plan'] = plan.model_dump(mode="json") if hasattr(plan, 'model_dump') else plan
+    result = PremiumExecutionHandoff.model_validate(payload)
+    return validate_execution_handoff(result, require_approval=False)
+
 CHATGPT_INSTRUCTION = """CREATE THIS HANNA CAMPAIGN FROM THE ATTACHED HANDOFF AND ASSETS.
 Read HANNA_CAMPAIGN_HANDOFF.md and .json, and inspect the actual assets/ images.
 Marketing OS owns product identity, facts, claims, exact copy, language, CTA and slide order.
@@ -52,6 +117,15 @@ def export_strategy_planning_package(plan, library, directory):
         'Use the visual benchmark for quality, not its layout/product/claims; it is not approval evidence.\n'
         'All future images require product fidelity and explicit visual/human approval.\n'
     )
+    if plan.get('execution_contract_version') == 1:
+        instructions += (
+            'Purpose-aware execution_proposal is a draft, not a complete execution plan.\n'
+            'Before production, prepare the version-2 handoff with exact approved reference IDs/hashes, '
+            'per-reference permitted influences and rationale, spatial/camera/light/type requirements '
+            'and named owner review of the exact content. A benchmark string grants no authority.\n'
+            'Approved references may guide composition as expressly prepared in that contract; '
+            'never transfer their packaging, claims or visible copy.\n'
+        )
     (directory / 'PREMIUM_CREATIVE_PLANNING_INSTRUCTION.txt').write_text(instructions, encoding='utf-8')
     return directory
 
@@ -139,6 +213,7 @@ def _public_asset(asset):
 
 def export_handoff(handoff,directory,*,revision=None):
     """New bundle only. Asset bytes are copied, never altered; no registry writes."""
+    handoff = validate_execution_handoff(handoff)
     from .marketing_claims import require_ready, approved_library
     library=require_ready(handoff)
     from .product_creative_eligibility import require_creative_eligibility
@@ -165,6 +240,15 @@ def export_handoff(handoff,directory,*,revision=None):
         with (directory/name).open("x",encoding="utf-8") as stream:
             json.dump(payload,stream,ensure_ascii=False,indent=2)
     instruction=CHATGPT_INSTRUCTION+"\nUse only the approved_copy and approved_claim_ids. Keep every mandatory_qualifier in visible copy. Follow benefit_hierarchy and prohibited_elements. Never invent or strengthen a benefit."+("\nREVISION: change only the rejected slide according to the attached exact feedback. Facts/copy stay unchanged." if revision else "")
+    if handoff.version == 2:
+        instruction += (
+            "\nFollow each owner-reviewed execution_plan: its concrete visual mechanism, product role, "
+            "camera/spatial relationships, lighting integration and typography requirements. "
+            "References guide only their listed permitted_influences; never transfer reference claims "
+            "or packaging. Prohibited imagery is binding. Human context must not depict application "
+            "or results. Plan approval is not artwork acceptance, publication or provider authorization. "
+            "Structural completeness does not establish premium quality."
+        )
     (directory/"CHATGPT_READY_INSTRUCTION.txt").write_text(instruction,encoding="utf-8")
     lines=["# Hanna premium campaign handoff",instruction,"## Campaign",json.dumps({k:v for k,v in public.items() if k not in ("slides","assets")},ensure_ascii=False,indent=2)]
     for slide in handoff.slides:

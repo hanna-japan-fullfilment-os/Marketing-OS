@@ -11,7 +11,7 @@ from sqlalchemy import update
 
 from ..models import CampaignOutput
 from .multimodal_creative import normalize_copy
-from .premium_handoff import build_campaign_handoff,export_handoff
+from .premium_handoff import build_campaign_handoff,export_handoff,validate_execution_handoff
 
 
 def _read_state(db,campaign):
@@ -58,6 +58,7 @@ def _save_state(db,campaign,data,root,row,*,expected_version):
 
 def prepare_campaign_export(db,campaign,root,*,handoff=None):
     handoff=handoff or build_campaign_handoff(db,campaign)
+    handoff=validate_execution_handoff(handoff)
     row,state=_read_state(db,campaign)
     bundle=Path(root)/"premium_handoff"/campaign.id/uuid4().hex
     archive=export_handoff(handoff,bundle)
@@ -72,6 +73,7 @@ def prepare_campaign_export(db,campaign,root,*,handoff=None):
 
 
 def _current(handoff,state):
+    validate_execution_handoff(handoff)
     if state.get("handoff_sha256")!=handoff.digest():
         raise ValueError("Canonical handoff changed; export a current package and re-review")
 
@@ -144,6 +146,7 @@ def review_slide(db,campaign,root,request,*,handoff=None):
 
 def readiness(db,campaign,*,handoff=None):
     handoff=handoff or build_campaign_handoff(db,campaign)
+    handoff=validate_execution_handoff(handoff)
     _,state=_read_state(db,campaign)
     current=state.get("handoff_sha256")==handoff.digest()
     approved=0

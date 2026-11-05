@@ -14,6 +14,75 @@ from test_build6r_v121_handoff import handoff
 from test_build6r_v121_handoff import approved_fixture_library
 
 
+def test_execution_intake_does_not_grant_artwork_approval(setup, tmp_path):
+    from test_build6r_v121_handoff import execution_handoff
+    db, c, legacy, root = setup
+    h = execution_handoff(tmp_path, legacy=legacy)
+    service.prepare_campaign_export(db, c, root, handoff=h)
+    db.commit()
+    state = service.readiness(db, c, handoff=h)
+    result = service.import_slide(db, c, root, slide_key=h.slides[0].key,
+        filename='art.png', data=image_bytes(), expected_version=state['version'], handoff=h)
+    db.commit()
+    assert result['slides'][h.slides[0].key]['approval_status'] == 'PENDING_REVIEW'
+    assert service.readiness(db, c, handoff=h)['APPROVED_SLIDE_COUNT'] == 0
+    s = h.slides[0]
+    request = PremiumReviewRequest(expected_version=result['version'], slide_key=s.key,
+        decision='APPROVED', reviewer='Human owner', product_visible=True,
+        product_fidelity_confirmed=True, observed_copy={v.key: v.text for v in s.approved_copy})
+    service.review_slide(db, c, root, request, handoff=h)
+    db.commit()
+    assert service.readiness(db, c, handoff=h)['APPROVED_SLIDE_COUNT'] == 1
+    assert not service.readiness(db, c, handoff=h)['CAMPAIGN_CREATIVE_COMPLETE']
+
+
+def test_preparing_execution_plan_does_not_invalidate_legacy_approval(setup, tmp_path):
+    from test_build6r_v121_handoff import execution_handoff
+    db, c, h, root = setup
+    ingest(setup)
+    review(setup)
+    before = service.readiness(db, c, handoff=h)
+    execution_handoff(tmp_path, legacy=h)
+    assert service.readiness(db, c, handoff=h) == before
+    assert before['APPROVED_SLIDE_COUNT'] == 1
+
+
+def test_pending_execution_fails_before_state_or_file_writes(setup, tmp_path):
+    from test_build6r_v121_handoff import execution_handoff
+    db, c, legacy, root = setup
+    pending = execution_handoff(tmp_path, approved=False, legacy=legacy)
+    before = service._read_state(db, c)[1]
+    files = {p: p.read_bytes() for p in root.rglob('*') if p.is_file()}
+    with pytest.raises(ValueError, match='approval required'):
+        service.prepare_campaign_export(db, c, root, handoff=pending)
+    with pytest.raises(ValueError, match='approval required'):
+        service.import_slide(db, c, root, slide_key=pending.slides[0].key,
+            filename='pending.png', data=image_bytes(), expected_version=before['version'], handoff=pending)
+    assert service._read_state(db, c)[1] == before
+    assert {p: p.read_bytes() for p in root.rglob('*') if p.is_file()} == files
+
+
+def test_changed_execution_cannot_reuse_prior_review(setup, tmp_path):
+    from test_build6r_v121_handoff import execution_handoff
+    from app.services.premium_handoff import validate_execution_handoff
+    db, c, legacy, root = setup
+    h = execution_handoff(tmp_path, legacy=legacy)
+    service.prepare_campaign_export(db, c, root, handoff=h)
+    db.commit()
+    _, state = service._read_state(db, c)
+    plan = h.slides[0].execution_plan
+    changed = plan.model_copy(update={'lighting_integration': 'New owner-prepared shared light'})
+    # Without renewed approval the changed plan is invalid.
+    stale = h.model_copy(update={'slides': (h.slides[0].model_copy(update={'execution_plan': changed}), *h.slides[1:])})
+    with pytest.raises(ValueError):
+        validate_execution_handoff(stale)
+    changed = changed.model_copy(update={'reviewed_content_sha256': changed.content_digest()})
+    renewed = h.model_copy(update={'slides': (h.slides[0].model_copy(update={'execution_plan': changed}), *h.slides[1:])})
+    validate_execution_handoff(renewed)
+    with pytest.raises(ValueError, match='handoff changed'):
+        service._current(renewed, state)
+
+
 @pytest.fixture(autouse=True)
 def reviewed_catalog(monkeypatch):
     approved_fixture_library(monkeypatch)
