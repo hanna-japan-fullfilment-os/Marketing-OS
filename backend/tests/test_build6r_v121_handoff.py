@@ -8,8 +8,33 @@ import zipfile
 import pytest
 
 from test_build6r_v101_creative_package import package
-from app.services.premium_handoff import assemble_handoff, export_handoff, uses_premium_handoff
+from app.services.premium_handoff import assemble_handoff, export_handoff as production_export, uses_premium_handoff
 from app.services.marketing_claims import bind_handoff
+from app.services.premium_handoff import resolve_canonical_handoff as real_canonical_resolver
+
+
+# Unit fixtures model the independent persisted-campaign read boundary.
+CANONICAL_FIXTURES = {}
+
+
+def install_fixture_authority(monkeypatch):
+    from app.services import premium_handoff
+    CANONICAL_FIXTURES.clear()
+    def current(db, campaign):
+        if campaign.id not in CANONICAL_FIXTURES:
+            raise ValueError('Missing isolated canonical campaign')
+        return CANONICAL_FIXTURES[campaign.id]
+    monkeypatch.setattr(premium_handoff, 'resolve_canonical_handoff', current)
+
+
+def register_fixture(h):
+    CANONICAL_FIXTURES[h.campaign_id] = h
+    return h
+
+
+def export_handoff(h, directory, **kwargs):
+    return production_export(h, directory, db=object(),
+                             campaign=SimpleNamespace(id=h.campaign_id), **kwargs)
 
 
 def execution_handoff(tmp_path, *, approved=True, legacy=None):
@@ -128,6 +153,7 @@ def test_execution_failures_rejected_before_export_writes(tmp_path, case):
 def approved_fixture_library(monkeypatch):
     """Isolated reviewed catalog; never approves the production library."""
     from app.services import marketing_claims
+    install_fixture_authority(monkeypatch)
     original = marketing_claims.load_library
     def reviewed(product_id):
         return original(product_id).model_copy(update={"owner_library_review_status": "APPROVED",
@@ -143,8 +169,10 @@ def reviewed_catalog(monkeypatch):
 def handoff(tmp_path, campaign=None):
     campaign = campaign or SimpleNamespace(id="campaign", objective="awareness", angle="Japan skincare", hook="", audience="Brazil")
     first = package(tmp_path, product_id="a5ea2272a1f89d743c089461bb2fb50f", product_name="LuLuLun Hydra EX Mask 7 Sheets")
+    first = first.model_copy(update={'images': tuple(a.model_copy(update={'authority': 'owner-approved-target'})
+        if a.role == 'visual_reference' else a for a in first.images)})
     second = first.model_copy(update={"slide_id": "slide-2", "slide_role": "cta"})
-    return bind_handoff(assemble_handoff(campaign, [(1, first), (2, second)]))
+    return bind_handoff(register_fixture(assemble_handoff(campaign, [(1, first), (2, second)])))
 
 
 def test_full_campaign_and_individual_briefs_preserve_authority(tmp_path):
@@ -267,3 +295,189 @@ def test_api_approval_gate_uses_external_readiness(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         api._require_current_creative_qa(None, SimpleNamespace())
     assert exc.value.status_code == 409
+
+
+@pytest.mark.parametrize('version', [1, 2])
+@pytest.mark.parametrize('case', ['unknown', 'wrong', 'missing', 'additional', 'role', 'asset'])
+def test_exec0002_rebound_handoff_cannot_create_claim_authority(tmp_path, version, case):
+    from app.schemas.premium_handoff import PremiumSlideBrief, CreativeExecutionPlan
+    legacy = handoff(tmp_path)
+    h = execution_handoff(tmp_path, legacy=legacy) if version == 2 else legacy
+    b = h.slides[0]
+    ids = dict(b.approved_claim_ids)
+    updates = {}
+    if case == 'unknown': ids['headline'] = 'UNVERIFIED'
+    elif case == 'wrong': ids['headline'] = 'ex-after'
+    elif case == 'missing': ids.pop('headline')
+    elif case == 'additional': ids['extra'] = 'ex-after'
+    elif case == 'role': updates['slide_role'] = 'application'
+    updates['approved_claim_ids'] = ids
+    altered = b.model_copy(update=updates)
+    if version == 2:
+        base = PremiumSlideBrief.model_validate(altered.model_dump(exclude={'execution_plan'}))
+        p = altered.execution_plan.model_copy(update={'brief_sha256': base.digest(),
+            'composition_family': 'ritual_context' if case == 'role' else altered.execution_plan.composition_family,
+            'owner_review_status': 'PENDING'})
+        p = CreativeExecutionPlan.model_validate(p.model_dump())
+        p = p.model_copy(update={'owner_review_status': 'APPROVED', 'reviewed_content_sha256': p.content_digest()})
+        altered = altered.model_copy(update={'execution_plan': p})
+    forged = h.model_copy(update={'slides': (altered, *h.slides[1:])})
+    if case == 'asset':
+        forged = forged.model_copy(update={'assets': tuple(a.model_copy(update={'authority': 'Forged product authority'})
+            if a.role == 'product_source' else a for a in forged.assets)})
+    target = tmp_path / 'forbidden_export'
+    with pytest.raises(ValueError): export_handoff(forged, target)
+    assert not target.exists()
+
+
+def test_exec0002_context_free_production_export_fails_closed(tmp_path):
+    h = handoff(tmp_path)
+    target = tmp_path / 'context_free'
+    with pytest.raises(ValueError, match='canonical campaign context'):
+        production_export(h, target)
+    assert not target.exists()
+
+
+@pytest.fixture
+def live_factual_campaign(temp_db, tmp_path, monkeypatch):
+    """Real persisted plans and real DB evidence; no provenance mocks."""
+    from test_build6r_v345_claim_evidence_foundation import _seed, _candidate, _verification
+    from app.models import Asset, BrandAsset, Campaign, CampaignOutput
+    from app.schemas.ai import SlidePlan
+    from app.services import marketing_claims, premium_handoff, orchestrator
+    from app.services.claim_evidence import create_claim_candidate, verify_claim_evidence, promote_verified_claim
+    from app.services.creative.pipeline import canonical_slide_claim_bindings
+    db = temp_db.SessionLocal()
+    seeded = _seed(db)
+    library = marketing_claims.load_library('a5ea2272a1f89d743c089461bb2fb50f')
+    isolated_library = library.model_copy(update={'product_id': seeded['product'].id})
+    monkeypatch.setattr(marketing_claims, 'load_library', lambda key: isolated_library if key == isolated_library.product_id else (_ for _ in ()).throw(ValueError('Wrong product')))
+    monkeypatch.setattr(premium_handoff, 'resolve_canonical_handoff', real_canonical_resolver)
+    assets = {a.asset_id: a for a in package(tmp_path).images}
+    source = assets['source']
+    asset = Asset(brand_id=seeded['brand'].id, product_id=seeded['product'].id,
+        absolute_path=source.path, relative_path='source.png', filename='source.png', extension='.png',
+        sha256=source.sha256, image_role='product', is_active=True)
+    db.add(asset)
+    for key, kind in [('reference', 'visual_reference'), ('logo', 'logo')]:
+        db.add(BrandAsset(brand_id=seeded['brand'].id, kind=kind, file_path=assets[key].path,
+                          label='owner-approved-target' if kind == 'visual_reference' else 'canonical logo'))
+    c = Campaign(brand_id=seeded['brand'].id, product_id=seeded['product'].id,
+        display_id='EXEC0002-FACTUAL', objective='education', language='pt-BR',
+        target_slide_count=2, platform_key='instagram_portrait')
+    db.add(c); db.commit()
+    reference = db.query(BrandAsset).filter_by(brand_id=seeded['brand'].id, kind='visual_reference').one()
+    plans = []; rows = []
+    for number, role, cid in [(1, 'application', 'ex-apply'), (2, 'routine_aftercare', 'ex-after')]:
+        claim = next(x for x in library.claims if x.claim_id == cid)
+        words = claim.approved_pt_br_wording['STANDARD']
+        row = create_claim_candidate(db, _candidate(seeded, claim_text=words))
+        verify_claim_evidence(db, row.id, _verification(seeded))
+        promote_verified_claim(db, row.id); db.commit()
+        # Build persisted snapshots from SQLite's loaded representation, as a
+        # later campaign request does (not transient timezone-aware ORM values).
+        db.expire_all()
+        p = SlidePlan(slide_number=number, purpose=role, headline=words, visual_brief='Factual routine guidance',
+            slide_id=f'factual-{number}', verified_claim_ids=[row.id],
+            evidence_references=[orchestrator._claim_reference(db, row.id, c.product_id)],
+            product_asset=orchestrator._asset_reference(asset), selection_rationale='Exact isolated product',
+            reference_asset_ids=[reference.id],
+            reference_assets=[orchestrator._asset_reference(reference, reference=True)],
+            disclaimer=orchestrator._current_brand_disclaimer(db, c))
+        p = p.model_copy(update={'claim_bindings': canonical_slide_claim_bindings(p)})
+        plans.append(p); rows.append(row)
+    path = tmp_path / 'canonical_creative.json'
+    path.write_text(json.dumps({'carousel_plan': {'slides': [p.model_dump() for p in plans]}}, ensure_ascii=False), encoding='utf-8')
+    db.add(CampaignOutput(campaign_id=c.id, kind='creative', file_path=str(path)))
+    db.commit()
+    yield db, c, rows, path
+    db.close()
+
+
+@pytest.mark.parametrize('version', [1, 2])
+def test_exec0002_real_canonical_application_aftercare_and_forged_role(live_factual_campaign, tmp_path, version):
+    from app.services import premium_handoff, marketing_claims
+    db, c, rows, path = live_factual_campaign
+    h = premium_handoff.build_campaign_handoff(db, c)
+    if version == 2:
+        h = execution_handoff(tmp_path, legacy=h)
+    assert [s.approved_claim_ids for s in h.slides] == [{'headline': 'ex-apply'}, {'headline': 'ex-after'}]
+    assert all(s.benefit_hierarchy == () for s in h.slides)
+    marketing_claims.require_ready(h, db=db, campaign=c)
+    archive = production_export(h, tmp_path / 'real_factual_export', db=db, campaign=c)
+    with zipfile.ZipFile(archive) as bundle:
+        exported = json.loads(bundle.read('HANNA_CAMPAIGN_HANDOFF.json'))
+        assert exported['version'] == version
+        assert [s['approved_copy'] for s in exported['slides']] == [s.model_dump(mode='json')['approved_copy'] for s in h.slides]
+    swapped = h.model_copy(update={'slides': (h.slides[0].model_copy(update={'slide_role': 'routine_aftercare'}), h.slides[1])})
+    with pytest.raises(ValueError, match='canonical purpose'):
+        marketing_claims.require_ready(swapped, db=db, campaign=c)
+
+
+@pytest.mark.parametrize('case', ['revoked', 'ineligible', 'expired', 'source', 'snapshot', 'purpose', 'missing_plan'])
+def test_exec0002_live_evidence_changes_block_export_before_writes(live_factual_campaign, tmp_path, case):
+    from datetime import datetime, timezone, timedelta
+    from app.services import premium_handoff
+    db, c, rows, path = live_factual_campaign
+    h = premium_handoff.build_campaign_handoff(db, c)
+    row = rows[0]
+    if case == 'revoked': row.status = 'rejected'
+    elif case == 'ineligible': row.marketing_eligible = False
+    elif case == 'expired': row.expires_at = datetime.now(timezone.utc) - timedelta(days=1)
+    elif case == 'source': row.source_ids = ['missing-source']
+    elif case == 'snapshot': row.source_excerpt = 'Changed evidence excerpt'
+    elif case == 'missing_plan': path.unlink()
+    else:
+        content = json.loads(path.read_text(encoding='utf-8'))
+        content['carousel_plan']['slides'][0]['purpose'] = 'cover'
+        path.write_text(json.dumps(content, ensure_ascii=False), encoding='utf-8')
+    db.commit()
+    target = tmp_path / 'must_not_write'
+    with pytest.raises((ValueError, OSError)):
+        production_export(h, target, db=db, campaign=c)
+    assert not target.exists()
+
+
+@pytest.mark.parametrize('operation', ['export', 'import', 'review', 'readiness', 'revision'])
+@pytest.mark.parametrize('authority', ['revoked', 'dirty_session'])
+def test_exec0002_live_consumers_reject_before_state_read_or_flush(live_factual_campaign, tmp_path,
+                                                                 monkeypatch, operation, authority):
+    from app.services import premium_handoff, premium_ingestion
+    db, c, rows, path = live_factual_campaign
+    h = premium_handoff.build_campaign_handoff(db, c)
+    rows[0].marketing_eligible = False
+    if authority == 'revoked': db.commit()
+    def forbidden(*args, **kwargs): raise AssertionError('Invalid authority reached state read/write or flush')
+    monkeypatch.setattr(premium_ingestion, '_read_state', forbidden)
+    monkeypatch.setattr(db, 'flush', forbidden)
+    actions = {
+        'export': lambda: premium_ingestion.prepare_campaign_export(db, c, tmp_path/'out', handoff=h),
+        'import': lambda: premium_ingestion.import_slide(db, c, tmp_path/'out', slide_key=h.slides[0].key,
+            filename='unused.png', data=b'unused', expected_version=0, handoff=h),
+        'review': lambda: premium_ingestion.review_slide(db, c, tmp_path/'out', None, handoff=h),
+        'readiness': lambda: premium_ingestion.readiness(db, c, handoff=h),
+        'revision': lambda: premium_ingestion.export_revision(db, c, tmp_path/'out', h.slides[0].key, handoff=h),
+    }
+    with pytest.raises(ValueError): actions[operation]()
+    assert not (tmp_path/'out').exists()
+    db.rollback()
+
+
+def test_exec0002_separate_session_revocation_is_not_hidden_by_identity_map(live_factual_campaign):
+    from sqlalchemy.orm import sessionmaker
+    from app.models import ProductClaimEvidence
+    from app.services import premium_handoff, marketing_claims
+    db, c, rows, path = live_factual_campaign
+    h = premium_handoff.build_campaign_handoff(db, c)
+    row = rows[0]
+    assert row.marketing_eligible
+    other = sessionmaker(bind=db.get_bind())()
+    try:
+        current = other.get(ProductClaimEvidence, row.id)
+        current.marketing_eligible = False
+        other.commit()
+    finally:
+        other.close()
+    assert row.marketing_eligible  # Cached historical evidence, before the gate.
+    with pytest.raises(ValueError, match='current canonical marketing evidence'):
+        marketing_claims.require_ready(h, db=db, campaign=c)

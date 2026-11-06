@@ -162,11 +162,24 @@ def assemble_handoff(campaign,packages):
         prohibited_claims=first.prohibited_claims,expected_slide_count=len(briefs),slides=tuple(briefs),assets=tuple(images.values()))
 
 
-def build_campaign_handoff(db,campaign):
-    from ..models import Brand, CampaignOutput
+def resolve_canonical_handoff(db,campaign):
+    """Read current campaign plans and revalidate live evidence, without binding.
+
+    Kept separate from claim readiness to avoid recursive authority resolution.
+    This creates no alternate registry or campaign/state writes.
+    """
+    from ..models import Brand, Campaign, CampaignOutput
     from ..schemas.ai import SlidePlan
     from .hanna_creative_package import build_hanna_creative_package
     from .creative.templates import get_platform_format
+    if db.new or db.dirty or db.deleted:
+        raise ValueError("Canonical authority requires a clean read-only session")
+    # A long-lived session may still hold evidence/campaign objects from the
+    # historical export. Re-read them rather than trusting its identity map.
+    db.expire_all()
+    campaign = db.get(Campaign, campaign.id)
+    if campaign is None:
+        raise ValueError("Current canonical campaign is missing")
     if not campaign.product_id:
         raise ValueError("Select a canonical product before premium handoff")
     output=(db.query(CampaignOutput).filter_by(campaign_id=campaign.id,kind="creative")
@@ -198,8 +211,12 @@ def build_campaign_handoff(db,campaign):
                     prohibited_claims=tuple(brand.disallowed_terms or ())+("No unsupported product claims",),
                     visual_objective="External premium creative production",width=fmt.width,height=fmt.height)
                 packages.append((index,package))
+    return assemble_handoff(campaign,packages)
+
+
+def build_campaign_handoff(db,campaign):
     from .marketing_claims import bind_handoff
-    return bind_handoff(assemble_handoff(campaign,packages))
+    return bind_handoff(resolve_canonical_handoff(db,campaign), db=db, campaign=campaign)
 
 
 def _public_asset(asset):
@@ -211,11 +228,11 @@ def _public_asset(asset):
         "file":f"assets/{asset.asset_id}-{asset.sha256[:12]}{extension}"}
 
 
-def export_handoff(handoff,directory,*,revision=None):
+def export_handoff(handoff,directory,*,revision=None,db=None,campaign=None):
     """New bundle only. Asset bytes are copied, never altered; no registry writes."""
     handoff = validate_execution_handoff(handoff)
     from .marketing_claims import require_ready, approved_library
-    library=require_ready(handoff)
+    library=require_ready(handoff, db=db, campaign=campaign)
     from .product_creative_eligibility import require_creative_eligibility
     eligibility=require_creative_eligibility(handoff.product_id)
     directory=Path(directory)

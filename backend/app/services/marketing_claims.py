@@ -64,7 +64,7 @@ def resolve_copy(library, copy_fields):
     return bindings
 
 
-def validate_brief(library, brief):
+def validate_brief(library, brief, *, canonical_brief=None):
     if brief.locale != "pt-BR":
         raise ValueError("Reviewed wording is pt-BR only; approve exact locale before handoff")
     if not brief.approved_claim_ids:
@@ -84,6 +84,21 @@ def validate_brief(library, brief):
     if dict(brief.mandatory_qualifiers) != qualifiers:
         raise ValueError("Exported qualifier contract changed")
     benefits = [c for c in selected if c.evidence_scope == "PRODUCT_BENEFIT"]
+    # A supplied role is never authority. Production callers obtain this brief
+    # independently from the current persisted campaign and live provenance.
+    factual_claim = {
+        "application": "ex-apply", "application_action": "ex-apply",
+        "routine_aftercare": "ex-after", "manufacturer_aftercare_guidance": "ex-after",
+    }.get(canonical_brief.slide_role.casefold()) if canonical_brief is not None else None
+    if factual_claim and not benefits:
+        if (brief.slide_role != canonical_brief.slide_role
+                or brief.approved_copy != canonical_brief.approved_copy
+                or brief.canonical_package_sha256 != canonical_brief.canonical_package_sha256
+                or set(expected.values()) != {factual_claim}
+                or any(c.claim_class != "FACT_ONLY" or c.evidence_scope != "PRODUCT_FACT" for c in selected)
+                or brief.benefit_hierarchy):
+            raise ValueError("Canonical factual purpose / reviewed evidence mismatch")
+        return selected
     available = any(c.claim_class in USABLE and c.evidence_scope == "PRODUCT_BENEFIT" for c in library.claims)
     if available and not benefits:
         raise ValueError("Premium brief is usage/fact-only despite approved benefits")
@@ -92,12 +107,13 @@ def validate_brief(library, brief):
     return selected
 
 
-def bind_handoff(handoff):
+def bind_handoff(handoff, *, db=None, campaign=None):
     require_creative_eligibility(handoff.product_id)
     library = load_library(handoff.product_id)
     if library.owner_library_review_status != "APPROVED":
         raise ValueError("Complete claim library awaits owner review; creative production remains paused")
     slides = []
+    canonical = _canonical_briefs(handoff, db, campaign) if db is not None or campaign is not None else {}
     by_id = {c.claim_id: c for c in library.claims}
     for brief in handoff.slides:
         bindings = resolve_copy(library, brief.approved_copy)
@@ -107,18 +123,50 @@ def bind_handoff(handoff):
         bound = brief.model_copy(update={"approved_claim_ids": bindings, "mandatory_qualifiers": qualifiers,
             "benefit_hierarchy": hierarchy, "prohibited_elements": tuple(dict.fromkeys((*brief.prohibited_elements, *library.prohibited_language))),
             "claim_library_sha256": library.digest(), "creative_brief_status": "CREATIVE_READY"})
-        validate_brief(library, bound)
+        validate_brief(library, bound, canonical_brief=canonical.get(brief.key))
         slides.append(bound)
     return handoff.model_copy(update={"slides": tuple(slides)})
 
 
-def require_ready(handoff):
+def _canonical_briefs(handoff, db, campaign):
+    """Resolve authority, never accept a caller's replacement context/role flag."""
+    if db is None or campaign is None:
+        raise ValueError("Current canonical campaign context is required")
+    from .premium_handoff import resolve_canonical_handoff
+    current = resolve_canonical_handoff(db, campaign)
+    if (handoff.campaign_id != campaign.id or current.campaign_id != handoff.campaign_id
+            or current.product_id != handoff.product_id
+            or current.expected_slide_count != handoff.expected_slide_count
+            or len(handoff.slides) != handoff.expected_slide_count
+            or len({b.key for b in handoff.slides}) != len(handoff.slides)
+            or {b.key for b in current.slides} != {b.key for b in handoff.slides}):
+        raise ValueError("Current canonical campaign / product / slide scope mismatch")
+    if (len(handoff.assets) != len(current.assets)
+            or len({a.asset_id for a in handoff.assets}) != len(handoff.assets)
+            or {a.asset_id: a for a in handoff.assets} != {a.asset_id: a for a in current.assets}):
+        raise ValueError("Current canonical asset authority changed")
+    canonical = {b.key: b for b in current.slides}
+    # Derived claim-ready fields differ legitimately from the unbound canonical
+    # brief. Everything else, including exact copy, purpose and source-package
+    # digest, must still match. Execution approval is checked independently.
+    from ..schemas.premium_handoff import PremiumSlideBrief
+    derived = {"approved_claim_ids", "mandatory_qualifiers", "benefit_hierarchy",
+               "claim_library_sha256", "creative_brief_status", "prohibited_elements"}
+    for brief in handoff.slides:
+        supplied = PremiumSlideBrief.model_validate(brief.model_dump(exclude={"execution_plan"}))
+        if supplied.model_dump(exclude=derived) != canonical[brief.key].model_dump(exclude=derived):
+            raise ValueError("Current canonical purpose / copy / package binding changed")
+    return canonical
+
+
+def require_ready(handoff, *, db=None, campaign=None):
     require_creative_eligibility(handoff.product_id)
     library = load_library(handoff.product_id)
     if library.owner_library_review_status != "APPROVED":
         raise ValueError("Claim library owner approval is required before creative export")
+    canonical = _canonical_briefs(handoff, db, campaign)
     for brief in handoff.slides:
-        validate_brief(library, brief)
+        validate_brief(library, brief, canonical_brief=canonical[brief.key])
         if brief.creative_brief_status != "CREATIVE_READY" or brief.claim_library_sha256 != library.digest():
             raise ValueError("Creative gate stale/unreviewed library snapshot")
     return library

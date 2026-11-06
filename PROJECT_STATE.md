@@ -310,3 +310,67 @@ No canonical DB/environment writes, provider calls, image generation, runtime
 activation, deployment, staging, commit, push or branch change was authorized or
 performed. Source remains uncommitted for owner review; no creative run follows
 automatically. No premium visual acceptance is claimed by these engineering tests.
+
+## BUILD6R-EXEC-0002 implementation record — 2026-11-07
+
+BUILD=BUILD6R-EXEC-0002
+TITLE=Claim Authority Freshness & Purpose-Aware Factual Validation
+AUTHORITY=Explicit bounded owner implementation authorization in this conversation
+BASE_HEAD=2441d58553965bd0549a43e9fbf813311709f11d
+BASE_TREE=35298e66463eac84113a638cd441eaa100b68222
+BRANCH=feature/build6r-v6-local-sdxl-comfyui-backend
+IMPLEMENTATION_STATUS=IMPLEMENTED_LOCALLY_NOT_COMMITTED
+
+Scope: marketing_claims.py, premium_handoff.py and premium_ingestion.py; existing
+v124_claims_gate, v121_handoff and v121_ingestion tests; the premium handoff
+workflow document; and this state record. No schema, catalog, migration, frontend
+or route changes. No new claim registry.
+
+Production export/import/review/readiness/revision now require current canonical
+campaign context and recheck the existing claim library and live database
+provenance. Canonical resolution rejects dirty sessions before queries, expires
+cached identities, and reloads persisted campaign plans and current evidence.
+Supplied historical handoffs cannot replace canonical purpose/copy/package/asset
+bindings. Missing context fails closed before production output/state writes.
+
+Benefit-free application/aftercare requires the independently resolved canonical
+purpose, exact ex-apply/ex-after factual wording and evidence, current library
+approval, qualifiers and an empty benefit hierarchy. Benefit-oriented and generic
+usage briefs retain their previous benefit requirements. Legacy v1 serialization
+and digests, v2 owner plan approval and independent artwork review are preserved.
+No existing campaign was upgraded, re-exported, imported, approved or rewritten.
+
+QA: pristine committed baseline focused suite: 101 passes, zero failures/skips.
+Final source suite: 213 focused plus 104 dependent regression passes = 317 passes,
+zero failures/skips. No baseline exception. Development failures in new fixtures
+(missing selected reference, then transient versus SQLite-loaded timestamp
+snapshots) were corrected without weakening assertions or production validation.
+The final tests include real isolated persisted campaign/evidence integration,
+cross-session revocation, v1/v2 factual exports, forged purpose/rebound digests,
+historical injection and rejection before state reads/flushes. Existing warnings
+were also present in the baseline. External socket attempts: zero.
+
+Tests configured isolated SQLite/output paths before application imports, disabled
+production dotenv loading and denied repository writes/nonisolated SQLite opens.
+Windows in-process HTTP tests used bounded loopback access; no application server,
+frontend or production API runtime was activated. No dependency installation.
+
+Evidence root (noncanonical):
+C:\Users\wesle\.codex\visualizations\2026\11\06\01a1b125-e0e5-7413-9c61-5d0f354500f1
+- EXEC0002_QA/baseline_full.xml
+- EXEC0002_QA/verified_final.xml
+- EXEC0002_QA/verified_final_network.json
+- BUILD6R_EXEC_0002_COMPLETION_EVIDENCE.json
+
+All 46 prior protected locks matched preflight and completion, including canonical
+DB, .env, claim matrix, reconstructed master, logos, references, frozen Slides
+1–6 and rejected Slides 7–8. Existing assets/output inventories were preserved.
+Canonical database/environment/settings/claim approval/campaign/artwork mutations,
+provider/image/paid calls, runtime activation, deployment, staging, commits and
+pushes: zero. Only isolated fixture data and noncanonical QA artifacts were written.
+
+Engineering implementation PASS does not establish current campaign readiness.
+Whole-library owner approval remains PENDING; live canonical ten-slide purpose/
+evidence compatibility and later v2 adoption were not activated or certified.
+Slides 7–8 plans and artwork remain unapproved. Owner review and explicit Git
+preservation authorization are the next boundaries; no automatic next build.

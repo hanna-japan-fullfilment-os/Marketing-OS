@@ -279,3 +279,58 @@ def test_operator_api_exports_imports_previews_reviews_and_revisions(setup, monk
         revision = client.post(base + "/revision", params={"slide_key": h.slides[0].key})
         assert revision.status_code == 200 and zipfile.is_zipfile(io.BytesIO(revision.content))
         assert client.get(base).json()["readiness"]["REJECTED_SLIDE_COUNT"] == 1
+
+
+@pytest.mark.parametrize('version', [1, 2])
+@pytest.mark.parametrize('operation', ['export', 'import', 'review', 'readiness', 'revision', 'publishing'])
+@pytest.mark.parametrize('authority', ['pending', 'changed_library', 'revoked_claim', 'canonical_purpose', 'missing_context'])
+def test_exec0002_historical_injection_rechecks_authority_before_writes(setup, tmp_path, monkeypatch,
+                                                                      version, operation, authority):
+    from test_build6r_v121_handoff import execution_handoff, CANONICAL_FIXTURES
+    from app.services import marketing_claims, premium_handoff
+    db, c, legacy, root = setup
+    h = execution_handoff(tmp_path, legacy=legacy) if version == 2 else legacy
+    if version == 2:
+        service.prepare_campaign_export(db, c, root, handoff=h); db.commit()
+    current_setup = (db, c, h, root)
+    ingest(current_setup)
+    review(current_setup, decision='REJECTED', feedback_codes=('composition',), feedback='Needs owner visual revision')
+    # State digest remains exactly the historically exported handoff digest.
+    before = service._read_state(db, c)[1]
+    assert before['handoff_sha256'] == h.digest()
+    files = {str(p): p.read_bytes() for p in root.rglob('*') if p.is_file()}
+    campaign_state = (c.status, c.approved_at)
+    if authority in ('pending', 'changed_library', 'revoked_claim'):
+        library = marketing_claims.load_library(h.product_id)
+        changes = {'owner_library_review_status': 'PENDING'} if authority == 'pending' else {'reviewed_by': 'Changed current authority'}
+        if authority == 'revoked_claim':
+            changes = {'claims': tuple(x.model_copy(update={'claim_class': 'PROHIBITED_UNSUPPORTED',
+                'review_status': 'PROHIBITED'}) if x.claim_id == 'ex-hydration' else x for x in library.claims)}
+        current = library.model_copy(update=changes)
+        monkeypatch.setattr(marketing_claims, 'load_library', lambda key: current)
+    elif authority == 'canonical_purpose':
+        canonical = CANONICAL_FIXTURES[c.id]
+        CANONICAL_FIXTURES[c.id] = canonical.model_copy(update={'slides': (
+            canonical.slides[0].model_copy(update={'slide_role': 'application'}), *canonical.slides[1:])})
+    else:
+        def missing(*args): raise ValueError('Current canonical campaign is missing')
+        monkeypatch.setattr(premium_handoff, 'resolve_canonical_handoff', missing)
+    monkeypatch.setattr(service, 'build_campaign_handoff', lambda *args: h)
+    def forbidden_save(*args, **kwargs): raise AssertionError('Authority failure reached state write')
+    monkeypatch.setattr(service, '_save_state', forbidden_save)
+    req = PremiumReviewRequest(expected_version=before['version'], slide_key=h.slides[0].key,
+        decision='REJECTED', reviewer='Isolated reviewer', feedback_codes=('composition',), feedback='Keep rejected')
+    operations = {
+        'export': lambda: service.prepare_campaign_export(db, c, root, handoff=h),
+        'import': lambda: service.import_slide(db, c, root, slide_key=h.slides[0].key,
+            filename='new.png', data=image_bytes('red'), expected_version=before['version'], handoff=h),
+        'review': lambda: service.review_slide(db, c, root, req, handoff=h),
+        'readiness': lambda: service.readiness(db, c, handoff=h),
+        'revision': lambda: service.export_revision(db, c, root, h.slides[0].key, handoff=h),
+        'publishing': lambda: service.require_publishing_ready(db, c),
+    }
+    with pytest.raises(ValueError): operations[operation]()
+    assert service._read_state(db, c)[1] == before
+    assert {str(p): p.read_bytes() for p in root.rglob('*') if p.is_file()} == files
+    assert (c.status, c.approved_at) == campaign_state
+    assert not db.new and not db.dirty and not db.deleted

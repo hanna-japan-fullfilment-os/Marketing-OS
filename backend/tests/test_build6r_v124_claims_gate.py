@@ -6,10 +6,20 @@ import pytest
 from app.schemas.creative_bridge import CopyField
 from app.schemas.marketing_claims import MarketingClaim, ClaimLibrary
 from app.services import marketing_claims as gate
-from app.services.premium_handoff import assemble_handoff, export_handoff
+from app.services.premium_handoff import assemble_handoff
+from test_build6r_v121_handoff import export_handoff, register_fixture, install_fixture_authority
 from test_build6r_v101_creative_package import package
 
 PRODUCT = "a5ea2272a1f89d743c089461bb2fb50f"
+
+
+@pytest.fixture(autouse=True)
+def canonical_authority(monkeypatch):
+    install_fixture_authority(monkeypatch)
+
+
+def require_fixture_ready(h):
+    return gate.require_ready(h, db=object(), campaign=SimpleNamespace(id=h.campaign_id))
 
 
 @pytest.fixture
@@ -33,7 +43,7 @@ def draft(tmp_path, words=None):
     p = package(tmp_path, product_id=PRODUCT, product_name="LuLuLun Hydra EX Mask 7 Sheets",
         approved_copy=tuple(CopyField(key=k, text=v) for k, v in (words or {"headline": "Hidratação", "body": "Ajuda a manter a pele hidratada."}).items()), required_cta="")
     campaign = SimpleNamespace(id="campaign", objective="awareness", angle="", hook="", audience="Brazil")
-    return assemble_handoff(campaign, [(1, p)])
+    return register_fixture(assemble_handoff(campaign, [(1, p)]))
 
 
 def test_exact_sku_primary_provenance_and_research_complete(library):
@@ -100,7 +110,7 @@ def test_unresolved_market_clearance_does_not_block_creative_use(tmp_path, libra
     monkeypatch.setattr(gate, "load_library", lambda product_id: held)
     result = gate.bind_handoff(draft(tmp_path))
     assert result.slides[0].creative_brief_status == "CREATIVE_READY"
-    gate.require_ready(result)
+    require_fixture_ready(result)
     assert next(c for c in library.claims if c.claim_id == "ex-exosomes").claim_class == "NEEDS_REVIEW"
 
 
@@ -150,7 +160,7 @@ def test_forged_or_stale_ready_contract_fails(tmp_path, owner_reviewed, change):
     updates = {"binding": {"approved_claim_ids": {"headline": "ex-collagen", "body": "ex-collagen"}},
         "hierarchy": {"benefit_hierarchy": ()}, "library_sha": {"claim_library_sha256": "changed"},
         "status": {"creative_brief_status": "DRAFT"}}[change]
-    with pytest.raises(ValueError): gate.require_ready(h.model_copy(update={"slides": (b.model_copy(update=updates),)}))
+    with pytest.raises(ValueError): require_fixture_ready(h.model_copy(update={"slides": (b.model_copy(update=updates),)}))
 
 
 def test_proposed_five_slide_plan_has_ids_qualifiers_and_hierarchy(library):
@@ -161,3 +171,86 @@ def test_proposed_five_slide_plan_has_ids_qualifiers_and_hierarchy(library):
         assert p["approved_claim_ids"] and p["benefit_hierarchy"] and p["prohibited_wording"]
         assert gate.resolve_copy(library, tuple(CopyField(key=k, text=v) for k, v in p["approved_copy"].items())) == p["approved_claim_ids"]
     assert "causada pelo ressecamento" in plans[0]["approved_copy"]["radiance.body"]
+
+
+def factual_fixture(tmp_path, library, role, claim_id):
+    wording = next(c for c in library.claims if c.claim_id == claim_id).approved_pt_br_wording['STANDARD']
+    raw = draft(tmp_path, {'headline': wording})
+    raw = raw.model_copy(update={'slides': (raw.slides[0].model_copy(update={'slide_role': role}),)})
+    return register_fixture(raw)
+
+
+@pytest.mark.parametrize('role,claim_id', [('application', 'ex-apply'),
+    ('application_action', 'ex-apply'), ('routine_aftercare', 'ex-after'),
+    ('MANUFACTURER_AFTERCARE_GUIDANCE', 'ex-after')])
+def test_exec0002_canonical_factual_purpose_without_benefits(tmp_path, owner_reviewed, role, claim_id):
+    raw = factual_fixture(tmp_path, owner_reviewed, role, claim_id)
+    ready = gate.bind_handoff(raw, db=object(), campaign=SimpleNamespace(id=raw.campaign_id))
+    assert ready.slides[0].benefit_hierarchy == ()
+    assert ready.slides[0].approved_claim_ids == {'headline': claim_id}
+    assert ready.slides[0].approved_copy == raw.slides[0].approved_copy
+    require_fixture_ready(ready)
+
+
+@pytest.mark.parametrize('role,claim_id', [('cover', 'ex-apply'),
+    ('usage', 'ex-after'), ('application', 'ex-after'), ('routine_aftercare', 'ex-apply')])
+def test_exec0002_unrelated_or_swapped_factual_purpose_fails(tmp_path, owner_reviewed, role, claim_id):
+    raw = factual_fixture(tmp_path, owner_reviewed, role, claim_id)
+    with pytest.raises(ValueError):
+        gate.bind_handoff(raw, db=object(), campaign=SimpleNamespace(id=raw.campaign_id))
+
+
+def test_exec0002_role_only_and_missing_context_never_grant_authority(tmp_path, owner_reviewed):
+    raw = factual_fixture(tmp_path, owner_reviewed, 'cover', 'ex-apply')
+    forged = raw.model_copy(update={'slides': (raw.slides[0].model_copy(update={'slide_role': 'application'}),)})
+    with pytest.raises(ValueError, match='canonical purpose'):
+        gate.bind_handoff(forged, db=object(), campaign=SimpleNamespace(id=raw.campaign_id))
+    with pytest.raises(ValueError, match='usage/fact-only'):
+        gate.bind_handoff(forged)
+    good = gate.bind_handoff(draft(tmp_path))
+    with pytest.raises(ValueError, match='canonical campaign context'):
+        gate.require_ready(good)
+
+
+@pytest.mark.parametrize('case', ['unknown', 'wrong', 'missing', 'additional'])
+def test_exec0002_exact_claim_mapping_attacks(tmp_path, owner_reviewed, case):
+    ready = gate.bind_handoff(draft(tmp_path))
+    b = ready.slides[0]
+    ids = dict(b.approved_claim_ids)
+    if case == 'unknown': ids['headline'] = 'UNVERIFIED'
+    elif case == 'wrong': ids['headline'] = 'ex-after'
+    elif case == 'missing': ids.pop('body')
+    else: ids['extra'] = 'ex-after'
+    altered = ready.model_copy(update={'slides': (b.model_copy(update={'approved_claim_ids': ids}),)})
+    with pytest.raises(ValueError, match='Claim ID'):
+        require_fixture_ready(altered)
+
+
+@pytest.mark.parametrize('case', ['pending_library', 'digest', 'revoked', 'language', 'wording'])
+def test_exec0002_current_library_authority_is_reloaded(tmp_path, owner_reviewed, monkeypatch, case):
+    ready = gate.bind_handoff(draft(tmp_path))
+    changes = {}
+    if case == 'pending_library': changes['owner_library_review_status'] = 'PENDING'
+    elif case == 'digest': changes['reviewed_by'] = 'New reviewed authority revision'
+    else:
+        claims = []
+        for c in owner_reviewed.claims:
+            data = c.model_dump()
+            if c.claim_id == 'ex-hydration':
+                if case == 'revoked': data.update(claim_class='PROHIBITED_UNSUPPORTED', review_status='PROHIBITED')
+                elif case == 'language': data.update(claim_class='NEEDS_REVIEW', review_status='NEEDS_REVIEW', language_review='PENDING')
+                else: data['approved_pt_br_wording'] = {'STANDARD': 'Novo texto revisado.'}
+            claims.append(MarketingClaim.model_validate(data))
+        changes['claims'] = tuple(claims)
+    current = ClaimLibrary.model_validate({**owner_reviewed.model_dump(), **changes})
+    monkeypatch.setattr(gate, 'load_library', lambda product_id: current)
+    with pytest.raises(ValueError):
+        require_fixture_ready(ready)
+
+
+def test_exec0002_factual_hierarchy_cannot_be_invented(tmp_path, owner_reviewed):
+    raw = factual_fixture(tmp_path, owner_reviewed, 'application', 'ex-apply')
+    ready = gate.bind_handoff(raw, db=object(), campaign=SimpleNamespace(id=raw.campaign_id))
+    altered = ready.model_copy(update={'slides': (ready.slides[0].model_copy(update={'benefit_hierarchy': ('ex-hydration',)}),)})
+    with pytest.raises(ValueError, match='factual purpose'):
+        require_fixture_ready(altered)

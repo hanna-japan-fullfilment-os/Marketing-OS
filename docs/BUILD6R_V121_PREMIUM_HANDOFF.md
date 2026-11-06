@@ -1,5 +1,40 @@
 # Hanna premium creative production
 
+## BUILD6R-EXEC-0002: current claim authority and factual purposes
+
+Production export now requires `export_handoff(handoff, directory, db=db,
+campaign=campaign)`. Import, review, readiness and revision resolve current
+canonical authority even when a historical `handoff=` is explicitly supplied.
+Missing canonical context fails closed before output/state writes. An unchanged
+historical handoff digest does not establish current evidence or library approval.
+
+`resolve_canonical_handoff` reuses the existing persisted creative plan loader,
+package builder and database provenance checks. It requires a clean session,
+reloads the campaign identity, and never binds claims, creates evidence or writes
+campaign data. Cached session identities are expired before resolution so an
+earlier export cannot conceal evidence revoked by another session.
+`require_ready` compares the complete canonical slide set, exact
+copy, purpose and source-package bindings, then applies the existing reviewed
+claim, qualifier, library-approval and library-digest checks. There is no alternate
+claim registry, caller-supplied purpose permission or cached authority token.
+
+Benefit-free application/aftercare is supported only for independently resolved
+canonical purposes and their exact reviewed factual claims: application or
+application_action maps to ex-apply; routine_aftercare or
+manufacturer_aftercare_guidance maps to ex-after. Purpose matching is
+case-insensitive for policy selection, but the supplied role must still equal the
+canonical role. Only FACT_ONLY / PRODUCT_FACT evidence qualifies, and its benefit
+hierarchy must be empty. Other purposes retain the existing benefit requirements.
+No Portuguese copy, claim approval or persisted campaign purpose is rewritten to
+make a brief eligible. Pending whole-library approval still blocks production.
+
+Legacy v1 serialization and digests are unchanged. Context-free production calls
+are intentionally refused; old artifacts and review history remain preserved.
+Version-2 draft preparation remains structural and in memory, while production
+still requires exact-content owner plan approval and independent returned-artwork
+review. This repair does not adopt v2 into an existing campaign, reopen frozen
+artwork, activate an API/frontend, call a provider or authorize publication.
+
 ## BUILD6R-EXEC-0001: purpose-aware execution contract
 
 New executions may explicitly adopt `PremiumExecutionHandoff` (version 2).

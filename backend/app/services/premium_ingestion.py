@@ -56,12 +56,19 @@ def _save_state(db,campaign,data,root,row,*,expected_version):
     return data
 
 
+def _production_handoff(db,campaign,handoff):
+    """Check current authority before even reading mutable workflow state."""
+    from .marketing_claims import require_ready
+    handoff=validate_execution_handoff(handoff or build_campaign_handoff(db,campaign))
+    require_ready(handoff,db=db,campaign=campaign)
+    return handoff
+
+
 def prepare_campaign_export(db,campaign,root,*,handoff=None):
-    handoff=handoff or build_campaign_handoff(db,campaign)
-    handoff=validate_execution_handoff(handoff)
+    handoff=_production_handoff(db,campaign,handoff)
     row,state=_read_state(db,campaign)
     bundle=Path(root)/"premium_handoff"/campaign.id/uuid4().hex
-    archive=export_handoff(handoff,bundle)
+    archive=export_handoff(handoff,bundle,db=db,campaign=campaign)
     changed=state.get("handoff_sha256")!=handoff.digest()
     if changed:
         state["history"].extend(state["slides"].values())
@@ -79,7 +86,7 @@ def _current(handoff,state):
 
 
 def import_slide(db,campaign,root,*,slide_key,filename,data,expected_version,handoff=None):
-    handoff=handoff or build_campaign_handoff(db,campaign)
+    handoff=_production_handoff(db,campaign,handoff)
     row,state=_read_state(db,campaign)
     _current(handoff,state)
     slide=next((s for s in handoff.slides if s.key==slide_key),None)
@@ -117,7 +124,7 @@ def import_slide(db,campaign,root,*,slide_key,filename,data,expected_version,han
 
 
 def review_slide(db,campaign,root,request,*,handoff=None):
-    handoff=handoff or build_campaign_handoff(db,campaign)
+    handoff=_production_handoff(db,campaign,handoff)
     row,state=_read_state(db,campaign)
     _current(handoff,state)
     record=state["slides"].get(request.slide_key)
@@ -145,8 +152,7 @@ def review_slide(db,campaign,root,request,*,handoff=None):
 
 
 def readiness(db,campaign,*,handoff=None):
-    handoff=handoff or build_campaign_handoff(db,campaign)
-    handoff=validate_execution_handoff(handoff)
+    handoff=_production_handoff(db,campaign,handoff)
     _,state=_read_state(db,campaign)
     current=state.get("handoff_sha256")==handoff.digest()
     approved=0
@@ -177,7 +183,7 @@ def require_publishing_ready(db,campaign):
 
 
 def export_revision(db,campaign,root,slide_key,*,handoff=None):
-    handoff=handoff or build_campaign_handoff(db,campaign)
+    handoff=_production_handoff(db,campaign,handoff)
     _,state=_read_state(db,campaign)
     _current(handoff,state)
     record=state["slides"].get(slide_key)
@@ -187,7 +193,7 @@ def export_revision(db,campaign,root,slide_key,*,handoff=None):
     if hashlib.sha256(data).hexdigest()!=record["sha256"]:
         raise ValueError("Rejected slide bytes changed")
     directory=Path(root)/"premium_revisions"/campaign.id/uuid4().hex
-    archive=export_handoff(handoff,directory,revision={"slide_key":slide_key,"feedback_codes":record["feedback_codes"],
+    archive=export_handoff(handoff,directory,db=db,campaign=campaign,revision={"slide_key":slide_key,"feedback_codes":record["feedback_codes"],
         "requested_visual_changes":record["feedback"],"original_sha256":record["sha256"],"canonical_copy_unchanged":True})
     import zipfile
     with zipfile.ZipFile(archive,"a") as bundle:
