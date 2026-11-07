@@ -249,7 +249,7 @@ def resolve_authentic_package_mark_permission(db, campaign, render_asset_id):
             or permission.render_sha256 != render.sha256 or not source.is_active or not render.is_active
             or source.image_role != "product" or source_metadata.get("ai_generated") is not False):
         raise ValueError("Package-mark identity/authenticity mismatch")
-    if render is not source and choose_approved_product_master([render], source_lookup=lambda key: db.get(Asset, key)) is None:
+    if render is not source and choose_approved_product_master([render], source_lookup=lambda key: db.get(Asset, key), campaign_id=campaign.id) is None:
         raise ValueError("Package-mark master approval missing")
     if render is source and render.image_role != "product":
         raise ValueError("Package-mark product role mismatch")

@@ -169,9 +169,10 @@ publish or mutate the canonical acceptance campaign. No follow-up is automatic.
 `canonical_campaign_reconciliation` prepares typed plans in memory and validates
 an exact owner-approved architecture against current claim-library wording and
 the existing V3.45 evidence/provenance services. It creates no claim registry,
-evidence rows, approvals, campaign records or artwork. `apply_campaign` is an
-explicit disabled boundary in Phase 1: every call fails before writes. A Phase 2
-data-operation authorization and reviewed execution adapter remain necessary.
+evidence rows, approvals, campaign records or artwork. The initial Phase 1
+`apply_campaign` boundary rejected every call. The guarded adapter described below
+now requires independently recorded authorization and already valid prerequisites;
+its implementation does not authorize canonical execution.
 There is no startup hook, API route, provider dispatch or automatic adoption.
 
 The historical six-slide acceptance fixture is never migrated. A future separate
@@ -228,3 +229,64 @@ historical package digests. Preserve old artifacts/reviews; never automatically
 re-export or rebind the six-slide fixture. Production data application, whole-library
 approval, provider execution, publication and Git preservation require their own
 authorization. Structural QA does not establish premium aesthetic acceptance.
+
+## EXEC-0003 guarded draft application adapter
+
+This is a separately invoked service operation, with no API/startup integration.
+It never registers or promotes evidence, approves assets/permissions, modifies
+the claim library, or adopts historical artwork approval. It creates exactly one
+new Campaign, ten CampaignSlide rows and two CampaignOutput rows (creative and
+campaign_reconciliation). The campaign stays IDEA/PENDING, approval/publication
+timestamps stay null, and rendered/background paths stay empty.
+
+Prerequisites must already be independently registered and approved. In particular,
+the current whole-library review must be APPROVED, the fourteen exact product
+evidence mappings must remain eligible/promoted, and the exact campaign/master
+package-mark permission must exist. The scoped permission resolver forwards the
+actual campaign ID to the existing master selector; global selection still omits
+campaign context and excludes scoped masters. No historical permission is inherited.
+
+`describe_application` validates the detached proposal and returns a review package
+digest covering database identity, output root, complete normalized records,
+creative/manifest digests, current library and permission, creative eligibility and
+the exhaustive frozen/selected/deferred dispositions. It grants no write authority.
+
+`apply_campaign(..., owner_authorization=<event ID>)` reads an independently persisted
+AuditEvent with entity_type=canonical_campaign_application, entity_id equal to the
+new campaign ID and action=owner_authorized. Its detail must satisfy the separate
+CanonicalApplicationAuthorization contract: exact operation, OWNER authority,
+named operator, bounded operation ID, exact reviewed package hash and unexpired
+authorization. Missing/revoked/changed events fail closed. An append-only
+owner_authorization_revoked event referencing authorization_event_id also revokes
+it. The adapter does not create or update these prerequisite authorization events.
+No boolean, caller digest or supplied approval dictionary grants authority.
+Creating that trusted operator record needs separate owner data-write authority;
+this is the existing operator/database trust boundary, not new authentication.
+
+Use a fresh dedicated file-backed SQLite Session, with no caller transaction or
+pending ORM changes. The adapter ends its read-only preflight, acquires BEGIN
+IMMEDIATE, revalidates authority, checks identity/display collisions and complete
+idempotency, then creates exclusive output files. It rechecks authority after file
+publication and before any inserts. The thirteen rows share one transaction.
+Files are fsynced before commit; filesystem and SQLite are not one atomic store.
+
+An exclusive operation directory contains the two referenced JSON outputs and an
+immutable intent.json with authorization identity, package hash and expected file
+hashes. PREPARED is not proof of commit. Identical replay is recognized only when
+the complete thirteen-record graph, normalized values, output bytes and original
+intent all agree. Changed, evolved or partial state fails; it is never repaired by
+replay. Existing orphan directories are never adopted, even if their bytes match.
+
+Failures roll back new rows. Cleanup is limited to recorded attempt-owned file
+identities with matching bytes (or exact partial-write prefixes), plus the empty
+attempt-owned directory. Replaced/tampered/undeletable files are retained and named
+in ApplicationRecoveryRequired.evidence. Unrelated files and prerequisites are
+never deleted. A failed commit acknowledgement is checked with a fresh reader:
+confirmed completion retains its files; an unknown outcome retains evidence for
+explicit recovery. There is no commit retry or background recovery operation.
+`inspect_application_recovery` is read-only and requires current authorization;
+it reports committed/unreferenced/not-applied state without adopting or deleting.
+
+Source implementation and isolated fixture approval do not authorize any canonical
+application, prerequisite registration, claim promotion, permission approval,
+provider operation, artwork generation, runtime activation or deployment.

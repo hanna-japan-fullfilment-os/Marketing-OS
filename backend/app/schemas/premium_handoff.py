@@ -1,6 +1,6 @@
 """Governed external creative handoff and human review contracts."""
 from typing import Literal
-from pydantic import Field, StrictBool, field_validator, model_validator
+from pydantic import AwareDatetime, Field, StrictBool, field_validator, model_validator
 from .creative_bridge import Contract, CreativeImage, CopyField
 
 
@@ -147,6 +147,29 @@ class CanonicalCampaignReconciliation(Contract):
     master_asset_id: str = Field(min_length=1)
     logo: CreativeImage
     references: tuple[CreativeImage, ...] = Field(min_length=1)
+
+
+class CanonicalApplicationAuthorization(Contract):
+    """Read from an existing trusted-operator AuditEvent, never from a flag.
+
+    This authorizes creation of a draft data graph only. It cannot approve claims,
+    execution plans, artwork, publication, or another operation/package.
+    """
+    version: Literal[1] = 1
+    operation: Literal["CREATE_CANONICAL_TEN_SLIDE_DRAFT"]
+    status: Literal["AUTHORIZED", "REVOKED"]
+    authority: Literal["OWNER"]
+    operator: str = Field(min_length=1)
+    operation_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
+    package_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    expires_at: AwareDatetime
+
+    @field_validator("operator")
+    @classmethod
+    def named_operator(cls, value):
+        if not value.strip():
+            raise ValueError("Named operator required")
+        return value.strip()
 
 
 class ProductionScopeEnvelope(Contract):

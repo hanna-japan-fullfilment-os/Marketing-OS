@@ -443,3 +443,56 @@ Live ten-slide reconciliation remains unactivated; eight exact evidence mappings
 press-release source representation, campaign-scoped metadata and independent owner
 decisions remain Phase 2 work. Whole-library approval is still PENDING. No automatic
 next phase, export, ingestion, provider operation or Git preservation is authorized.
+
+
+## BUILD6R-EXEC-0003 — Guarded application adapter (isolated QA only)
+
+Implemented against HEAD fab045f1edd8a4a4047705febe2eb0292a92f054,
+tree 62d972e233846f5db90e11926ce0882ccc031d3c. Scope: three source files,
+three existing test files, premium handoff workflow documentation and this state file.
+This checkpoint supersedes the Phase 1 disabled-adapter implementation description;
+it does not authorize or record canonical application.
+
+Product selection now forwards canonical campaign identity to the existing approved
+master selector; global defaults and independent campaign permission requirements
+remain intact. A separate typed authorization payload leaves existing v1/v2 schema
+classes unchanged. The adapter requires an independently persisted owner authorization
+AuditEvent, current evidence/library approval, exact campaign/product/master/permission
+bindings, reviewed package identity and complete ten-slide dispositions. Caller flags
+or supplied digests cannot establish authority. No authorization event is created by
+application; a trusted, separately authorized operator must establish that prerequisite.
+
+Application validates before mutation, obtains BEGIN IMMEDIATE, revalidates authority
+under the lock and again after file publication, and commits exactly thirteen new
+draft records in one database transaction. Exclusive files and an immutable intent
+record support owned-file cleanup and read-only recovery inspection. Filesystem and
+SQLite publication are not a single atomic operation: ambiguous commit outcomes,
+changed files and interrupted/orphaned state fail closed for explicit recovery.
+Identical completed applications are recognized without adopting approvals or orphans.
+Historical six-slide records and frozen artwork remain preserved.
+
+Final isolated QA: 259 focused plus 371 dependent tests = 630 passed, zero failures,
+errors or skips (18 warnings). Committed baseline: 207 passed. One development
+concurrency fixture failure was corrected by capturing its immutable product ID before
+worker threads; concurrency assertions were retained. No baseline exception.
+Tests include authorization/staleness, lock-time revocation, collisions, concurrent
+attempts, file publication/fsync/flush/commit faults, lost commit acknowledgement,
+unknown outcomes, interrupted recovery, scoped/global selection and v1/v2 compatibility.
+All six source/test hashes remained identical throughout the accepted final run.
+
+Noncanonical evidence directory:
+C:\Users\wesle\.codex\visualizations\2026\11\06\01a1b125-e0e5-7413-9c61-5d0f354500f1\EXEC0003_ADAPTER_QA
+Accepted evidence: baseline_verified.xml; verified_final.xml;
+verified_final_network.json; verified_final_source_hashes.json;
+BUILD6R_EXEC_0003_ADAPTER_COMPLETION_EVIDENCE.json.
+Production dotenv reads, repository test writes, nonisolated SQLite access and external
+socket connections were denied; bounded loopback supported isolated test clients.
+
+No canonical database, evidence, approval, campaign, environment or artwork mutation;
+no provider, image-generation or paid call; no runtime activation or deployment.
+Protected hashes and untracked inventories are reverified in the completion manifest.
+No staging, commit, push or main integration. Git preservation requires separate
+explicit authorization. Canonical operation remains blocked on reviewed evidence and
+source registration, truthful reconstructed-master provenance, campaign-specific
+permission, library/owner decisions and independently authorized concrete application.
+No prerequisite registration, Phase 3 or subsequent build is implied.

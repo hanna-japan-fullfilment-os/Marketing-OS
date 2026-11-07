@@ -34,9 +34,10 @@ def reconciled(temp_db, tmp_path, monkeypatch):
     seed = _seed(db)
     library = marketing_claims.load_library(reconcile.PRODUCT_ID)
     seed['product'].name = 'LuLuLun Hydra EX Mask 7 Sheets'
-    reviewed = library.model_copy(update={'product_id': seed['product'].id, 'owner_library_review_status': 'APPROVED'})
-    monkeypatch.setattr(marketing_claims, 'load_library', lambda key: reviewed if key == seed['product'].id else (_ for _ in ()).throw(ValueError('Wrong product')))
-    monkeypatch.setattr(reconcile, 'PRODUCT_ID', seed['product'].id)
+    product_id = seed['product'].id  # Immutable fixture identity; never share an ORM loader across worker Sessions.
+    reviewed = library.model_copy(update={'product_id': product_id, 'owner_library_review_status': 'APPROVED'})
+    monkeypatch.setattr(marketing_claims, 'load_library', lambda key: reviewed if key == product_id else (_ for _ in ()).throw(ValueError('Wrong product')))
+    monkeypatch.setattr(reconcile, 'PRODUCT_ID', product_id)
     historical = Campaign(id=reconcile.HISTORICAL_CAMPAIGN_ID, display_id='SIX-ACCEPTANCE',
         brand_id=seed['brand'].id, product_id=seed['product'].id, target_slide_count=6,
         status='COPY_READY', notes='Protected isolated historical fixture')
@@ -373,3 +374,284 @@ def test_scoped_cross_session_revocation_precedes_state_and_writes(reconciled,mo
         'revision':lambda:premium_ingestion.export_revision(db,c,root,key,handoff=scope)}
     with pytest.raises(ValueError,match='current canonical marketing evidence'):actions[operation]()
     assert not root.exists()
+
+
+@pytest.fixture
+def application(reconciled):
+    """Synthetic approved prerequisites; application itself adds only 13 rows.
+
+    Authorization is seeded independently in the existing audit table. No helper
+    in the production adapter creates approvals or evidence.
+    """
+    from datetime import datetime, timedelta, timezone
+    from app.models import AuditEvent
+    f = reconciled; db = f['db']; c = f['campaign']
+    values = {column.name:getattr(c,column.name) for column in c.__table__.columns}
+    db.delete(c); db.commit()
+    f['campaign'] = Campaign(**values)
+    source = f['source']; master = f['master']
+    permission = dict(version=1,status='APPROVED',authority='OWNER',approved_at='2026-01-01T00:00:00Z',
+        campaign_id=c.id,brand_id=master.brand_id,product_id=master.product_id,
+        source_asset_id=source.id,render_asset_id=master.id,source_sha256=source.sha256,render_sha256=master.sha256,
+        owner_decision_sha256='a'*64,use='PHYSICAL_PACKAGE_DEPICTION_ONLY',
+        allowed_marks=[dict(mark_id='fixture-seal',kind='award',visible_text=['Physical fixture seal'])])
+    source.ai_metadata = {**source.ai_metadata,'authentic_package_mark_permissions':[permission]}
+    db.commit()
+    root = f['tmp']/'application-output'
+    preview = reconcile.describe_application(db,f['campaign'],f['manifest'],f['creative_path'].read_bytes(),root)
+    db.rollback()
+    event = AuditEvent(entity_type='canonical_campaign_application',entity_id=c.id,action='owner_authorized',detail={
+        'version':1,'operation':'CREATE_CANONICAL_TEN_SLIDE_DRAFT','status':'AUTHORIZED','authority':'OWNER',
+        'operator':'Isolated owner/operator','operation_id':'fixture-operation',
+        'package_sha256':preview['package_sha256'],'expires_at':(datetime.now(timezone.utc)+timedelta(hours=1)).isoformat()})
+    db.add(event);db.commit()
+    f.update(root=root,authorization=event.id,preview=preview)
+    return f
+
+
+def apply_fixture(f, **changes):
+    args=dict(db=f['db'],campaign=f['campaign'],manifest=f['manifest'],creative=f['creative_path'].read_bytes(),
+        output_directory=f['root'],owner_authorization=f['authorization'])
+    args.update(changes)
+    return reconcile.apply_campaign(**args)
+
+
+def test_application_creates_only_thirteen_pending_records_and_is_idempotent(application):
+    from app.models import AuditEvent, ProductClaimEvidence
+    f=application;db=f['db']
+    # Exact historical graph and all pre-existing prerequisites stay unchanged.
+    def snapshot():
+        return {table.name:[tuple(row) for row in db.execute(table.select()).all()]
+            for table in [AuditEvent.__table__,Asset.__table__,BrandAsset.__table__,ProductClaimEvidence.__table__]}
+    before=snapshot();old=[tuple(row) for row in db.execute(Campaign.__table__.select()).all()];db.rollback()
+    result=apply_fixture(f)
+    assert result['status']=='APPLIED' and result['record_count']==13
+    assert not result['approvals_adopted']
+    assert apply_fixture(f)['status']=='ALREADY_APPLIED'
+    assert snapshot()==before
+    assert [tuple(row) for row in db.execute(Campaign.__table__.select().where(Campaign.id==reconcile.HISTORICAL_CAMPAIGN_ID)).all()]==old
+    assert db.query(Campaign).count()==2
+    assert db.query(CampaignSlide).filter_by(campaign_id=f['campaign'].id).count()==10
+    assert db.query(CampaignOutput).filter_by(campaign_id=f['campaign'].id).count()==2
+    actual=db.get(Campaign,f['campaign'].id)
+    assert actual.status=='IDEA' and actual.human_review_status=='PENDING' and actual.approved_at is None
+    assert all(not s.rendered_asset_path for s in db.query(CampaignSlide).filter_by(campaign_id=actual.id))
+    db.rollback()
+    assert reconcile.inspect_application_recovery(db,f['campaign'],f['manifest'],f['creative_path'].read_bytes(),f['root'],owner_authorization=f['authorization'])['status']=='COMMITTED'
+    assert len(list(f['root'].rglob('*.json')))==3  # Intent plus two referenced outputs.
+
+
+@pytest.mark.parametrize('authorization',[None,True,False,'',{},'caller-digest-does-not-authorize'])
+def test_application_missing_authority_never_reaches_mutation(application,monkeypatch,authorization):
+    f=application
+    def forbidden(*a,**k):raise AssertionError('Unauthorized application reached DML')
+    monkeypatch.setattr(f['db'],'add',forbidden);monkeypatch.setattr(f['db'],'flush',forbidden)
+    with pytest.raises(ValueError):apply_fixture(f,owner_authorization=authorization)
+    assert not f['root'].exists()
+
+
+@pytest.mark.parametrize('fault',['revoked','expired','package','campaign','operation','operator','revocation_event',
+    'product','master','permission','permission_revoked','claim_revoked','library','output'])
+def test_application_rejects_wrong_or_stale_prerequisites_before_writes(application,monkeypatch,fault):
+    from datetime import datetime,timedelta,timezone
+    from app.models import AuditEvent
+    f=application;db=f['db'];kwargs={}
+    event=db.get(AuditEvent,f['authorization']);detail=dict(event.detail)
+    if fault=='revoked':detail['status']='REVOKED'
+    elif fault=='expired':detail['expires_at']=(datetime.now(timezone.utc)-timedelta(seconds=1)).isoformat()
+    elif fault=='package':detail['package_sha256']='f'*64
+    elif fault=='campaign':event.entity_id='unrelated'
+    elif fault=='operation':detail['operation']='APPROVE_ARTWORK'
+    elif fault=='operator':detail['operator']=' '
+    elif fault=='revocation_event':db.add(AuditEvent(entity_type=event.entity_type,entity_id=event.entity_id,
+        action='owner_authorization_revoked',detail={'authorization_event_id':event.id}))
+    elif fault=='product':kwargs['campaign']=Campaign(**{**f['preview']['campaign_record'],'product_id':'wrong'})
+    elif fault=='master':kwargs['manifest']=f['manifest'].model_copy(update={'master_asset_id':f['source'].id})
+    elif fault in ('permission','permission_revoked'):
+        metadata=dict(f['source'].ai_metadata);entries=[dict(v) for v in metadata['authentic_package_mark_permissions']]
+        entries[0]['campaign_id']='other' if fault=='permission' else entries[0]['campaign_id']
+        if fault=='permission_revoked':entries[0]['status']='REVOKED'
+        f['source'].ai_metadata={**metadata,'authentic_package_mark_permissions':entries}
+    elif fault=='claim_revoked':f['rows'][0].marketing_eligible=False
+    elif fault=='library':monkeypatch.setattr(marketing_claims,'load_library',lambda _:f['library'].model_copy(update={'owner_library_review_status':'PENDING'}))
+    else:kwargs['output_directory']=f['tmp']/'another-root'
+    event.detail=detail;db.commit()
+    def forbidden(*a,**k):raise AssertionError('Invalid authority reached insert/flush')
+    monkeypatch.setattr(db,'add',forbidden);monkeypatch.setattr(db,'flush',forbidden)
+    with pytest.raises(ValueError):apply_fixture(f,**kwargs)
+    assert not f['root'].exists()
+
+
+def test_application_revalidates_after_write_lock(application,monkeypatch):
+    f=application;original=reconcile._authorized_application;calls=[]
+    def changed(*a,**k):
+        preview,auth=original(*a,**k);calls.append(1)
+        if len(calls)==2:preview={**preview,'package_sha256':'f'*64}
+        return preview,auth
+    monkeypatch.setattr(reconcile,'_authorized_application',changed)
+    with pytest.raises(ValueError,match='after preflight'):apply_fixture(f)
+    assert len(calls)==2 and not f['root'].exists()
+
+
+@pytest.mark.parametrize('fault',['intent','creative','manifest','open','partial','fsync','flush','commit'])
+def test_application_failure_rolls_back_only_its_files_and_records(application,monkeypatch,fault):
+    f=application;db=f['db'];unrelated=f['tmp']/'keep.json';unrelated.write_text('protected unrelated output')
+    publish=reconcile._publish_application_file
+    def failing_publish(path,raw,owned):
+        if fault=='open':raise OSError('Injected exclusive-open failure')
+        if fault=='partial':
+            import os
+            with path.open('xb') as stream:
+                stat=os.fstat(stream.fileno());owned.append((path,stat.st_dev,stat.st_ino,raw))
+                stream.write(raw[:10])
+            raise OSError('Injected partial-write failure')
+        publish(path,raw,owned)
+        if (fault=='intent' and path.name=='intent.json' or fault=='creative' and path.name.startswith('creative-')
+                or fault=='manifest' and path.name==f['manifest'].digest()+'.json'):
+            raise OSError('Injected publication failure')
+    monkeypatch.setattr(reconcile,'_publish_application_file',failing_publish)
+    if fault=='fsync':
+        import os
+        def no_sync(*a):raise OSError('Injected fsync failure')
+        monkeypatch.setattr(os,'fsync',no_sync)
+    if fault in ('flush','commit'):
+        def fail(*a,**k):raise OSError('Injected database failure')
+        monkeypatch.setattr(db,fault,fail)
+    with pytest.raises(OSError,match='Injected'):apply_fixture(f)
+    assert db.get(Campaign,f['campaign'].id) is None
+    assert db.query(CampaignSlide).filter_by(campaign_id=f['campaign'].id).count()==0
+    assert db.query(CampaignOutput).filter_by(campaign_id=f['campaign'].id).count()==0
+    assert not list(f['root'].rglob('*.json'))
+    assert unrelated.read_text()=='protected unrelated output'
+
+
+def test_commit_acknowledgement_failure_retains_committed_files(application,monkeypatch):
+    f=application;commit=f['db'].commit
+    def lost_ack():commit();raise OSError('Lost commit acknowledgement')
+    monkeypatch.setattr(f['db'],'commit',lost_ack)
+    result=apply_fixture(f)
+    assert result['status']=='APPLIED_COMMIT_CONFIRMED'
+    assert len(list(f['root'].rglob('*.json')))==3
+    assert apply_fixture(f)['status']=='ALREADY_APPLIED'
+
+
+def test_interrupted_files_are_reported_and_never_adopted(application):
+    f=application;directory=f['root']/'application-fixture-operation';directory.mkdir(parents=True)
+    orphan=directory/'intent.json';orphan.write_text('Interrupted operation evidence')
+    with pytest.raises(reconcile.ApplicationRecoveryRequired) as error:apply_fixture(f)
+    assert error.value.evidence['status']=='UNREFERENCED_OR_CONFLICTING_FILES'
+    assert orphan.read_text()=='Interrupted operation evidence'
+    result=reconcile.inspect_application_recovery(f['db'],f['campaign'],f['manifest'],f['creative_path'].read_bytes(),f['root'],owner_authorization=f['authorization'])
+    assert result['status']=='UNREFERENCED_FILES'
+
+
+@pytest.mark.parametrize('fault',['display','partial','changed_output','changed_intent','evolved','concept','template'])
+def test_application_collisions_and_partial_state_are_not_repaired(application,fault):
+    f=application;db=f['db']
+    if fault in ('changed_output','changed_intent','evolved','concept','template'):
+        apply_fixture(f)
+        if fault=='evolved':
+            row=db.get(Campaign,f['campaign'].id);row.status='REVIEW';db.commit()
+        elif fault=='concept':
+            row=db.get(Campaign,f['campaign'].id);row.angle='Different concept';db.commit()
+        elif fault=='template':
+            row=db.query(CampaignSlide).filter_by(campaign_id=f['campaign'].id,slide_number=1).one()
+            row.template_id='different-template';db.commit()
+        else:
+            pattern='creative-*.json' if fault=='changed_output' else 'intent.json'
+            path=next(f['root'].rglob(pattern));path.write_text('Changed by another actor')
+    else:
+        values=dict(f['preview']['campaign_record'])
+        if fault=='display':values['id']='another-campaign'
+        db.add(Campaign(**values));db.commit()
+    with pytest.raises(ValueError):apply_fixture(f)
+
+
+def test_concurrent_identical_applications_serialize(application):
+    from concurrent.futures import ThreadPoolExecutor
+    from sqlalchemy.orm import sessionmaker
+    f=application;factory=sessionmaker(bind=f['db'].get_bind(),autoflush=False)
+    def run():
+        with factory() as db:
+            return apply_fixture(f,db=db)['status']
+    with ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(lambda _:run(),range(2)))
+    assert sorted(results)==['ALREADY_APPLIED','APPLIED']
+
+
+def test_actual_revocation_between_preflight_and_lock_is_reloaded(application,monkeypatch):
+    from sqlalchemy.orm import sessionmaker
+    from app.models import ProductClaimEvidence
+    f=application;original=reconcile._authorized_application;calls=[]
+    def revoke(*a,**k):
+        result=original(*a,**k);calls.append(1)
+        if len(calls)==1:
+            with sessionmaker(bind=f['db'].get_bind())() as other:
+                row=other.get(ProductClaimEvidence,f['rows'][0].id);row.marketing_eligible=False;other.commit()
+        return result
+    monkeypatch.setattr(reconcile,'_authorized_application',revoke)
+    with pytest.raises(ValueError,match='current canonical marketing evidence'):apply_fixture(f)
+    assert not f['root'].exists()
+
+
+def test_unknown_commit_outcome_preserves_evidence_for_explicit_inspection(application,monkeypatch):
+    f=application;original=reconcile._completed_application
+    def uncertain(db,*a):
+        if db is not f['db']:raise OSError('Probe unavailable')
+        return original(db,*a)
+    def fail_commit():raise OSError('Commit failed')
+    with monkeypatch.context() as m:
+        m.setattr(reconcile,'_completed_application',uncertain);m.setattr(f['db'],'commit',fail_commit)
+        with pytest.raises(reconcile.ApplicationRecoveryRequired) as error:apply_fixture(f)
+        assert error.value.evidence['status']=='COMMIT_OUTCOME_UNKNOWN'
+        assert len(list(f['root'].rglob('*.json')))==3
+    result=reconcile.inspect_application_recovery(f['db'],f['campaign'],f['manifest'],f['creative_path'].read_bytes(),f['root'],owner_authorization=f['authorization'])
+    assert result['status']=='UNREFERENCED_FILES'
+    with pytest.raises(reconcile.ApplicationRecoveryRequired):apply_fixture(f)
+
+
+def test_cleanup_never_deletes_a_tampered_attempt_file(application,monkeypatch):
+    f=application;publish=reconcile._publish_application_file
+    def tamper(path,raw,owned):
+        publish(path,raw,owned)
+        if path.name.startswith('creative-'):
+            path.write_bytes(b'Other actor data');raise OSError('Injected concurrent change')
+    monkeypatch.setattr(reconcile,'_publish_application_file',tamper)
+    with pytest.raises(reconcile.ApplicationRecoveryRequired) as error:apply_fixture(f)
+    assert error.value.evidence['status']=='ROLLBACK_FILES_RETAINED'
+    assert next(f['root'].rglob('creative-*.json')).read_bytes()==b'Other actor data'
+    assert f['db'].get(Campaign,f['campaign'].id) is None
+
+
+def test_application_snapshots_mutable_caller_inputs(application,monkeypatch):
+    f=application;publish=reconcile._publish_application_file
+    mapping=dict(f['manifest'].evidence_ids);display=f['campaign'].display_id
+    def mutate(path,raw,owned):
+        publish(path,raw,owned)
+        if path.name=='intent.json':
+            f['manifest'].evidence_ids['ex-apply']='caller-mutated'
+            f['campaign'].display_id='caller-mutated'
+    monkeypatch.setattr(reconcile,'_publish_application_file',mutate)
+    try:
+        assert apply_fixture(f)['status']=='APPLIED'
+        actual=f['db'].get(Campaign,f['campaign'].id)
+        assert actual.display_id==display
+        row=f['db'].query(CampaignOutput).filter_by(campaign_id=actual.id,kind='campaign_reconciliation').one()
+        assert json.loads(Path(row.file_path).read_bytes())['evidence_ids']==mapping
+    finally:
+        f['manifest'].evidence_ids.clear();f['manifest'].evidence_ids.update(mapping)
+        f['campaign'].display_id=display
+
+
+@pytest.mark.parametrize('target',['missing','memory_uri'])
+def test_application_entry_never_creates_a_database(tmp_path,target):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    missing=tmp_path/'unregistered.db'
+    url='sqlite:///'+str(missing) if target=='missing' else 'sqlite:///file:unregistered?mode=memory&uri=true'
+    engine=create_engine(url)
+    try:
+        with Session(engine) as db:
+            with pytest.raises(ValueError,match='file-backed'):
+                reconcile.apply_campaign(db,None,None,b'',tmp_path/'out',owner_authorization='untrusted-reference')
+        assert not missing.exists() and not (tmp_path/'out').exists()
+    finally:engine.dispose()

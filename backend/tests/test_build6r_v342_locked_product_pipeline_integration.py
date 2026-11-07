@@ -738,6 +738,27 @@ def _mark_permission_fixture(tmp_path):
     return db, campaign, source, render, permission
 
 
+@pytest.mark.parametrize('fault',[None,'sibling_scope','missing_permission','old_campaign','revoked'])
+def test_campaign_scoped_permission_uses_real_master_authority(tmp_path,fault):
+    from app.services import product_asset_selection as selection
+    from test_build6r_product_master_selection import approved_master
+    db,campaign,source,render,permission=_mark_permission_fixture(tmp_path)
+    metadata=approved_master().ai_metadata
+    metadata.update(source_asset_id=source.id,source_sha256=source.sha256,campaign_scope_id=campaign.id)
+    render.ai_metadata=metadata
+    assert selection.choose_approved_product_master([render],source_lookup=lambda _:source) is None
+    assert selection.choose_approved_product_master([render],source_lookup=lambda _:source,campaign_id='other') is None
+    if fault=='sibling_scope':metadata['campaign_scope_id']='other'
+    elif fault=='missing_permission':source.ai_metadata.pop('authentic_package_mark_permissions')
+    elif fault=='old_campaign':permission['campaign_id']='historical-six-slide'
+    elif fault=='revoked':permission['status']='REVOKED'
+    if fault=='sibling_scope':
+        with pytest.raises(ValueError,match='master approval'):selection.resolve_authentic_package_mark_permission(db,campaign,render.id)
+    else:
+        result=selection.resolve_authentic_package_mark_permission(db,campaign,render.id)
+        assert (result is not None)==(fault is None)
+
+
 @pytest.mark.parametrize("fault", [None, "missing", "blank", "partial", "extra", "authority", "owner_proof",
     "campaign", "product", "brand", "source_id", "render_id", "source_hash", "render_hash", "sibling",
     "generated_source", "changed_source", "changed_render", "revoked", "duplicate", "duplicate_mark", "master_approval"])

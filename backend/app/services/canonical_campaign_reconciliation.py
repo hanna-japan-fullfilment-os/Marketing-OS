@@ -290,12 +290,287 @@ def prepare_slide_plans(db, campaign, manifest):
 
 
 def apply_campaign(db, campaign, manifest, creative, output_directory, *, owner_authorization):
-    """Explicit future data-operation boundary; Phase 1 deliberately cannot apply.
+    """Explicit draft-only application, with thirteen inserts and no approvals.
 
-    No boolean, named reviewer, or test flag manufactures canonical-write
-    authorization. Phase 2 must supply a separately reviewed execution adapter.
+    owner_authorization is the ID of an independently persisted AuditEvent. This
+    adapter never creates/changes that event or any evidence/asset prerequisite.
+    The caller supplies a fresh dedicated Session; this operation owns its two
+    transactions. There is no route, startup call, fallback or automatic retry.
     """
-    raise ValueError("Canonical application is disabled in Phase 1; separate Phase 2 authorization and adapter required")
+    from sqlalchemy import text
+    from ..models import Campaign, CampaignSlide, CampaignOutput
+    _application_entry(db, owner_authorization)
+    manifest = CanonicalCampaignReconciliation.model_validate_json(manifest.model_dump_json())
+    creative = bytes(creative)
+    output_directory = Path(output_directory).resolve()
+    try:
+        preview, authorization = _authorized_application(db, campaign, manifest, creative,
+            output_directory, owner_authorization)
+    finally:
+        db.rollback()  # End our read-only preflight, never a caller transaction.
+    campaign = Campaign(**preview['campaign_record'])  # Private reviewed proposal, not a mutable caller alias.
+    owned = []
+    directory = Path(preview['output_directory']) / ('application-' + authorization.operation_id)
+    directory_identity = None
+    commit_attempted = False
+    try:
+        # Serialize collision/idempotency checks with inserts. Read authority
+        # again after the lock, before mkdir, file publication or any DML.
+        db.execute(text('BEGIN IMMEDIATE'))
+        current, current_authorization = _authorized_application(db, campaign, manifest, creative,
+            output_directory, owner_authorization)
+        if current != preview or current_authorization != authorization:
+            raise ValueError('Application authority changed after preflight')
+        files = _application_files(directory, manifest, creative)
+        intent = _application_intent(current, owner_authorization, authorization.operation_id, files)
+        if _completed_application(db, current, files, intent):
+            db.rollback()
+            return _application_result('ALREADY_APPLIED', current, directory)
+        if directory.exists():
+            raise ApplicationRecoveryRequired('Existing operation files require explicit recovery review',
+                _application_result('UNREFERENCED_OR_CONFLICTING_FILES', current, directory))
+        directory.parent.mkdir(parents=True, exist_ok=True)
+        directory.mkdir(exist_ok=False)
+        stat = directory.stat()
+        directory_identity = (stat.st_dev, stat.st_ino)
+        _publish_application_file(directory/'intent.json', intent, owned)
+        for path, raw in files.items():
+            _publish_application_file(path, raw, owned)
+        # Files/library can change independently of SQLite's write lock. Check
+        # again after publication, while no canonical row has been inserted.
+        final, final_authorization = _authorized_application(db, campaign, manifest, creative,
+            output_directory, owner_authorization)
+        if final != current or final_authorization != authorization:
+            raise ValueError('Application authority changed before inserts')
+        record = current['campaign_record']
+        db.add(Campaign(**record))
+        db.flush()
+        for row in current['slide_records']:
+            db.add(CampaignSlide(**row))
+        for kind, path in zip(('creative', 'campaign_reconciliation'), files):
+            db.add(CampaignOutput(campaign_id=campaign.id, kind=kind, platform='instagram',
+                file_path=str(path), version=1))
+        db.flush()
+        if not _completed_application(db, current, files, intent):
+            raise ValueError('Application read-back is incomplete')
+        commit_attempted = True
+        db.commit()
+        return _application_result('APPLIED', current, directory)
+    except BaseException as error:
+        try:
+            db.rollback()
+        except Exception as rollback_error:
+            raise ApplicationRecoveryRequired('Rollback outcome unknown; retain operation evidence',
+                _application_result('ROLLBACK_OUTCOME_UNKNOWN', preview, directory)) from rollback_error
+        if commit_attempted:
+            # A commit error can mean failed commit OR lost acknowledgement.
+            # Never delete referenced files on an uncertain outcome.
+            from sqlalchemy.orm import Session
+            try:
+                with Session(db.get_bind()) as probe:
+                    committed = _completed_application(probe, preview,
+                        _application_files(directory, manifest, creative), intent)
+            except Exception as probe_error:
+                raise ApplicationRecoveryRequired('Commit outcome cannot be established; retain files',
+                    _application_result('COMMIT_OUTCOME_UNKNOWN', preview, directory)) from probe_error
+            if committed:
+                return _application_result('APPLIED_COMMIT_CONFIRMED', preview, directory)
+        retained = _cleanup_application_files(owned)
+        if directory_identity is not None and not retained:
+            try:
+                stat = directory.stat()
+                if (stat.st_dev, stat.st_ino) == directory_identity:
+                    directory.rmdir()  # Empty, attempt-owned directory only.
+            except OSError:
+                retained = [str(directory)]
+        if retained:
+            evidence = _application_result('ROLLBACK_FILES_RETAINED', preview, directory)
+            evidence['retained_paths'] = retained
+            raise ApplicationRecoveryRequired('Rollback complete; retained files need explicit review', evidence) from error
+        raise
+
+
+class ApplicationRecoveryRequired(ValueError):
+    def __init__(self, message, evidence):
+        super().__init__(message)
+        self.evidence = evidence
+
+
+def _json_bytes(value):
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False).encode('utf-8')
+
+
+def _application_entry(db, authorization_id):
+    if not isinstance(authorization_id, str) or not authorization_id.strip():
+        # Retains the original disabled-boundary rejection for boolean flags.
+        raise ValueError('Canonical application is disabled in Phase 1 without independently recorded operator authorization')
+    if db.new or db.dirty or db.deleted or db.in_transaction():
+        raise ValueError('Application requires a fresh dedicated clean transaction')
+    engine = db.get_bind()
+    if (engine.dialect.name != 'sqlite' or not hasattr(engine, 'url')
+            or not engine.url.database or engine.url.database == ':memory:'
+            or str(engine.url.database).startswith('file:')
+            or not Path(engine.url.database).is_file()):
+        raise ValueError('Application requires a dedicated file-backed SQLite engine')
+
+
+def describe_application(db, campaign, manifest, creative, output_directory):
+    """Read-only package for independent operator review, never authorization."""
+    from .marketing_claims import load_library
+    from .product_asset_selection import resolve_authentic_package_mark_permission
+    from .product_creative_eligibility import require_creative_eligibility
+    _clean(db)
+    if campaign.approved_at is not None or campaign.published_at is not None or campaign.human_review_status not in (None, 'PENDING'):
+        raise ValueError('Only an unapproved canonical draft may be applied')
+    content = json.loads(creative)
+    if set(content) != {'carousel_plan'} or set(content['carousel_plan']) - {'slides', 'narrative_summary'}:
+        raise ValueError('Only the complete single-locale canonical creative plan may be applied')
+    report = prepare_campaign(db, campaign, manifest, creative)
+    library = load_library(campaign.product_id)
+    if library.owner_library_review_status != 'APPROVED':
+        raise ValueError('Current whole-library authority is not approved')
+    permission = resolve_authentic_package_mark_permission(db, campaign, manifest.master_asset_id)
+    if permission is None or permission.status != 'APPROVED':
+        raise ValueError('Exact current campaign-specific package-mark permission is required')
+    engine = db.get_bind()
+    database = str(Path(engine.url.database).resolve())
+    record = report['campaign_record']
+    record.update(channels=['instagram'], content_type='carousel', geography=campaign.geography or 'Brasil',
+        angle='', hook='', main_promise='', cta='', template_id=None, strategy_type_id=None,
+        triggered_by_event_id=None, research_run_id=None, notes='')
+    for slide in report['slide_records']:
+        slide['template_id'] = ''
+    value = {'version': 1, 'operation': 'CREATE_CANONICAL_TEN_SLIDE_DRAFT',
+        'database_identity_sha256': hashlib.sha256(database.encode('utf-8')).hexdigest(),
+        'output_directory': str(Path(output_directory).resolve()),
+        'campaign_record': record, 'slide_records': report['slide_records'],
+        'manifest_sha256': manifest.digest(), 'creative_sha256': manifest.creative_sha256,
+        'claim_library_sha256': library.digest(),
+        'creative_eligibility': require_creative_eligibility(campaign.product_id),
+        'permission_sha256': hashlib.sha256(_json_bytes(permission.model_dump(mode='json'))).hexdigest(),
+        'dispositions': {f'pt-BR:instagram:{n}': ('FROZEN_EXTERNAL_REFERENCE' if n<=6 else
+            'SELECTED_PENDING_OWNER_REVIEW' if n<=8 else 'DEFERRED_UNRENDERED') for n in range(1,11)}}
+    return {**value, 'package_sha256': hashlib.sha256(_json_bytes(value)).hexdigest()}
+
+
+def _authorized_application(db, campaign, manifest, creative, output_directory, authorization_id):
+    from datetime import datetime, timezone
+    from ..models import AuditEvent
+    from ..schemas.premium_handoff import CanonicalApplicationAuthorization
+    _clean(db)
+    event = db.get(AuditEvent, authorization_id)
+    if (event is None or event.entity_type != 'canonical_campaign_application'
+            or event.entity_id != campaign.id or event.action != 'owner_authorized'):
+        raise ValueError('Independent operator authorization event is missing or mismatched')
+    authorization = CanonicalApplicationAuthorization.model_validate(event.detail)
+    if authorization.status != 'AUTHORIZED' or authorization.expires_at <= datetime.now(timezone.utc):
+        raise ValueError('Operator authorization is revoked or expired')
+    revocations = db.query(AuditEvent).filter_by(entity_type=event.entity_type,
+        entity_id=campaign.id, action='owner_authorization_revoked').all()
+    if any((row.detail or {}).get('authorization_event_id') == authorization_id for row in revocations):
+        raise ValueError('Operator authorization was independently revoked')
+    preview = describe_application(db, campaign, manifest, creative, output_directory)
+    if authorization.package_sha256 != preview['package_sha256']:
+        raise ValueError('Reviewed operation/package authority changed')
+    return preview, authorization
+
+
+def _application_files(directory, manifest, creative):
+    return {directory/('creative-'+manifest.creative_sha256+'.json'): creative,
+        directory/(manifest.digest()+'.json'): manifest.model_dump_json().encode('utf-8')}
+
+
+def _application_intent(preview, authorization_id, operation_id, files):
+    return _json_bytes({'version': 1, 'state': 'PREPARED_NOT_PROOF_OF_COMMIT',
+        'authorization_event_id': authorization_id, 'operation_id': operation_id,
+        'package_sha256': preview['package_sha256'], 'campaign_id': preview['campaign_record']['id'],
+        'files': {p.name: hashlib.sha256(raw).hexdigest() for p, raw in files.items()}})
+
+
+def _completed_application(db, preview, files, intent):
+    from sqlalchemy import func
+    from ..models import Campaign, CampaignSlide, CampaignOutput
+    record = preview['campaign_record']
+    matches = db.query(Campaign).filter(func.lower(Campaign.display_id) == record['display_id'].lower()).all()
+    campaign = db.get(Campaign, record['id'])
+    if campaign is None and not matches:
+        # Also reject dangling graph records in a database with FK checks disabled.
+        if (db.query(CampaignSlide).filter_by(campaign_id=record['id']).count()
+                or db.query(CampaignOutput).filter_by(campaign_id=record['id']).count()):
+            raise ValueError('Conflicting partial application graph')
+        return False
+    if campaign is None or len(matches)!=1 or matches[0].id!=record['id']:
+        raise ValueError('Campaign display/identity collision')
+    if any(getattr(campaign,key)!=value for key,value in record.items()):
+        raise ValueError('Existing campaign conflicts with reviewed application')
+    slides = db.query(CampaignSlide).filter_by(campaign_id=record['id']).order_by(CampaignSlide.slide_number).all()
+    outputs = db.query(CampaignOutput).filter_by(campaign_id=record['id']).all()
+    if len(slides)!=10 or len(outputs)!=2:
+        raise ValueError('Conflicting partial application graph')
+    if any(any(getattr(row,key)!=value for key,value in wanted.items())
+            for row,wanted in zip(slides,preview['slide_records'])):
+        raise ValueError('Existing slide graph changed')
+    paths = {kind:str(path) for kind,path in zip(('creative','campaign_reconciliation'),files)}
+    if {o.kind:o.file_path for o in outputs} != paths or any(o.version!=1 or o.platform!='instagram' for o in outputs):
+        raise ValueError('Existing output graph changed')
+    for path, raw in files.items():
+        if path.is_symlink() or path.parent.is_symlink() or path.read_bytes()!=raw:
+            raise ValueError('Referenced application output changed')
+    intent_path = next(iter(files)).parent/'intent.json'
+    if intent_path.is_symlink() or intent_path.read_bytes()!=intent:
+        raise ValueError('Application intent receipt changed')
+    return True
+
+
+def _publish_application_file(path, raw, owned):
+    import os
+    with path.open('xb') as stream:
+        stat = os.fstat(stream.fileno())
+        owned.append((path, stat.st_dev, stat.st_ino, raw))
+        stream.write(raw)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def _cleanup_application_files(owned):
+    retained = []
+    for path, device, inode, raw in reversed(owned):
+        try:
+            if not path.exists():
+                continue
+            stat = path.lstat()
+            # Refuse replacement/symlink/tampered content. A failed partial write
+            # can be removed only when it is an exact prefix in our original inode.
+            if path.is_symlink() or (stat.st_dev,stat.st_ino)!=(device,inode) or not raw.startswith(path.read_bytes()):
+                retained.append(str(path))
+                continue
+            path.unlink()
+        except OSError:
+            retained.append(str(path))
+    return retained
+
+
+def _application_result(status, preview, directory):
+    return {'status':status, 'campaign_id':preview['campaign_record']['id'],
+        'package_sha256':preview['package_sha256'], 'record_count':13,
+        'operation_directory':str(directory), 'recovery_evidence_path':str(directory/'intent.json'),
+        'approvals_adopted':False}
+
+
+def inspect_application_recovery(db, campaign, manifest, creative, output_directory, *, owner_authorization):
+    """Explicit read-only inspection. Never adopts or deletes orphaned files."""
+    _application_entry(db, owner_authorization)
+    try:
+        preview, authorization = _authorized_application(db, campaign, manifest, creative,
+            output_directory, owner_authorization)
+        directory = Path(preview['output_directory'])/('application-'+authorization.operation_id)
+        files = _application_files(directory,manifest,creative)
+        complete = _completed_application(db, preview, files,
+            _application_intent(preview,owner_authorization,authorization.operation_id,files))
+        status = 'COMMITTED' if complete else 'UNREFERENCED_FILES' if directory.exists() else 'NOT_APPLIED'
+        return _application_result(status, preview, directory)
+    finally:
+        db.rollback()
 
 
 def factual_policy(db, campaign, brief):
