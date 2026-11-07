@@ -16,6 +16,9 @@ def validate_execution_handoff(handoff, *, require_approval=True):
     """
     from ..schemas.premium_handoff import PremiumExecutionHandoff, PremiumSlideBrief
     from .campaign_creative_strategy import composition_for_purpose
+    from ..schemas.premium_handoff import ProductionScopeEnvelope
+    if isinstance(handoff, ProductionScopeEnvelope):
+        return validate_production_scope(handoff, require_approval=require_approval)
     if handoff.version == 1:
         return PremiumCreativeHandoff.model_validate(handoff.model_dump(mode="json"))
     if handoff.version != 2:
@@ -219,6 +222,52 @@ def build_campaign_handoff(db,campaign):
     return bind_handoff(resolve_canonical_handoff(db,campaign), db=db, campaign=campaign)
 
 
+def prepare_production_scope(db, campaign, plans):
+    """Explicit draft envelope. No export, approval, state write or provider call."""
+    from ..schemas.premium_handoff import ProductionScopeEnvelope
+    from .canonical_campaign_reconciliation import current_reconciliation
+    base = build_campaign_handoff(db, campaign)
+    manifest = current_reconciliation(db, campaign)
+    if manifest is None:
+        raise ValueError("Canonical reconciliation required for selected production")
+    dispositions = {s.key: ("FROZEN_EXTERNAL_REFERENCE" if s.slide_number <= 6 else
+        "SELECTED_PENDING_OWNER_REVIEW" if s.slide_number <= 8 else "DEFERRED_UNRENDERED") for s in base.slides}
+    scope = ProductionScopeEnvelope(canonical_handoff=base, reconciliation_sha256=manifest.digest(),
+        dispositions=dispositions, execution_plans=plans)
+    return validate_production_scope(scope, db=db, campaign=campaign, require_approval=False)
+
+
+def validate_production_scope(scope, *, db=None, campaign=None, require_approval=True):
+    from ..schemas.premium_handoff import ProductionScopeEnvelope
+    scope = ProductionScopeEnvelope.model_validate(scope.model_dump(mode="json"))
+    base = scope.canonical_handoff
+    if base.version != 1 or base.expected_slide_count != 10 or [s.slide_number for s in base.slides] != list(range(1, 11)):
+        raise ValueError("Complete ordered ten-slide canonical scope required")
+    expected = {s.key: ("FROZEN_EXTERNAL_REFERENCE" if s.slide_number <= 6 else
+        "SELECTED_PENDING_OWNER_REVIEW" if s.slide_number <= 8 else "DEFERRED_UNRENDERED") for s in base.slides}
+    selected = {key for key, value in expected.items() if value == "SELECTED_PENDING_OWNER_REVIEW"}
+    if len(expected) != 10 or scope.dispositions != expected or set(scope.execution_plans) != selected:
+        raise ValueError("Exhaustive frozen/selected/deferred scope required; scope widening forbidden")
+    validate_execution_handoff(scope.execution_handoff(), require_approval=require_approval)
+    if require_approval and (scope.owner_review_status != "APPROVED" or not scope.owner_reviewer.strip()
+            or scope.reviewed_content_sha256 != scope.content_digest()):
+        raise ValueError("Named owner approval of exact selected release scope required")
+    if db is not None or campaign is not None:
+        from .canonical_campaign_reconciliation import current_reconciliation
+        from .marketing_claims import require_ready
+        require_ready(base, db=db, campaign=campaign)
+        manifest = current_reconciliation(db, campaign)
+        if manifest is None or manifest.digest() != scope.reconciliation_sha256:
+            raise ValueError("Current canonical reconciliation / production scope changed")
+    return scope
+
+
+def reject_full_reconciled_export(db, campaign):
+    from .canonical_campaign_reconciliation import current_reconciliation
+    if db is not None and hasattr(db, "query") and current_reconciliation(db, campaign) is not None:
+        raise ValueError("Frozen campaign requires an explicit selected production-scope envelope")
+
+
 def _public_asset(asset):
     if not re.fullmatch(r"[A-Za-z0-9_-]+",asset.asset_id):
         raise ValueError("Unsafe export asset identifier")
@@ -232,7 +281,19 @@ def export_handoff(handoff,directory,*,revision=None,db=None,campaign=None):
     """New bundle only. Asset bytes are copied, never altered; no registry writes."""
     handoff = validate_execution_handoff(handoff)
     from .marketing_claims import require_ready, approved_library
-    library=require_ready(handoff, db=db, campaign=campaign)
+    from ..schemas.premium_handoff import ProductionScopeEnvelope
+    scoped = isinstance(handoff, ProductionScopeEnvelope)
+    if scoped:
+        handoff = validate_production_scope(handoff, db=db, campaign=campaign)
+        library = require_ready(handoff.canonical_handoff, db=db, campaign=campaign)
+        from .canonical_campaign_reconciliation import current_reconciliation, frozen_evidence
+        frozen = frozen_evidence(current_reconciliation(db, campaign))
+        if revision:
+            from .canonical_campaign_reconciliation import require_selected_key
+            require_selected_key(handoff, revision["slide_key"])
+    else:
+        library=require_ready(handoff, db=db, campaign=campaign)
+        reject_full_reconciled_export(db, campaign)
     from .product_creative_eligibility import require_creative_eligibility
     eligibility=require_creative_eligibility(handoff.product_id)
     directory=Path(directory)
@@ -243,7 +304,13 @@ def export_handoff(handoff,directory,*,revision=None,db=None,campaign=None):
         data=verified_image_bytes(asset)
         with (directory/record["file"]).open("xb") as stream:
             stream.write(data)
-    public=handoff.model_dump(mode="json")
+    public=(handoff.execution_handoff() if scoped else handoff).model_dump(mode="json")
+    if scoped:
+        public["production_scope"] = {"scope_version": handoff.scope_version,
+            "scope_sha256": handoff.digest(), "canonical_handoff_sha256": handoff.canonical_handoff.digest(),
+            "reconciliation_sha256": handoff.reconciliation_sha256,
+            "dispositions": handoff.dispositions, "historical_approvals_adopted": False,
+            "frozen_external_evidence": frozen}
     public["assets"]=manifest
     public["handoff_sha256"]=handoff.digest()
     public["approved_claim_library"]=approved_library(library)
@@ -257,7 +324,7 @@ def export_handoff(handoff,directory,*,revision=None,db=None,campaign=None):
         with (directory/name).open("x",encoding="utf-8") as stream:
             json.dump(payload,stream,ensure_ascii=False,indent=2)
     instruction=CHATGPT_INSTRUCTION+"\nUse only the approved_copy and approved_claim_ids. Keep every mandatory_qualifier in visible copy. Follow benefit_hierarchy and prohibited_elements. Never invent or strengthen a benefit."+("\nREVISION: change only the rejected slide according to the attached exact feedback. Facts/copy stay unchanged." if revision else "")
-    if handoff.version == 2:
+    if scoped or handoff.version == 2:
         instruction += (
             "\nFollow each owner-reviewed execution_plan: its concrete visual mechanism, product role, "
             "camera/spatial relationships, lighting integration and typography requirements. "
@@ -266,6 +333,8 @@ def export_handoff(handoff,directory,*,revision=None,db=None,campaign=None):
             "or results. Plan approval is not artwork acceptance, publication or provider authorization. "
             "Structural completeness does not establish premium quality."
         )
+    if scoped:
+        instruction += "\nSELECTED OUTPUT ONLY: create Slides 7 and 8. Slides 1–6 are frozen external references and must not be regenerated or replaced. Slides 9–10 remain deferred/unrendered. Return exactly the two selected slides."
     (directory/"CHATGPT_READY_INSTRUCTION.txt").write_text(instruction,encoding="utf-8")
     lines=["# Hanna premium campaign handoff",instruction,"## Campaign",json.dumps({k:v for k,v in public.items() if k not in ("slides","assets")},ensure_ascii=False,indent=2)]
     for slide in handoff.slides:

@@ -163,3 +163,68 @@ not authorize fallback generation or a provider retry.
 V12.1 validation uses isolated databases and produces a read-only canonical
 campaign demonstration outside the repository. It does not import, approve,
 publish or mutate the canonical acceptance campaign. No follow-up is automatic.
+
+## EXEC-0003: separate ten-slide reconciliation (offline, opt-in)
+
+`canonical_campaign_reconciliation` prepares typed plans in memory and validates
+an exact owner-approved architecture against current claim-library wording and
+the existing V3.45 evidence/provenance services. It creates no claim registry,
+evidence rows, approvals, campaign records or artwork. `apply_campaign` is an
+explicit disabled boundary in Phase 1: every call fails before writes. A Phase 2
+data-operation authorization and reviewed execution adapter remain necessary.
+There is no startup hook, API route, provider dispatch or automatic adoption.
+
+The historical six-slide acceptance fixture is never migrated. A future separate
+campaign uses ten independent slide plans and a `CampaignOutput` with kind
+`campaign_reconciliation`. Its filename stem is the semantic manifest digest.
+The manifest pins creative bytes, the approved external architecture and owner
+approval, freeze evidence, fourteen product-evidence IDs, the reconstructed master,
+original/display logo provenance and approved reference hashes. Editorial wording
+uses the existing reviewed library; it does not create product-evidence records.
+The eight missing exact product-evidence mappings and missing press-release source
+representation must be reconciled through existing evidence services separately.
+No evidence is verified or promoted by planning/export/intake.
+
+Only live canonical reconciliation can establish the ten-slide factual/editorial
+policy. Caller roles, flags, claim IDs or recomputed digests grant no eligibility.
+Slides 2 and 5 retain benefit hierarchies. Other approved factual/editorial slides
+require their exact purpose/claim sets and empty benefit hierarchies. Product-name
+copy is bound to the current Product and approved architecture; it is not a global
+neutral-copy exception. Whole-library approval, current eligible evidence, exact
+Portuguese copy and qualifiers remain mandatory for production consumption.
+
+Campaign-scoped reconstructed masters require the existing master contract and
+exact source/owner provenance. The global selector excludes them. Campaign logo
+bindings use `campaign:<campaign-id>:logo` labels, which the legacy global logo
+resolver excludes. Existing master/logo records and bytes remain unchanged.
+
+`ProductionScopeEnvelope(scope_version=1)` is separate from legacy handoff v1 and
+execution handoff v2; neither existing model's serialized fields/digests change.
+It binds the complete ten-slide canonical handoff, reconciliation digest, selected
+structured execution plans and exact named owner review of the release scope.
+Every canonical slide must occur once in the exhaustive disposition map:
+
+| Slides | Disposition | Meaning |
+| --- | --- | --- |
+| 1–6 | FROZEN_EXTERNAL_REFERENCE | Preserve external hashes/classifications; no regenerated output or adopted approval |
+| 7–8 | SELECTED_PENDING_OWNER_REVIEW | Selected output membership; plan/release approval remains independently required |
+| 9–10 | DEFERRED_UNRENDERED | No output, import or revision permitted |
+
+The selected disposition name is membership, not an approval verdict. Draft scope
+and execution plans may remain pending. Production export requires approved exact
+plans and release scope, then rechecks all current canonical claim/asset authority.
+The ZIP lists only Slides 7–8 and contains frozen hashes/classifications as evidence,
+not editable frozen artwork. Widening scope or exporting the complete reconciled
+campaign fails closed. Frozen/deferred imports, reviews and revisions fail before
+workflow state reads/writes. Legacy routes cannot silently reopen the campaign.
+
+`SELECTED_RELEASE_COMPLETE` means the two selected outputs received independent
+current artwork reviews. It always leaves `CAMPAIGN_CREATIVE_COMPLETE=false` and
+cannot satisfy publication readiness. Frozen historical decisions are referenced,
+never copied into new execution/artwork approvals. Rejected artwork stays rejected.
+
+Future promotion of shared product facts or library approval can change recomputed
+historical package digests. Preserve old artifacts/reviews; never automatically
+re-export or rebind the six-slide fixture. Production data application, whole-library
+approval, provider execution, publication and Git preservation require their own
+authorization. Structural QA does not establish premium aesthetic acceptance.

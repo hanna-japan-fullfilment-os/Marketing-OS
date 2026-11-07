@@ -86,6 +86,7 @@ def select_source_assets(
 def choose_approved_product_master(
     candidates: list[Any],
     *,
+    campaign_id: str | None = None,
     source_lookup: Callable[
         [str],
         Any | None,
@@ -115,6 +116,10 @@ def choose_approved_product_master(
             metadata,
             dict,
         ):
+            continue
+
+        scope = metadata.get("campaign_scope_id")
+        if scope is not None and (not scope or scope != campaign_id):
             continue
 
         source_asset_id = str(

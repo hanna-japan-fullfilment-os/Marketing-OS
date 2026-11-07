@@ -64,12 +64,36 @@ def resolve_copy(library, copy_fields):
     return bindings
 
 
-def validate_brief(library, brief, *, canonical_brief=None):
+def _resolve_canonical_copy(library, brief, product_identity):
+    fields = brief.approved_copy
+    if product_identity is not None:
+        if any(f.text != product_identity for f in fields if f.key == 'product_identity'):
+            raise ValueError("Canonical product identity copy changed")
+        fields = tuple(f for f in fields if f.key != 'product_identity')
+    return resolve_copy(library, fields)
+
+
+def validate_brief(library, brief, *, canonical_brief=None, db=None, campaign=None):
+    """Public validator: reconciled eligibility comes only from live DB context."""
+    policy = identity = None
+    if db is not None or campaign is not None:
+        from .premium_handoff import resolve_canonical_handoff
+        current = resolve_canonical_handoff(db, campaign)
+        canonical_brief = next((s for s in current.slides if s.key == brief.key), None)
+        if canonical_brief is None:
+            raise ValueError("Current canonical brief missing")
+        policy = _reconciliation_policies(current, db, campaign, {s.key:s for s in current.slides}).get(brief.key)
+        identity = current.product_name if policy is not None else None
+    return _validate_brief(library, brief, canonical_brief=canonical_brief,
+        canonical_claim_ids=policy, product_identity=identity)
+
+
+def _validate_brief(library, brief, *, canonical_brief=None, canonical_claim_ids=None, product_identity=None):
     if brief.locale != "pt-BR":
         raise ValueError("Reviewed wording is pt-BR only; approve exact locale before handoff")
     if not brief.approved_claim_ids:
         raise ValueError("Creative brief lacks approved claim IDs")
-    expected = resolve_copy(library, brief.approved_copy)
+    expected = _resolve_canonical_copy(library, brief, product_identity)
     if dict(brief.approved_claim_ids) != expected:
         raise ValueError("Claim ID / exact visible wording substitution")
     by_id = {c.claim_id: c for c in library.claims}
@@ -84,6 +108,16 @@ def validate_brief(library, brief, *, canonical_brief=None):
     if dict(brief.mandatory_qualifiers) != qualifiers:
         raise ValueError("Exported qualifier contract changed")
     benefits = [c for c in selected if c.evidence_scope == "PRODUCT_BENEFIT"]
+    if canonical_claim_ids is not None:
+        if (canonical_brief is None or brief.slide_role != canonical_brief.slide_role
+                or brief.approved_copy != canonical_brief.approved_copy
+                or brief.canonical_package_sha256 != canonical_brief.canonical_package_sha256
+                or tuple(expected.values()) != tuple(canonical_claim_ids)):
+            raise ValueError("Canonical reconciliation purpose / exact claim set changed")
+        if not benefits:
+            if brief.benefit_hierarchy or any(c.evidence_scope not in ("PRODUCT_FACT", "INGREDIENT_PRESENCE", "EDITORIAL") for c in selected):
+                raise ValueError("Reconciled factual/editorial slide cannot invent a benefit hierarchy")
+            return selected
     # A supplied role is never authority. Production callers obtain this brief
     # independently from the current persisted campaign and live provenance.
     factual_claim = {
@@ -114,16 +148,19 @@ def bind_handoff(handoff, *, db=None, campaign=None):
         raise ValueError("Complete claim library awaits owner review; creative production remains paused")
     slides = []
     canonical = _canonical_briefs(handoff, db, campaign) if db is not None or campaign is not None else {}
+    policies = _reconciliation_policies(handoff, db, campaign, canonical)
     by_id = {c.claim_id: c for c in library.claims}
     for brief in handoff.slides:
-        bindings = resolve_copy(library, brief.approved_copy)
+        policy = policies.get(brief.key)
+        identity = handoff.product_name if policy is not None else None
+        bindings = _resolve_canonical_copy(library, brief, identity)
         selected = [by_id[key] for key in dict.fromkeys(bindings.values())]
         hierarchy = tuple(c.claim_id for c in selected if c.evidence_scope == "PRODUCT_BENEFIT")
         qualifiers = {c.claim_id: c.mandatory_qualifier for c in selected if c.mandatory_qualifier}
         bound = brief.model_copy(update={"approved_claim_ids": bindings, "mandatory_qualifiers": qualifiers,
             "benefit_hierarchy": hierarchy, "prohibited_elements": tuple(dict.fromkeys((*brief.prohibited_elements, *library.prohibited_language))),
             "claim_library_sha256": library.digest(), "creative_brief_status": "CREATIVE_READY"})
-        validate_brief(library, bound, canonical_brief=canonical.get(brief.key))
+        _validate_brief(library, bound, canonical_brief=canonical.get(brief.key), canonical_claim_ids=policy, product_identity=identity)
         slides.append(bound)
     return handoff.model_copy(update={"slides": tuple(slides)})
 
@@ -159,14 +196,34 @@ def _canonical_briefs(handoff, db, campaign):
     return canonical
 
 
+def _reconciliation_policies(handoff, db, campaign, canonical):
+    # This context is independently loaded after canonical equality checks.
+    # Caller role flags, IDs and recalculated handoff digests cannot establish it.
+    if handoff.expected_slide_count != 10 or not canonical:
+        return {}
+    from .canonical_campaign_reconciliation import current_reconciliation, PURPOSES
+    if current_reconciliation(db, campaign) is None:
+        return {}
+    result = {}
+    for key, brief in canonical.items():
+        purpose, ids = PURPOSES[brief.slide_number - 1]
+        if brief.slide_role != purpose:
+            raise ValueError("Canonical reconciled purpose changed")
+        result[key] = ids
+    return result
+
+
 def require_ready(handoff, *, db=None, campaign=None):
     require_creative_eligibility(handoff.product_id)
     library = load_library(handoff.product_id)
     if library.owner_library_review_status != "APPROVED":
         raise ValueError("Claim library owner approval is required before creative export")
     canonical = _canonical_briefs(handoff, db, campaign)
+    policies = _reconciliation_policies(handoff, db, campaign, canonical)
     for brief in handoff.slides:
-        validate_brief(library, brief, canonical_brief=canonical[brief.key])
+        policy = policies.get(brief.key)
+        identity = handoff.product_name if policy is not None else None
+        _validate_brief(library, brief, canonical_brief=canonical[brief.key], canonical_claim_ids=policy, product_identity=identity)
         if brief.creative_brief_status != "CREATIVE_READY" or brief.claim_library_sha256 != library.digest():
             raise ValueError("Creative gate stale/unreviewed library snapshot")
     return library

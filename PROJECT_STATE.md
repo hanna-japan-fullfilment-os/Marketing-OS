@@ -374,3 +374,72 @@ Whole-library owner approval remains PENDING; live canonical ten-slide purpose/
 evidence compatibility and later v2 adoption were not activated or certified.
 Slides 7–8 plans and artwork remain unapproved. Owner review and explicit Git
 preservation authorization are the next boundaries; no automatic next build.
+
+## BUILD6R-EXEC-0003 Phase 1 implementation record — 2026-11-07
+
+BUILD=BUILD6R-EXEC-0003
+TITLE=Canonical Ten-Slide Campaign & Premium Handoff Reconciliation
+AUTHORITY=Explicit owner Phase 1 implementation authorization attached in this conversation
+BASE_HEAD=1d881105b93e6870727302773c5e56be3198873d
+BASE_TREE=a29ff1ee99cdfbd564f2403d296449816fbcde20
+BRANCH=feature/build6r-v6-local-sdxl-comfyui-backend
+IMPLEMENTATION_STATUS=IMPLEMENTED_LOCALLY_NOT_COMMITTED
+
+Eight source paths: new canonical_campaign_reconciliation service; premium handoff
+schema, marketing claims, Hanna package, handoff, ingestion, product asset selection
+and orchestrator. Tests: new exec0003_campaign_reconciliation plus the existing
+product_master_selection file. Documentation: premium handoff workflow and this
+record. Other authorized existing test files were exercised without modification.
+No additional repository paths, migrations, routes or frontend changes.
+
+Deterministic in-memory preparation produces complete ten-slide plans and proposed
+campaign/slide/output records, preserving exact approved copy and reviewed claim
+assignments. Current V3.45 evidence and source relationships remain authoritative.
+The approved architecture/approval/freeze, source/master/logo and approved reference
+hashes are locked. Product identity is checked against the current canonical Product.
+Factual/editorial exceptions require independently resolved canonical reconciliation;
+benefit slides retain benefit hierarchies and the library freshness gate is unchanged.
+
+The separate versioned production-scope envelope binds all ten canonical briefs,
+frozen/deferred exclusions, only Slides 7–8 execution plans and exact named owner
+release approval. Full export and frozen/deferred intake/revision are rejected.
+Selected-release completion never establishes whole-campaign or publishing readiness.
+Historical artwork classifications remain references, not adopted approvals.
+Campaign-scoped masters/logos cannot become global defaults. Legacy v1 serialization
+and existing v2 execution/artwork approval boundaries remain unchanged.
+
+Canonical application is deliberately disabled in Phase 1: apply_campaign rejects
+all calls before writes, including boolean authorization flags. A separately
+authorized Phase 2 data-operation adapter is still required. No campaign, evidence,
+asset registration or approval was created in the canonical database. The historical
+six-slide acceptance fixture was not migrated or repurposed. No production activation.
+
+QA evidence (noncanonical):
+C:\Users\wesle\.codex\visualizations\2026\11\06\01a1b125-e0e5-7413-9c61-5d0f354500f1\EXEC0003_QA
+- baseline_verified.xml: 239 committed-baseline passes.
+- focused_final.xml: 52 new reconciliation cases passed.
+- boundary_final.xml: 5 additional cross-session consumer cases passed.
+- record_payload_final.xml: updated prepared-record assertions passed.
+- regression_verified.xml: final dependent/compatibility regression evidence.
+- BUILD6R_EXEC_0003_COMPLETION_EVIDENCE.json: completion scope, hashes and counts.
+
+The accepted coverage is 297 focused plus 140 dependent cases = 437 distinct cases,
+zero failures/errors/skips; the record-payload rerun repeats one accepted case.
+No baseline exception. An early new-fixture error assumed editorial wording had a
+STANDARD variant; corrected to use its existing reviewed variant without changing
+approved wording or weakening assertions. The first sandboxed HTTP run was interrupted;
+the same committed baseline passed with bounded local loopback access. Existing
+Pydantic/testclient warnings also occur in the baseline.
+
+All test resources were isolated before application imports; production dotenv reads,
+repository test writes, nonisolated SQLite opens and external network connections
+were denied. Provider/image/paid calls: zero. No application server or runtime was
+activated. Pillow created isolated test fixtures only, not campaign artwork.
+
+The 46 protected hashes and existing assets/output inventories matched preflight
+and completion. Canonical DB, environment, claim-library approval, campaign data,
+protected artwork, staging, commits, pushes, integration and deployment unchanged.
+Live ten-slide reconciliation remains unactivated; eight exact evidence mappings,
+press-release source representation, campaign-scoped metadata and independent owner
+decisions remain Phase 2 work. Whole-library approval is still PENDING. No automatic
+next phase, export, ingestion, provider operation or Git preservation is authorized.

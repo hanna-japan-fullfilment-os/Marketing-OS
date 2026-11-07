@@ -74,6 +74,8 @@ def build_hanna_creative_package(db, campaign, plan, *, campaign_plans, locale, 
     plans = tuple(campaign_plans)
     if not plans or plan not in plans or len(plans) != campaign.target_slide_count:
         raise ValueError("Complete canonical campaign plan required")
+    from .canonical_campaign_reconciliation import current_reconciliation, architecture
+    reconciliation = current_reconciliation(db, campaign)
     selected = validate_slide_provenance(db, campaign, plan)
     claims = {}
     for other in plans:
@@ -107,23 +109,36 @@ def build_hanna_creative_package(db, campaign, plan, *, campaign_plans, locale, 
             raise ValueError("Reference lacks explicit existing owner approval")
         images.append(image_record(asset_id=registered.id, role="visual_reference", path=registered.file_path,
             expected_sha256=ref.sha256, authority=registered.label, provenance=ref.model_dump(mode="json")))
-    logo = resolve_brand_logo_path(db, campaign.brand_id)
+    logo = Path(reconciliation.logo.path) if reconciliation else resolve_brand_logo_path(db, campaign.brand_id)
     if not logo:
         raise ValueError("Canonical logo missing")
-    logo_row = db.query(BrandAsset).filter_by(brand_id=campaign.brand_id, kind="logo", file_path=str(logo)).one()
-    images.append(image_record(asset_id=logo_row.id, role="logo", path=logo,
-        expected_sha256=hashlib.sha256(Path(logo).read_bytes()).hexdigest(), authority="canonical brand logo",
-        provenance={"brand_id": campaign.brand_id, "label": logo_row.label}))
+    logo_row = db.get(BrandAsset, reconciliation.logo.asset_id) if reconciliation else db.query(BrandAsset).filter_by(brand_id=campaign.brand_id, kind="logo", file_path=str(logo)).one()
+    if reconciliation:
+        images.append(reconciliation.logo)
+    else:
+        images.append(image_record(asset_id=logo_row.id, role="logo", path=logo,
+            expected_sha256=hashlib.sha256(Path(logo).read_bytes()).hexdigest(), authority="canonical brand logo",
+            provenance={"brand_id": campaign.brand_id, "label": logo_row.label}))
     contract = complete_slide_text_contract(plan)
     fields = dict(contract["fields"])
+    if reconciliation:
+        approved = architecture(reconciliation)["slides"][plan.slide_number - 1]
+        identity = approved.get("PRODUCT_IDENTITY_COPY")
+        if identity:
+            if identity != product.name:
+                raise ValueError("Approved architecture / current product identity mismatch")
+            fields["product_identity"] = identity
     fields.update(structural_slide_text(plans.index(plan) + 1, len(plans)))
     permission = _package_mark_permission(db, campaign, plan)
+    approved_facts = {"verified_product_facts": facts, "claim_evidence": claims,
+        "creative_eligibility": eligibility,
+        "asset_scoped_package_mark_permission": permission.model_dump(mode="json") if permission else None}
+    if reconciliation:
+        approved_facts["reconciliation_sha256"] = reconciliation.digest()
     return HannaCreativePackage(campaign_id=campaign.id, brand_id=campaign.brand_id,
         product_id=product.id, product_name=product.name, category=category.name if category else "Uncategorized",
         slide_id=plan.slide_id, slide_role=plan.purpose, locale=locale, channel=channel,
-        approved_facts_json=canonical_json({"verified_product_facts": facts, "claim_evidence": claims,
-            "creative_eligibility": eligibility,
-            "asset_scoped_package_mark_permission": permission.model_dump(mode="json") if permission else None}),
+        approved_facts_json=canonical_json(approved_facts),
         slide_contract_json=canonical_json({"plan": plan.model_dump(mode="json"), "text": contract}),
         approved_copy=tuple(CopyField(key=k, text=v) for k, v in fields.items()),
         prohibited_claims=tuple(dict.fromkeys([*facts.get("prohibited_claims", []), *prohibited_claims])), brand_instructions=brand_instructions,

@@ -129,6 +129,70 @@ class PremiumExecutionHandoff(PremiumCreativeHandoff):
     slides: tuple[PremiumExecutionSlideBrief, ...]
 
 
+class ReconciliationEvidence(Contract):
+    path: str = Field(min_length=1)
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class CanonicalCampaignReconciliation(Contract):
+    """Persisted import recipe/provenance; never an approval or claim registry."""
+    version: Literal[1] = 1
+    campaign_id: str = Field(min_length=1)
+    product_id: str = Field(min_length=1)
+    architecture: ReconciliationEvidence
+    architecture_approval: ReconciliationEvidence
+    freeze: ReconciliationEvidence
+    creative_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    evidence_ids: dict[str, str]
+    master_asset_id: str = Field(min_length=1)
+    logo: CreativeImage
+    references: tuple[CreativeImage, ...] = Field(min_length=1)
+
+
+class ProductionScopeEnvelope(Contract):
+    """Separate opt-in contract: complete authority, selected output only."""
+    scope_version: Literal[1] = 1
+    canonical_handoff: PremiumCreativeHandoff
+    reconciliation_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    dispositions: dict[str, Literal["FROZEN_EXTERNAL_REFERENCE", "SELECTED_PENDING_OWNER_REVIEW", "DEFERRED_UNRENDERED"]]
+    execution_plans: dict[str, CreativeExecutionPlan]
+    owner_review_status: Literal["PENDING", "APPROVED", "REJECTED"] = "PENDING"
+    owner_reviewer: str = ""
+    reviewed_content_sha256: str = ""
+
+    def content_digest(self):
+        from .creative_bridge import Contract
+        return Contract.digest(self.model_copy(update={"owner_review_status": "PENDING",
+            "owner_reviewer": "", "reviewed_content_sha256": ""}))
+
+    @property
+    def slides(self):
+        return tuple(PremiumExecutionSlideBrief(**s.model_dump(), execution_plan=self.execution_plans[s.key])
+            for s in self.canonical_handoff.slides if s.key in self.execution_plans)
+
+    @property
+    def assets(self):
+        return self.canonical_handoff.assets
+
+    @property
+    def campaign_id(self):
+        return self.canonical_handoff.campaign_id
+
+    @property
+    def product_id(self):
+        return self.canonical_handoff.product_id
+
+    @property
+    def expected_slide_count(self):
+        return len(self.execution_plans)
+
+    def execution_handoff(self):
+        payload = self.canonical_handoff.model_dump(mode="json")
+        payload.update(version=2, expected_slide_count=len(self.slides),
+            slides=[s.model_dump(mode="json") for s in self.slides])
+        return PremiumExecutionHandoff.model_validate(payload)
+
+
 FeedbackCode = Literal["product_fidelity","copy","typography","hierarchy","brand_mismatch","composition","cta","visual_quality","other"]
 
 

@@ -1647,7 +1647,8 @@ def resolve_brand_colors(brand: Brand) -> list[str] | None:
 
 
 def resolve_brand_logo_path(db: Session, brand_id: str) -> Path | None:
-    logo_asset = db.query(BrandAsset).filter(BrandAsset.brand_id == brand_id, BrandAsset.kind == "logo").first()
+    logo_asset = db.query(BrandAsset).filter(BrandAsset.brand_id == brand_id, BrandAsset.kind == "logo",
+        ~BrandAsset.label.like("campaign:%")).first()
     if logo_asset is None:
         return None
     candidate = Path(logo_asset.file_path)
@@ -1861,7 +1862,7 @@ def validate_slide_provenance(db, campaign, plan: SlidePlan):
             or _asset_reference(asset) != selected):
         raise ValueError("Product asset selection changed")
     if selected.role == "product_master_approved":
-        if choose_approved_product_master([asset], source_lookup=lambda key: db.get(Asset, key)) is None:
+        if choose_approved_product_master([asset], source_lookup=lambda key: db.get(Asset, key), campaign_id=campaign.id) is None:
             raise ValueError("Product master approval is no longer valid")
         source = db.get(Asset, asset.ai_metadata["source_asset_id"])
         if hashlib.sha256(Path(source.absolute_path).read_bytes()).hexdigest().lower() != source.sha256.lower():

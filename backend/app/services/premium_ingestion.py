@@ -59,8 +59,13 @@ def _save_state(db,campaign,data,root,row,*,expected_version):
 def _production_handoff(db,campaign,handoff):
     """Check current authority before even reading mutable workflow state."""
     from .marketing_claims import require_ready
+    from ..schemas.premium_handoff import ProductionScopeEnvelope
+    from .premium_handoff import validate_production_scope, reject_full_reconciled_export
+    if isinstance(handoff, ProductionScopeEnvelope):
+        return validate_production_scope(handoff, db=db, campaign=campaign)
     handoff=validate_execution_handoff(handoff or build_campaign_handoff(db,campaign))
     require_ready(handoff,db=db,campaign=campaign)
+    reject_full_reconciled_export(db, campaign)
     return handoff
 
 
@@ -87,6 +92,7 @@ def _current(handoff,state):
 
 def import_slide(db,campaign,root,*,slide_key,filename,data,expected_version,handoff=None):
     handoff=_production_handoff(db,campaign,handoff)
+    _selected(handoff, slide_key)
     row,state=_read_state(db,campaign)
     _current(handoff,state)
     slide=next((s for s in handoff.slides if s.key==slide_key),None)
@@ -125,6 +131,7 @@ def import_slide(db,campaign,root,*,slide_key,filename,data,expected_version,han
 
 def review_slide(db,campaign,root,request,*,handoff=None):
     handoff=_production_handoff(db,campaign,handoff)
+    _selected(handoff, request.slide_key)
     row,state=_read_state(db,campaign)
     _current(handoff,state)
     record=state["slides"].get(request.slide_key)
@@ -169,10 +176,16 @@ def readiness(db,campaign,*,handoff=None):
         approved+=bool(current and valid and record["approval_status"]=="APPROVED" and record["qa_status"]=="PASS"
             and record.get("reviewed_sha256")==record["sha256"] and record.get("reviewed_handoff_sha256")==handoff.digest())
     complete=approved==handoff.expected_slide_count and not missing
-    return {"EXPECTED_SLIDE_COUNT":handoff.expected_slide_count,"IMPORTED_SLIDE_COUNT":len(state["slides"]),
-        "APPROVED_SLIDE_COUNT":approved,"REJECTED_SLIDE_COUNT":rejected,"CAMPAIGN_CREATIVE_COMPLETE":complete,
-        "status":"READY_TO_PUBLISH" if complete else state.get("workflow_status","CREATIVE_DRAFT"),
+    from ..schemas.premium_handoff import ProductionScopeEnvelope
+    scoped = isinstance(handoff, ProductionScopeEnvelope)
+    result = {"EXPECTED_SLIDE_COUNT":handoff.expected_slide_count,"IMPORTED_SLIDE_COUNT":len(state["slides"]),
+        "APPROVED_SLIDE_COUNT":approved,"REJECTED_SLIDE_COUNT":rejected,"CAMPAIGN_CREATIVE_COMPLETE":complete and not scoped,
+        "status":("SELECTED_RELEASE_COMPLETE" if scoped else "READY_TO_PUBLISH") if complete else state.get("workflow_status","CREATIVE_DRAFT"),
         "canonical_handoff_current":current,"missing_slides":missing,"version":state["version"],"slides":list(state["slides"].values())}
+    if scoped:
+        result.update(SELECTED_RELEASE_COMPLETE=complete, CANONICAL_CAMPAIGN_SLIDE_COUNT=10,
+            HISTORICAL_APPROVALS_ADOPTED=False, dispositions=handoff.dispositions)
+    return result
 
 
 def require_publishing_ready(db,campaign):
@@ -184,6 +197,7 @@ def require_publishing_ready(db,campaign):
 
 def export_revision(db,campaign,root,slide_key,*,handoff=None):
     handoff=_production_handoff(db,campaign,handoff)
+    _selected(handoff, slide_key)
     _,state=_read_state(db,campaign)
     _current(handoff,state)
     record=state["slides"].get(slide_key)
@@ -199,3 +213,10 @@ def export_revision(db,campaign,root,slide_key,*,handoff=None):
     with zipfile.ZipFile(archive,"a") as bundle:
         bundle.writestr("REJECTED_ORIGINAL"+Path(record["file_path"]).suffix,data)
     return archive
+
+
+def _selected(handoff, key):
+    from ..schemas.premium_handoff import ProductionScopeEnvelope
+    if isinstance(handoff, ProductionScopeEnvelope):
+        from .canonical_campaign_reconciliation import require_selected_key
+        require_selected_key(handoff, key)

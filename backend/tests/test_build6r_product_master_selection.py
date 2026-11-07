@@ -97,6 +97,18 @@ def test_eligible_master_is_selected():
     assert selected is master
 
 
+def test_campaign_scoped_master_is_never_a_global_default():
+    source = source_asset()
+    master = approved_master()
+    master.ai_metadata['campaign_scope_id'] = 'ten-slide'
+    lookup = lambda key: source if key == source.id else None
+    assert choose_approved_product_master([master], source_lookup=lookup) is None
+    assert choose_approved_product_master([master], source_lookup=lookup, campaign_id='six-slide') is None
+    assert choose_approved_product_master([master], source_lookup=lookup, campaign_id='ten-slide') is master
+    master.ai_metadata['human_review']['status'] = 'PENDING'
+    assert choose_approved_product_master([master], source_lookup=lookup, campaign_id='ten-slide') is None
+
+
 def test_missing_source_fails_closed():
     master = approved_master()
 
